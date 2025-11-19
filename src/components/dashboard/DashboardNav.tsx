@@ -17,7 +17,7 @@ export const DashboardNav = ({ currentPage, onPageChange }: DashboardNavProps) =
   ];
 
   return (
-    <nav className="border-b bg-card shadow-sm">
+    <nav className="border-b bg-card shadow-sm backdrop-blur-sm sticky top-0 z-50 animate-fade-in">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between py-4">
           <div className="flex items-center gap-3">
@@ -34,7 +34,7 @@ export const DashboardNav = ({ currentPage, onPageChange }: DashboardNavProps) =
                 variant={currentPage === page.id ? "default" : "ghost"}
                 size="sm"
                 onClick={() => onPageChange(page.id)}
-                className="gap-2"
+                className="gap-2 transition-all duration-200 hover:scale-105"
               >
                 <page.icon className="h-4 w-4" />
                 {page.label}

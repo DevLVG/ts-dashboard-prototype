@@ -26,7 +26,7 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
   };
 
   return (
-    <Card className="p-6 shadow-sm">
+    <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300">
       <h3 className="text-xl font-heading tracking-wide mb-6">BU PERFORMANCE</h3>
       <ResponsiveContainer width="100%" height={300}>
         <BarChart data={chartData} layout="vertical" onClick={(data) => data && onClick?.(data.activeLabel as string)}>

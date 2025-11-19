@@ -40,12 +40,16 @@ export const KPICard = ({ metric, onClick }: KPICardProps) => {
 
   return (
     <Card
-      className={`p-5 cursor-pointer transition-all hover:shadow-lg border-2 ${getStatusColor(metric.variancePercent)}`}
+      className={`group p-5 cursor-pointer transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 border-2 animate-fade-in ${getStatusColor(metric.variancePercent)}`}
       onClick={onClick}
     >
       <div className="space-y-2">
-        <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide">{metric.label}</p>
-        <p className="text-3xl font-heading tracking-tight">{formatValue(metric.actual, metric.format)}</p>
+        <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide transition-colors group-hover:text-foreground">
+          {metric.label}
+        </p>
+        <p className="text-3xl font-heading tracking-tight transition-transform group-hover:scale-105">
+          {formatValue(metric.actual, metric.format)}
+        </p>
         {metric.label !== "Cash Balance" && (
           <div className="flex items-center gap-2">
             <div className={`flex items-center gap-1 ${getVarianceColor(metric.variancePercent)}`}>

@@ -28,12 +28,13 @@ export const ServiceMixTreemap = ({ data }: ServiceMixTreemapProps) => {
     return `SAR ${(value / 1000).toFixed(0)}K`;
   };
 
-  // Transform BU data into treemap format
+  // Transform BU data into treemap format and create lookup
+  const dataLookup: Record<string, any> = {};
   const treemapData = data.map((bu) => {
     const gmPercent = (bu.grossMargin.actual / bu.revenue.actual) * 100;
     const ebitdaPercent = (bu.ebitda.actual / bu.revenue.actual) * 100;
     
-    return {
+    const item = {
       name: bu.name,
       revenue: bu.revenue.actual,
       revenueBudget: bu.revenue.budget,
@@ -42,13 +43,24 @@ export const ServiceMixTreemap = ({ data }: ServiceMixTreemapProps) => {
       ebitdaPercent: ebitdaPercent,
       size: bu.revenue.actual,
     };
+    
+    // Store in lookup for easy access
+    dataLookup[bu.name] = item;
+    
+    return item;
   });
 
   const CustomizedContent = (props: any) => {
-    const { x, y, width, height, name, revenue, grossMargin } = props;
+    const { x, y, width, height, name } = props;
     
-    // Only show content if rectangle is large enough
-    if (width < 80 || height < 60) return null;
+    // Only show content if rectangle is large enough and has valid coordinates
+    if (!x || !y || width < 80 || height < 60 || !name) return null;
+
+    // Look up the data by name
+    const itemData = dataLookup[name];
+    if (!itemData) return null;
+
+    const { revenue, grossMargin } = itemData;
 
     return (
       <g>
@@ -65,34 +77,38 @@ export const ServiceMixTreemap = ({ data }: ServiceMixTreemapProps) => {
           }}
           className="transition-all duration-300 hover:brightness-110"
         />
-        <text
-          x={x + width / 2}
-          y={y + height / 2 - 15}
-          textAnchor="middle"
-          fill="#fff"
-          fontSize={16}
-          fontWeight="bold"
-        >
-          {name}
-        </text>
-        <text
-          x={x + width / 2}
-          y={y + height / 2 + 5}
-          textAnchor="middle"
-          fill="#fff"
-          fontSize={14}
-        >
-          {formatCurrencyShort(revenue)}
-        </text>
-        <text
-          x={x + width / 2}
-          y={y + height / 2 + 25}
-          textAnchor="middle"
-          fill="rgba(255, 255, 255, 0.9)"
-          fontSize={12}
-        >
-          {grossMargin.toFixed(1)}% GM
-        </text>
+        {width > 100 && height > 80 && (
+          <>
+            <text
+              x={x + width / 2}
+              y={y + height / 2 - 15}
+              textAnchor="middle"
+              fill="#fff"
+              fontSize={16}
+              fontWeight="bold"
+            >
+              {name}
+            </text>
+            <text
+              x={x + width / 2}
+              y={y + height / 2 + 5}
+              textAnchor="middle"
+              fill="#fff"
+              fontSize={14}
+            >
+              {formatCurrencyShort(revenue)}
+            </text>
+            <text
+              x={x + width / 2}
+              y={y + height / 2 + 25}
+              textAnchor="middle"
+              fill="rgba(255, 255, 255, 0.9)"
+              fontSize={12}
+            >
+              {grossMargin.toFixed(1)}% GM
+            </text>
+          </>
+        )}
       </g>
     );
   };

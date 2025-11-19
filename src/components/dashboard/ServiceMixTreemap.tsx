@@ -62,11 +62,11 @@ export const ServiceMixTreemap = ({ data }: ServiceMixTreemapProps) => {
   const CustomizedContent = (props: any) => {
     const { x, y, width, height, name, depth } = props;
     
-    // Skip the root node (depth 0)
-    if (depth === 0) return null;
+    // Only render leaf nodes (depth 1 in our case)
+    if (depth !== 1) return null;
     
-    // Only show content if rectangle is large enough and has valid coordinates
-    if (!x || !y || width < 80 || height < 60 || !name) return null;
+    // Only show content if rectangle has valid coordinates and name
+    if (!x || !y || !width || !height || !name) return null;
 
     // Look up the data by name
     const itemData = dataLookup[name];
@@ -89,7 +89,7 @@ export const ServiceMixTreemap = ({ data }: ServiceMixTreemapProps) => {
           }}
           className="transition-all duration-300 hover:brightness-110"
         />
-        {width > 100 && height > 80 && (
+        {width > 60 && height > 50 && (
           <>
             <text
               x={x + width / 2}

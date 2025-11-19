@@ -21,18 +21,42 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
 
   const getBarColor = (variance: number) => {
     if (variance >= 0) return "hsl(var(--success))";
-    if (variance > -10) return "hsl(var(--warning))";
+    if (variance > -10) return "hsl(var(--gold))";
     return "hsl(var(--destructive))";
   };
 
   return (
-    <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300">
-      <h3 className="text-xl font-heading tracking-wide mb-6">BU PERFORMANCE</h3>
-      <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={chartData} layout="vertical" onClick={(data) => data && onClick?.(data.activeLabel as string)}>
-          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-          <XAxis type="number" tickFormatter={formatCurrency} className="text-xs" />
-          <YAxis type="category" dataKey="name" width={100} className="text-xs" />
+    <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300 group">
+      <h3 className="text-xl font-heading tracking-wide mb-6 transition-colors group-hover:text-gold">
+        BU PERFORMANCE
+      </h3>
+      <ResponsiveContainer width="100%" height={320}>
+        <BarChart 
+          data={chartData} 
+          layout="vertical" 
+          onClick={(data) => data && onClick?.(data.activeLabel as string)}
+          barGap={8}
+        >
+          <CartesianGrid 
+            strokeDasharray="3 3" 
+            stroke="hsl(var(--border))" 
+            strokeOpacity={0.3}
+          />
+          <XAxis 
+            type="number" 
+            tickFormatter={formatCurrency} 
+            className="text-sm font-medium"
+            stroke="hsl(var(--muted-foreground))"
+            tick={{ fill: 'hsl(var(--muted-foreground))' }}
+          />
+          <YAxis 
+            type="category" 
+            dataKey="name" 
+            width={110} 
+            className="text-sm font-semibold"
+            stroke="hsl(var(--muted-foreground))"
+            tick={{ fill: 'hsl(var(--foreground))' }}
+          />
           <Tooltip
             formatter={(value: number, name: string) => [
               new Intl.NumberFormat("en-SA", {
@@ -44,15 +68,39 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
             ]}
             contentStyle={{
               backgroundColor: "hsl(var(--card))",
-              border: "1px solid hsl(var(--border))",
+              border: "2px solid hsl(var(--gold))",
               borderRadius: "var(--radius)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              fontWeight: 600,
+            }}
+            cursor={{ fill: 'hsl(var(--gold) / 0.1)' }}
+          />
+          <Legend 
+            wrapperStyle={{ 
+              paddingTop: '10px',
+              fontWeight: 600,
+              fontSize: '14px'
             }}
           />
-          <Legend />
-          <Bar dataKey="budget" fill="hsl(var(--muted))" name="Budget" radius={[0, 4, 4, 0]} />
-          <Bar dataKey="actual" name="Actual" radius={[0, 4, 4, 0]}>
+          <Bar 
+            dataKey="budget" 
+            fill="hsl(var(--muted-foreground) / 0.4)" 
+            name="Budget" 
+            radius={[0, 6, 6, 0]}
+            opacity={0.7}
+          />
+          <Bar 
+            dataKey="actual" 
+            name="Actual" 
+            radius={[0, 6, 6, 0]}
+            opacity={0.95}
+          >
             {chartData.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={getBarColor(entry.variance)} />
+              <Cell 
+                key={`cell-${index}`} 
+                fill={getBarColor(entry.variance)}
+                className="transition-opacity hover:opacity-100"
+              />
             ))}
           </Bar>
         </BarChart>

@@ -34,20 +34,33 @@ export const CashFlowWaterfall = ({ data }: CashFlowWaterfallProps) => {
   };
 
   return (
-    <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300">
-      <h3 className="text-xl font-heading tracking-wide mb-6">CASH FLOW WATERFALL</h3>
-      <ResponsiveContainer width="100%" height={350}>
+    <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300 group">
+      <h3 className="text-xl font-heading tracking-wide mb-6 transition-colors group-hover:text-gold">
+        CASH FLOW WATERFALL
+      </h3>
+      <ResponsiveContainer width="100%" height={380}>
         <BarChart data={waterfallData}>
-          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+          <CartesianGrid 
+            strokeDasharray="3 3" 
+            stroke="hsl(var(--border))" 
+            strokeOpacity={0.3}
+          />
           <XAxis
             dataKey="name"
             angle={-45}
             textAnchor="end"
-            height={120}
-            className="text-xs"
+            height={140}
+            className="text-xs font-medium"
             interval={0}
+            stroke="hsl(var(--muted-foreground))"
+            tick={{ fill: 'hsl(var(--foreground))' }}
           />
-          <YAxis tickFormatter={formatCurrency} className="text-xs" />
+          <YAxis 
+            tickFormatter={formatCurrency} 
+            className="text-sm font-medium"
+            stroke="hsl(var(--muted-foreground))"
+            tick={{ fill: 'hsl(var(--muted-foreground))' }}
+          />
           <Tooltip
             formatter={(value: number) => [
               new Intl.NumberFormat("en-SA", {
@@ -59,15 +72,22 @@ export const CashFlowWaterfall = ({ data }: CashFlowWaterfallProps) => {
             ]}
             contentStyle={{
               backgroundColor: "hsl(var(--card))",
-              border: "1px solid hsl(var(--border))",
+              border: "2px solid hsl(var(--gold))",
               borderRadius: "var(--radius)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              fontWeight: 600,
             }}
           />
-          <ReferenceLine y={0} stroke="hsl(var(--border))" />
+          <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={2} />
           <Bar dataKey="start" stackId="a" fill="transparent" />
-          <Bar dataKey="value" stackId="a" radius={[4, 4, 0, 0]}>
+          <Bar dataKey="value" stackId="a" radius={[6, 6, 0, 0]}>
             {waterfallData.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={getColor(entry)} />
+              <Cell 
+                key={`cell-${index}`} 
+                fill={getColor(entry)}
+                opacity={0.95}
+                className="transition-opacity hover:opacity-100"
+              />
             ))}
           </Bar>
         </BarChart>

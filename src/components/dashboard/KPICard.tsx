@@ -27,48 +27,73 @@ export const KPICard = ({ metric, onClick }: KPICardProps) => {
   };
 
   const getVarianceColor = (variance: number) => {
-    if (variance >= 0) return "text-success";
-    if (variance > -10) return "text-gold";
-    return "text-destructive";
+    if (variance >= 0) return "text-[#22d3ee]";
+    if (variance > -10) return "text-[#ffc107]";
+    return "text-[#dc3545]";
   };
 
-  const getStatusColor = (variance: number) => {
-    if (variance >= 0) return "bg-success/10 border-success/30";
-    if (variance > -10) return "bg-gold/15 border-gold/40";
-    return "bg-destructive/10 border-destructive/30";
+  const getStatusColor = (variance: number, label: string) => {
+    // Special handling for Runway card
+    if (label === "Runway") {
+      const months = metric.actual;
+      if (months < 3) return "bg-[#dc3545]/10 border-[#dc3545]/30";
+      if (months < 6) return "bg-[#ffc107]/15 border-[#ffc107]/40";
+      return "bg-[#22d3ee]/10 border-[#22d3ee]/30";
+    }
+    
+    if (variance >= 0) return "bg-[#22d3ee]/10 border-[#22d3ee]/30";
+    if (variance > -10) return "bg-[#ffc107]/15 border-[#ffc107]/40";
+    return "bg-[#dc3545]/10 border-[#dc3545]/30";
   };
 
   return (
     <Card
-      className={`group p-5 cursor-pointer transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 border-2 animate-fade-in ${getStatusColor(metric.variancePercent)}`}
+      className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getStatusColor(metric.variancePercent, metric.label)}`}
       onClick={onClick}
     >
       <div className="space-y-2">
-        <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide transition-colors group-hover:text-foreground">
+        <p className="text-base md:text-sm text-muted-foreground font-semibold uppercase tracking-wide transition-colors group-hover:text-foreground">
           {metric.label}
         </p>
-        <p className="text-3xl font-heading tracking-tight transition-transform group-hover:scale-105">
-          {formatValue(metric.actual, metric.format)}
-        </p>
-        {metric.label !== "Cash Balance" && (
-          <div className="flex items-center gap-2">
-            <div className={`flex items-center gap-1 ${getVarianceColor(metric.variancePercent)}`}>
-              {metric.variancePercent < 0 ? (
-                <TrendingDown className="h-4 w-4" />
-              ) : (
-                <TrendingUp className="h-4 w-4" />
-              )}
-              <span className="text-sm font-semibold">{metric.variancePercent.toFixed(1)}%</span>
-            </div>
-            <span className="text-xs text-muted-foreground">vs Budget</span>
-          </div>
-        )}
-        {metric.label !== "Cash Balance" && (
-          <p className="text-xs text-muted-foreground">
-            Budget: {formatValue(metric.budget, metric.format)}
+        <div className="flex items-center gap-2">
+          <p className="text-4xl md:text-3xl font-heading tracking-tight transition-transform group-hover:scale-105">
+            {formatValue(metric.actual, metric.format)}
           </p>
+          {metric.label === "Runway" && metric.actual < 6 && (
+            <TrendingDown className="h-5 w-5 md:h-4 md:w-4 text-[#ffc107]" />
+          )}
+        </div>
+        {metric.label === "Cash Balance" ? (
+          <div className="flex items-center gap-2">
+            <span className="text-base md:text-sm text-muted-foreground">--</span>
+            <span className="text-sm md:text-xs text-muted-foreground">No budget comparison</span>
+          </div>
+        ) : metric.label === "Runway" ? (
+          <div className="flex items-center gap-2">
+            <span className="text-sm md:text-xs text-muted-foreground">
+              vs Target: {metric.budget.toFixed(1)} mo
+            </span>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <div className={`flex items-center gap-1 ${getVarianceColor(metric.variancePercent)}`}>
+                {metric.variancePercent < 0 ? (
+                  <TrendingDown className="h-5 w-5 md:h-4 md:w-4" />
+                ) : (
+                  <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />
+                )}
+                <span className="text-base md:text-sm font-semibold">{metric.variancePercent.toFixed(1)}%</span>
+              </div>
+              <span className="text-sm md:text-xs text-muted-foreground">vs Budget</span>
+            </div>
+            <p className="text-sm md:text-xs text-muted-foreground">
+              Budget: {formatValue(metric.budget, metric.format)}
+            </p>
+          </>
         )}
       </div>
+      <TrendingUp className="absolute bottom-3 right-3 h-4 w-4 text-muted-foreground/50 transition-opacity group-hover:opacity-100" />
     </Card>
   );
 };

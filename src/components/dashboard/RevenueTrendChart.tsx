@@ -1,5 +1,5 @@
 import { Card } from "@/components/ui/card";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Area, ComposedChart } from "recharts";
+import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { TrendData } from "@/types/dashboard";
 
 interface RevenueTrendChartProps {
@@ -11,13 +11,30 @@ export const RevenueTrendChart = ({ data }: RevenueTrendChartProps) => {
     return `${(value / 1000).toFixed(0)}K`;
   };
 
+  // Create data with variance shading
+  const chartData = data.map((item) => ({
+    ...item,
+    varianceArea: item.actual > item.budget ? item.actual : null,
+    negativeVarianceArea: item.actual < item.budget ? item.actual : null,
+  }));
+
   return (
     <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300 group">
-      <h3 className="text-xl font-heading tracking-wide mb-6 transition-colors group-hover:text-gold">
+      <h3 className="text-2xl md:text-xl font-heading tracking-wide mb-6 transition-colors group-hover:text-gold">
         REVENUE TREND (6 MONTHS)
       </h3>
       <ResponsiveContainer width="100%" height={320}>
-        <ComposedChart data={data}>
+        <ComposedChart data={chartData}>
+          <defs>
+            <linearGradient id="positiveVariance" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgba(34, 211, 238, 0.2)" />
+              <stop offset="100%" stopColor="rgba(34, 211, 238, 0)" />
+            </linearGradient>
+            <linearGradient id="negativeVariance" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgba(220, 53, 69, 0.2)" />
+              <stop offset="100%" stopColor="rgba(220, 53, 69, 0)" />
+            </linearGradient>
+          </defs>
           <CartesianGrid 
             strokeDasharray="3 3" 
             stroke="hsl(var(--border))" 
@@ -25,15 +42,15 @@ export const RevenueTrendChart = ({ data }: RevenueTrendChartProps) => {
           />
           <XAxis 
             dataKey="month" 
-            className="text-sm font-medium"
+            className="text-base md:text-sm font-medium"
             stroke="hsl(var(--muted-foreground))"
-            tick={{ fill: 'hsl(var(--foreground))' }}
+            tick={{ fill: 'hsl(var(--foreground))', fontSize: 14 }}
           />
           <YAxis 
             tickFormatter={formatCurrency} 
-            className="text-sm font-medium"
+            className="text-base md:text-sm font-medium"
             stroke="hsl(var(--muted-foreground))"
-            tick={{ fill: 'hsl(var(--muted-foreground))' }}
+            tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 14 }}
           />
           <Tooltip
             formatter={(value: number) => [
@@ -68,8 +85,23 @@ export const RevenueTrendChart = ({ data }: RevenueTrendChartProps) => {
             wrapperStyle={{ 
               paddingTop: '10px',
               fontWeight: 600,
-              fontSize: '14px'
+              fontSize: '15px'
             }}
+          />
+          {/* Area shading for variance */}
+          <Area
+            type="monotone"
+            dataKey="budget"
+            fill="url(#negativeVariance)"
+            stroke="none"
+            fillOpacity={1}
+          />
+          <Area
+            type="monotone"
+            dataKey="varianceArea"
+            fill="url(#positiveVariance)"
+            stroke="none"
+            fillOpacity={1}
           />
           <Line
             type="monotone"

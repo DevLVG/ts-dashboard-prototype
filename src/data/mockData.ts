@@ -47,7 +47,7 @@ export const trendData: TrendData[] = [
 export const buPerformance: BUPerformance[] = [
   {
     name: "Equestrian",
-    revenue: { actual: 380000, budget: 450000 },
+    revenue: { actual: 600000, budget: 700000 },
     grossMargin: { actual: 190000, budget: 225000 },
     opex: { actual: 120000, budget: 115000 },
     ebitda: { actual: 70000, budget: 110000 },
@@ -77,7 +77,7 @@ export const buPerformance: BUPerformance[] = [
   },
   {
     name: "Events",
-    revenue: { actual: 250000, budget: 350000 },
+    revenue: { actual: 200000, budget: 250000 },
     grossMargin: { actual: 100000, budget: 175000 },
     opex: { actual: 95000, budget: 90000 },
     ebitda: { actual: 5000, budget: 85000 },
@@ -107,7 +107,7 @@ export const buPerformance: BUPerformance[] = [
   },
   {
     name: "Retail",
-    revenue: { actual: 140000, budget: 130000 },
+    revenue: { actual: 40000, budget: 40000 },
     grossMargin: { actual: 56000, budget: 52000 },
     opex: { actual: 42000, budget: 40000 },
     ebitda: { actual: 14000, budget: 12000 },
@@ -130,7 +130,7 @@ export const buPerformance: BUPerformance[] = [
   },
   {
     name: "Advisory",
-    revenue: { actual: 80000, budget: 70000 },
+    revenue: { actual: 10000, budget: 10000 },
     grossMargin: { actual: 64000, budget: 56000 },
     opex: { actual: 33000, budget: 30000 },
     ebitda: { actual: 31000, budget: 26000 },

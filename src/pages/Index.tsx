@@ -7,6 +7,7 @@ import { PLMatrix } from "@/components/dashboard/PLMatrix";
 import { CashFlowWaterfall } from "@/components/dashboard/CashFlowWaterfall";
 import { FinancialRatiosChart } from "@/components/dashboard/FinancialRatiosChart";
 import { OpExDrawer } from "@/components/dashboard/OpExDrawer";
+import { ServiceMixTreemap } from "@/components/dashboard/ServiceMixTreemap";
 import { PageType } from "@/types/dashboard";
 import { kpiData, trendData, buPerformance, cashFlowData, financialRatiosData } from "@/data/mockData";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -122,26 +123,7 @@ const Index = () => {
           setOpexDrawerOpen(true);
         }}
       />
-      <div className="grid grid-cols-1 gap-6">
-        <Card className="p-6 shadow-sm animate-fade-in-delay hover:shadow-xl transition-all duration-300">
-          <h3 className="text-xl font-heading tracking-wide mb-6">SERVICE MIX ANALYSIS</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {buPerformance.map((bu) => {
-              const gmPercent = (bu.grossMargin.actual / bu.revenue.actual) * 100;
-              return (
-                <div 
-                  key={bu.name} 
-                  className="p-4 border rounded-lg hover:shadow-lg hover:-translate-y-1 transition-all duration-300 cursor-pointer"
-                >
-                  <p className="text-sm font-medium mb-2">{bu.name}</p>
-                  <p className="text-2xl font-bold">{gmPercent.toFixed(1)}%</p>
-                  <p className="text-xs text-muted-foreground">Gross Margin</p>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      </div>
+      <ServiceMixTreemap data={buPerformance} />
     </div>
   );
 

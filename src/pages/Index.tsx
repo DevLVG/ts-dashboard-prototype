@@ -70,8 +70,8 @@ const Index = () => {
       {renderFilters()}
       <PLMatrix data={buPerformance} />
       <div className="grid grid-cols-1 gap-6">
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Service Mix Analysis</h3>
+        <Card className="p-6 shadow-sm">
+          <h3 className="text-xl font-heading tracking-wide mb-6">SERVICE MIX ANALYSIS</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {buPerformance.map((bu) => {
               const gmPercent = (bu.grossMargin.actual / bu.revenue.actual) * 100;
@@ -93,17 +93,17 @@ const Index = () => {
     <div className="space-y-6">
       {renderFilters()}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-2">Cash Balance</p>
-          <p className="text-3xl font-bold">2.8M SAR</p>
+        <Card className="p-6 shadow-sm">
+          <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide mb-2">Cash Balance</p>
+          <p className="text-3xl font-heading">2.8M SAR</p>
         </Card>
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-2">Monthly Burn</p>
-          <p className="text-3xl font-bold text-destructive">-667K</p>
+        <Card className="p-6 shadow-sm">
+          <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide mb-2">Monthly Burn</p>
+          <p className="text-3xl font-heading text-destructive">-667K</p>
         </Card>
-        <Card className="p-6 bg-warning/10 border-warning/20">
-          <p className="text-sm text-muted-foreground mb-2">Runway</p>
-          <p className="text-3xl font-bold text-warning">4.2 months</p>
+        <Card className="p-6 shadow-sm bg-gold/15 border-gold/40">
+          <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide mb-2">Runway</p>
+          <p className="text-3xl font-heading text-foreground">4.2 months</p>
         </Card>
       </div>
       <CashFlowWaterfall data={cashFlowData} />
@@ -115,8 +115,8 @@ const Index = () => {
       {renderFilters()}
       <FinancialRatiosChart data={financialRatiosData} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Current Month Ratios</h3>
+        <Card className="p-6 shadow-sm">
+          <h3 className="text-xl font-heading tracking-wide mb-6">CURRENT MONTH RATIOS</h3>
           <div className="space-y-4">
             <div className="flex justify-between items-center p-3 bg-muted/50 rounded">
               <span className="font-medium">Gross Margin %</span>
@@ -132,8 +132,8 @@ const Index = () => {
             </div>
           </div>
         </Card>
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">BU Comparison</h3>
+        <Card className="p-6 shadow-sm">
+          <h3 className="text-xl font-heading tracking-wide mb-6">BU COMPARISON</h3>
           <div className="space-y-3">
             {buPerformance.map((bu) => {
               const gmPercent = (bu.grossMargin.actual / bu.revenue.actual) * 100;

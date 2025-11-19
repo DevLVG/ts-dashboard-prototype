@@ -11,7 +11,9 @@ import { GrossMarginDrawer } from "@/components/dashboard/GrossMarginDrawer";
 import { CashTrendChart } from "@/components/dashboard/CashTrendChart";
 import { RunwayScenarios } from "@/components/dashboard/RunwayScenarios";
 import { PageType } from "@/types/dashboard";
-import { kpiData, trendData, buPerformance, cashFlowData, financialRatiosData } from "@/data/mockData";
+import { kpiData, trendData, buPerformance, cashFlowData, financialRatiosData, buMarginComparisonData, costStructureData } from "@/data/mockData";
+import { BUMarginComparison } from "@/components/dashboard/BUMarginComparison";
+import { CostStructureChart } from "@/components/dashboard/CostStructureChart";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 
@@ -292,55 +294,91 @@ const Index = () => {
     );
   };
 
-  const renderRatios = () => (
-    <div className="space-y-6 animate-fade-in">
-      {renderFilters()}
-      <FinancialRatiosChart data={financialRatiosData} />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="p-6 shadow-sm animate-fade-in-delay hover:shadow-xl transition-all duration-300">
-          <h3 className="text-xl font-heading tracking-wide mb-6">CURRENT MONTH RATIOS</h3>
-          <div className="space-y-4">
-            <div className="flex justify-between items-center p-3 bg-muted/50 rounded">
-              <span className="font-medium">Gross Margin %</span>
-              <span className="text-xl font-bold text-primary">48.2%</span>
-            </div>
-            <div className="flex justify-between items-center p-3 bg-muted/50 rounded">
-              <span className="font-medium">EBITDA %</span>
-              <span className="text-xl font-bold text-success">14.1%</span>
-            </div>
-            <div className="flex justify-between items-center p-3 bg-muted/50 rounded">
-              <span className="font-medium">OpEx % of Revenue</span>
-              <span className="text-xl font-bold text-warning">34.1%</span>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6 shadow-sm animate-fade-in-delay hover:shadow-xl transition-all duration-300">
-          <h3 className="text-xl font-heading tracking-wide mb-6">BU COMPARISON</h3>
-          <div className="space-y-3">
-            {buPerformance.map((bu) => {
-              const gmPercent = (bu.grossMargin.actual / bu.revenue.actual) * 100;
-              const ebitdaPercent = (bu.ebitda.actual / bu.revenue.actual) * 100;
-              return (
-                <div key={bu.name} className="border-b pb-3 last:border-0">
-                  <p className="font-medium mb-2">{bu.name}</p>
-                  <div className="flex gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">GM: </span>
-                      <span className="font-semibold">{gmPercent.toFixed(1)}%</span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">EBITDA: </span>
-                      <span className="font-semibold">{ebitdaPercent.toFixed(1)}%</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
+  const renderRatios = () => {
+    // KPI data for ratios
+    const ratiosKPIData = [
+      {
+        label: "Gross Margin %",
+        actual: 48.2,
+        budget: 50.0,
+        variance: -1.8,
+        variancePercent: -1.8,
+        format: "percent" as const,
+      },
+      {
+        label: "EBITDA %",
+        actual: 14.1,
+        budget: 17.6,
+        variance: -3.5,
+        variancePercent: -3.5,
+        format: "percent" as const,
+      },
+      {
+        label: "OpEx % of Revenue",
+        actual: 34.1,
+        budget: 32.0,
+        variance: 2.1,
+        variancePercent: 2.1,
+        format: "percent" as const,
+      },
+    ];
+
+    return (
+      <div className="space-y-6 animate-fade-in">
+        {renderFilters()}
+        
+        {/* KPI Cards at top */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {ratiosKPIData.map((metric, index) => {
+            const isOpEx = metric.label.includes("OpEx");
+            const varianceColor = isOpEx 
+              ? (metric.variance > 1 ? "text-destructive" : metric.variance > 0 ? "text-warning" : "text-success")
+              : (metric.variance < -1 ? "text-destructive" : metric.variance < 0 ? "text-warning" : "text-success");
+            
+            const bgColor = isOpEx
+              ? (metric.variance > 1 ? "bg-destructive/15 border-destructive/40" : "bg-muted/50")
+              : (metric.variance < -1 ? "bg-destructive/15 border-destructive/40" : "bg-muted/50");
+
+            return (
+              <Card 
+                key={index}
+                className={`p-6 shadow-sm border-2 animate-fade-in hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer ${bgColor}`}
+                onClick={() => setCurrentPage("performance")}
+              >
+                <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide mb-2">
+                  {metric.label}
+                </p>
+                <p className="text-4xl font-heading mb-2">
+                  {metric.actual.toFixed(1)}%
+                </p>
+                <p className={`text-base font-semibold mb-1 ${varianceColor}`}>
+                  {metric.variance > 0 ? "+" : ""}{metric.variance.toFixed(1)}pp vs Budget
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Budget: {metric.budget.toFixed(1)}%
+                </p>
+              </Card>
+            );
+          })}
+        </div>
+
+        {/* Middle Section: BU Comparison and Cost Structure */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <BUMarginComparison 
+            data={buMarginComparisonData}
+            onClick={(buName) => {
+              setCurrentPage("performance");
+              // Could add BU filter logic here
+            }}
+          />
+          <CostStructureChart data={costStructureData} />
+        </div>
+
+        {/* Bottom Section: Trend Chart */}
+        <FinancialRatiosChart data={financialRatiosData} />
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderContent = () => {
     switch (currentPage) {

@@ -7,6 +7,7 @@ import { PLMatrix } from "@/components/dashboard/PLMatrix";
 import { CashFlowWaterfall } from "@/components/dashboard/CashFlowWaterfall";
 import { FinancialRatiosChart } from "@/components/dashboard/FinancialRatiosChart";
 import { OpExDrawer } from "@/components/dashboard/OpExDrawer";
+import { GrossMarginDrawer } from "@/components/dashboard/GrossMarginDrawer";
 import { ServiceMixTreemap } from "@/components/dashboard/ServiceMixTreemap";
 import { PageType } from "@/types/dashboard";
 import { kpiData, trendData, buPerformance, cashFlowData, financialRatiosData } from "@/data/mockData";
@@ -19,6 +20,8 @@ const Index = () => {
   const [selectedScenario, setSelectedScenario] = useState("actual-vs-budget");
   const [opexDrawerOpen, setOpexDrawerOpen] = useState(false);
   const [selectedOpExBreakdown, setSelectedOpExBreakdown] = useState<any>(null);
+  const [gmDrawerOpen, setGmDrawerOpen] = useState(false);
+  const [selectedGMBreakdown, setSelectedGMBreakdown] = useState<any>(null);
 
   const renderFilters = () => (
     <div className="flex flex-wrap gap-4 mb-6">
@@ -122,6 +125,94 @@ const Index = () => {
           setSelectedOpExBreakdown(breakdown);
           setOpexDrawerOpen(true);
         }}
+        onGrossMarginClick={(bu, service) => {
+          // Generate GM breakdown data based on actual BU data
+          const buData = buPerformance.find(b => b.name === bu);
+          if (!buData) return;
+          
+          let revenue, gmActual, gmBudget;
+          if (service) {
+            const serviceData = buData.services?.find(s => s.name === service);
+            if (!serviceData) return;
+            revenue = serviceData.revenue.actual;
+            gmActual = serviceData.grossMargin.actual;
+            gmBudget = serviceData.grossMargin.budget;
+          } else {
+            revenue = buData.revenue.actual;
+            gmActual = buData.grossMargin.actual;
+            gmBudget = buData.grossMargin.budget;
+          }
+          
+          // Calculate direct costs (Revenue - GM)
+          const cogsActual = revenue - gmActual;
+          const cogsBudget = revenue - gmBudget;
+          
+          // Generate BU-specific breakdown data
+          let personnelItems: { label: string; amount: number }[] = [];
+          let operationsItems: { label: string; amount: number }[] = [];
+          let cogsItems: { label: string; amount: number }[] = [];
+          
+          switch(bu) {
+            case "Equestrian":
+              personnelItems = [
+                { label: "Instructor Salaries", amount: Math.round(cogsActual * 0.5) },
+                { label: "Stable Staff", amount: Math.round(cogsActual * 0.12) }
+              ];
+              operationsItems = [
+                { label: "Feed & Nutrition", amount: Math.round(cogsActual * 0.15) },
+                { label: "Veterinary", amount: Math.round(cogsActual * 0.08) },
+                { label: "Farrier", amount: Math.round(cogsActual * 0.07) },
+                { label: "Equipment & Supplies", amount: Math.round(cogsActual * 0.08) }
+              ];
+              break;
+            case "Events":
+              operationsItems = [
+                { label: "Prize Money", amount: Math.round(cogsActual * 0.33) },
+                { label: "Venue Setup", amount: Math.round(cogsActual * 0.13) },
+                { label: "Course Design", amount: Math.round(cogsActual * 0.10) },
+                { label: "Catering & F&B", amount: Math.round(cogsActual * 0.27) },
+                { label: "Event Staff", amount: Math.round(cogsActual * 0.10) },
+                { label: "Event Marketing", amount: Math.round(cogsActual * 0.07) }
+              ];
+              break;
+            case "Retail":
+              cogsItems = [
+                { label: "Tack Shop Inventory", amount: Math.round(cogsActual * 0.60) },
+                { label: "F&B Ingredients", amount: Math.round(cogsActual * 0.24) }
+              ];
+              personnelItems = [
+                { label: "Retail Staff", amount: Math.round(cogsActual * 0.16) }
+              ];
+              break;
+            case "Advisory":
+              operationsItems = [
+                { label: "Consultant Time", amount: Math.round(cogsActual * 0.62) },
+                { label: "Travel & Expenses", amount: Math.round(cogsActual * 0.38) }
+              ];
+              break;
+          }
+          
+          const breakdown = {
+            buName: bu,
+            serviceName: service,
+            revenue: revenue,
+            directCosts: {
+              personnel: personnelItems.length > 0 ? { items: personnelItems } : undefined,
+              operations: operationsItems.length > 0 ? { items: operationsItems } : undefined,
+              cogs: cogsItems.length > 0 ? { items: cogsItems } : undefined,
+              total: cogsActual,
+              budget: cogsBudget,
+            },
+            grossMargin: {
+              actual: gmActual,
+              actualPercent: (gmActual / revenue) * 100,
+              budget: gmBudget,
+              budgetPercent: (gmBudget / revenue) * 100,
+            },
+          };
+          setSelectedGMBreakdown(breakdown);
+          setGmDrawerOpen(true);
+        }}
       />
       <ServiceMixTreemap data={buPerformance} />
     </div>
@@ -221,6 +312,11 @@ const Index = () => {
         isOpen={opexDrawerOpen} 
         onClose={() => setOpexDrawerOpen(false)}
         breakdown={selectedOpExBreakdown}
+      />
+      <GrossMarginDrawer 
+        isOpen={gmDrawerOpen} 
+        onClose={() => setGmDrawerOpen(false)}
+        breakdown={selectedGMBreakdown}
       />
     </div>
   );

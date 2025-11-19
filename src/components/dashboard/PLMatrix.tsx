@@ -8,9 +8,10 @@ interface PLMatrixProps {
   data: BUPerformance[];
   onServiceClick?: (bu: string, service: string) => void;
   onOpExClick?: (bu: string, service?: string) => void;
+  onGrossMarginClick?: (bu: string, service?: string) => void;
 }
 
-export const PLMatrix = ({ data, onServiceClick, onOpExClick }: PLMatrixProps) => {
+export const PLMatrix = ({ data, onServiceClick, onOpExClick, onGrossMarginClick }: PLMatrixProps) => {
   const [expandedBUs, setExpandedBUs] = useState<Set<string>>(new Set());
 
   const toggleBU = (buName: string) => {
@@ -53,18 +54,20 @@ export const PLMatrix = ({ data, onServiceClick, onOpExClick }: PLMatrixProps) =
   const MetricCell = ({ 
     actual, 
     budget, 
-    isOpEx, 
+    isOpEx,
+    isGrossMargin,
     onClick 
   }: { 
     actual: number; 
     budget: number; 
     isOpEx?: boolean;
+    isGrossMargin?: boolean;
     onClick?: (e: React.MouseEvent) => void;
   }) => {
     const { variance, variancePercent } = calculateVariance(actual, budget);
     return (
       <div 
-        className={`text-right space-y-1 ${isOpEx ? 'cursor-pointer group relative' : ''}`}
+        className={`text-right space-y-1 ${(isOpEx || isGrossMargin) ? 'cursor-pointer group relative' : ''}`}
         onClick={onClick}
       >
         <div className="font-semibold">{formatCurrency(actual)}</div>
@@ -73,7 +76,7 @@ export const PLMatrix = ({ data, onServiceClick, onOpExClick }: PLMatrixProps) =
           {variancePercent > 0 ? "+" : ""}
           {variancePercent.toFixed(1)}%
         </div>
-        {isOpEx && (
+        {(isOpEx || isGrossMargin) && (
           <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <svg className="h-3 w-3 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -111,7 +114,15 @@ export const PLMatrix = ({ data, onServiceClick, onOpExClick }: PLMatrixProps) =
                   {bu.name}
                 </div>
                 <MetricCell actual={bu.revenue.actual} budget={bu.revenue.budget} />
-                <MetricCell actual={bu.grossMargin.actual} budget={bu.grossMargin.budget} />
+                <MetricCell 
+                  actual={bu.grossMargin.actual} 
+                  budget={bu.grossMargin.budget}
+                  isGrossMargin={true}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onGrossMarginClick?.(bu.name);
+                  }}
+                />
                 <MetricCell 
                   actual={bu.opex.actual} 
                   budget={bu.opex.budget} 
@@ -134,7 +145,15 @@ export const PLMatrix = ({ data, onServiceClick, onOpExClick }: PLMatrixProps) =
                     >
                       <div className="text-muted-foreground pl-6">{service.name}</div>
                       <MetricCell actual={service.revenue.actual} budget={service.revenue.budget} />
-                      <MetricCell actual={service.grossMargin.actual} budget={service.grossMargin.budget} />
+                      <MetricCell 
+                        actual={service.grossMargin.actual} 
+                        budget={service.grossMargin.budget}
+                        isGrossMargin={true}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onGrossMarginClick?.(bu.name, service.name);
+                        }}
+                      />
                       <MetricCell 
                         actual={service.opex.actual} 
                         budget={service.opex.budget}

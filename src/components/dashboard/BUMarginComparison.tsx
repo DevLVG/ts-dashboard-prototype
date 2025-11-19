@@ -25,28 +25,23 @@ export const BUMarginComparison = ({ data, onClick }: BUMarginComparisonProps) =
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
+      const actual = data.Actual || 0;
+      const budget = data.Budget || 0;
+      const variance = actual - budget;
+      
       return (
         <div className="bg-popover border-2 border-gold rounded-lg shadow-lg p-4">
-          <p className="font-bold text-popover-foreground mb-2">{label}</p>
+          <p className="font-bold text-popover-foreground mb-2">{data.buName}</p>
+          <p className="text-sm font-semibold text-popover-foreground mb-2">{data.metric}</p>
           <div className="space-y-1 text-sm">
             <p className="text-popover-foreground">
-              <span className="font-semibold">GM Actual:</span> {data.gmActual.toFixed(1)}%
+              <span className="font-semibold">Actual:</span> {actual.toFixed(1)}%
             </p>
             <p className="text-muted-foreground">
-              <span className="font-semibold">GM Budget:</span> {data.gmBudget.toFixed(1)}%
+              <span className="font-semibold">Budget:</span> {budget.toFixed(1)}%
             </p>
             <p className="text-muted-foreground">
-              <span className="font-semibold">GM Variance:</span> {(data.gmActual - data.gmBudget).toFixed(1)}pp
-            </p>
-            <div className="my-2 border-t border-border" />
-            <p className="text-popover-foreground">
-              <span className="font-semibold">EBITDA Actual:</span> {data.ebitdaActual.toFixed(1)}%
-            </p>
-            <p className="text-muted-foreground">
-              <span className="font-semibold">EBITDA Budget:</span> {data.ebitdaBudget.toFixed(1)}%
-            </p>
-            <p className="text-muted-foreground">
-              <span className="font-semibold">EBITDA Variance:</span> {(data.ebitdaActual - data.ebitdaBudget).toFixed(1)}pp
+              <span className="font-semibold">Variance:</span> {variance > 0 ? '+' : ''}{variance.toFixed(1)}pp
             </p>
           </div>
         </div>

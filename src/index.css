@@ -8,71 +8,7 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    /* Trio Sporting Brand Colors */
-    --background: 36 25% 92%;
-    --foreground: 0 0% 0%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 0%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 0%;
-
-    --primary: 0 0% 0%;
-    --primary-foreground: 36 25% 92%;
-
-    --secondary: 36 25% 92%;
-    --secondary-foreground: 0 0% 0%;
-
-    --muted: 36 18% 88%;
-    --muted-foreground: 0 0% 35%;
-
-    --accent: 42 45% 66%;
-    --accent-foreground: 0 0% 0%;
-
-    --destructive: 0 70% 55%;
-    --destructive-foreground: 0 0% 100%;
-    
-    --success: 145 60% 45%;
-    --success-foreground: 0 0% 100%;
-    
-    --warning: 42 45% 66%;
-    --warning-foreground: 0 0% 0%;
-
-    --border: 36 18% 85%;
-    --input: 36 18% 88%;
-    --ring: 0 0% 0%;
-
-    --radius: 0.5rem;
-    
-    --gold: 42 45% 66%;
-    --gold-foreground: 0 0% 0%;
-    
-    --chart-1: 0 0% 0%;
-    --chart-2: 42 45% 66%;
-    --chart-3: 145 60% 45%;
-    --chart-4: 0 70% 55%;
-    --chart-5: 36 18% 70%;
-
-    --sidebar-background: 0 0% 98%;
-
-    --sidebar-foreground: 240 5.3% 26.1%;
-
-    --sidebar-primary: 240 5.9% 10%;
-
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-
-  .dark {
-    /* Trio Sporting Dark Mode */
+    /* Trio Sporting Dark Mode (Default) */
     --background: 0 0% 8%;
     --foreground: 36 25% 92%;
 
@@ -97,7 +33,7 @@ All colors MUST be HSL.
     --destructive: 0 70% 60%;
     --destructive-foreground: 0 0% 100%;
     
-    --success: 145 60% 50%;
+    --success: 195 75% 55%;
     --success-foreground: 0 0% 100%;
     
     --warning: 42 45% 66%;
@@ -106,14 +42,78 @@ All colors MUST be HSL.
     --border: 0 0% 20%;
     --input: 0 0% 18%;
     --ring: 42 45% 66%;
+
+    --radius: 0.5rem;
     
     --gold: 42 45% 66%;
     --gold-foreground: 0 0% 0%;
     
     --chart-1: 42 45% 66%;
     --chart-2: 36 25% 92%;
-    --chart-3: 145 60% 50%;
+    --chart-3: 195 75% 55%;
     --chart-4: 0 70% 60%;
+    --chart-5: 36 18% 70%;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .light {
+    /* Trio Sporting Light Mode */
+    --background: 36 25% 92%;
+    --foreground: 0 0% 0%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 0%;
+
+    --primary: 0 0% 0%;
+    --primary-foreground: 36 25% 92%;
+
+    --secondary: 36 25% 92%;
+    --secondary-foreground: 0 0% 0%;
+
+    --muted: 36 18% 88%;
+    --muted-foreground: 0 0% 35%;
+
+    --accent: 42 45% 66%;
+    --accent-foreground: 0 0% 0%;
+
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --success: 195 75% 45%;
+    --success-foreground: 0 0% 100%;
+    
+    --warning: 42 45% 66%;
+    --warning-foreground: 0 0% 0%;
+
+    --border: 36 18% 85%;
+    --input: 36 18% 88%;
+    --ring: 0 0% 0%;
+    
+    --gold: 42 45% 66%;
+    --gold-foreground: 0 0% 0%;
+    
+    --chart-1: 0 0% 0%;
+    --chart-2: 42 45% 66%;
+    --chart-3: 195 75% 45%;
+    --chart-4: 0 70% 55%;
     --chart-5: 36 18% 70%;
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;

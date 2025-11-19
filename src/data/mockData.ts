@@ -148,11 +148,11 @@ export const buPerformance: BUPerformance[] = [
 
 export const cashFlowData: CashFlowData[] = [
   { category: "Opening Balance", amount: 3200000, type: "inflow" },
-  { category: "Revenue Collections", amount: 820000, type: "inflow" },
-  { category: "Operating Expenses", amount: -730000, type: "outflow" },
+  { category: "Revenue", amount: 820000, type: "inflow" },
+  { category: "OpEx", amount: -730000, type: "outflow" },
   { category: "CAPEX", amount: -120000, type: "outflow" },
   { category: "Loan Payment", amount: -80000, type: "outflow" },
-  { category: "AR Collection Delay", amount: -290000, type: "outflow" },
+  { category: "AR Delay", amount: -290000, type: "outflow" },
   { category: "Closing Balance", amount: 2800000, type: "inflow" },
 ];
 

@@ -6,6 +6,7 @@ import { BUPerformanceChart } from "@/components/dashboard/BUPerformanceChart";
 import { PLMatrix } from "@/components/dashboard/PLMatrix";
 import { CashFlowWaterfall } from "@/components/dashboard/CashFlowWaterfall";
 import { FinancialRatiosChart } from "@/components/dashboard/FinancialRatiosChart";
+import { OpExDrawer } from "@/components/dashboard/OpExDrawer";
 import { PageType } from "@/types/dashboard";
 import { kpiData, trendData, buPerformance, cashFlowData, financialRatiosData } from "@/data/mockData";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,6 +16,8 @@ const Index = () => {
   const [currentPage, setCurrentPage] = useState<PageType>("overview");
   const [selectedMonth, setSelectedMonth] = useState("November");
   const [selectedScenario, setSelectedScenario] = useState("actual-vs-budget");
+  const [opexDrawerOpen, setOpexDrawerOpen] = useState(false);
+  const [selectedOpExBreakdown, setSelectedOpExBreakdown] = useState<any>(null);
 
   const renderFilters = () => (
     <div className="flex flex-wrap gap-4 mb-6">
@@ -49,9 +52,9 @@ const Index = () => {
             key={index}
             metric={metric}
             onClick={() => {
-              if (metric.label.includes("Revenue") || metric.label.includes("EBITDA")) {
+              if (metric.label.includes("Revenue") || metric.label.includes("EBITDA") || metric.label.includes("OpEx")) {
                 setCurrentPage("performance");
-              } else if (metric.label.includes("Cash") || metric.label.includes("Runway")) {
+              } else if (metric.label.includes("Cash")) {
                 setCurrentPage("cash");
               }
             }}
@@ -68,7 +71,57 @@ const Index = () => {
   const renderPerformance = () => (
     <div className="space-y-6 animate-fade-in">
       {renderFilters()}
-      <PLMatrix data={buPerformance} />
+      <PLMatrix 
+        data={buPerformance} 
+        onOpExClick={(bu, service) => {
+          // Generate OpEx breakdown data based on actual BU data
+          const buData = buPerformance.find(b => b.name === bu);
+          if (!buData) return;
+          
+          let actual, budget;
+          if (service) {
+            const serviceData = buData.services?.find(s => s.name === service);
+            if (!serviceData) return;
+            actual = serviceData.opex.actual;
+            budget = serviceData.opex.budget;
+          } else {
+            actual = buData.opex.actual;
+            budget = buData.opex.budget;
+          }
+          
+          // Calculate proportional breakdown (simplified mock logic)
+          const directRatio = 0.75; // 75% direct costs
+          const allocatedRatio = 0.25; // 25% allocated costs
+          
+          const breakdown = {
+            buName: bu,
+            serviceName: service,
+            actual: actual,
+            budget: budget,
+            directCosts: {
+              personnel: Math.round(actual * directRatio * 0.5),
+              operations: Math.round(actual * directRatio * 0.3),
+              facilities: Math.round(actual * directRatio * 0.2),
+            },
+            allocatedCosts: {
+              adminPersonnel: { 
+                amount: Math.round(actual * allocatedRatio * 0.4), 
+                method: "Headcount" 
+              },
+              utilities: { 
+                amount: Math.round(actual * allocatedRatio * 0.35), 
+                method: "Square Meters" 
+              },
+              marketing: { 
+                amount: Math.round(actual * allocatedRatio * 0.25), 
+                method: "Revenue proportion" 
+              },
+            },
+          };
+          setSelectedOpExBreakdown(breakdown);
+          setOpexDrawerOpen(true);
+        }}
+      />
       <div className="grid grid-cols-1 gap-6">
         <Card className="p-6 shadow-sm animate-fade-in-delay hover:shadow-xl transition-all duration-300">
           <h3 className="text-xl font-heading tracking-wide mb-6">SERVICE MIX ANALYSIS</h3>
@@ -182,6 +235,11 @@ const Index = () => {
     <div className="min-h-screen bg-background">
       <DashboardNav currentPage={currentPage} onPageChange={setCurrentPage} />
       <main className="container mx-auto px-4 py-6">{renderContent()}</main>
+      <OpExDrawer 
+        isOpen={opexDrawerOpen} 
+        onClose={() => setOpexDrawerOpen(false)}
+        breakdown={selectedOpExBreakdown}
+      />
     </div>
   );
 };

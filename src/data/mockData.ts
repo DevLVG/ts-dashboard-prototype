@@ -26,12 +26,12 @@ export const kpiData: KPIMetric[] = [
     format: "currency",
   },
   {
-    label: "Runway",
-    actual: 4.2,
-    budget: 6,
-    variance: -1.8,
-    variancePercent: -30,
-    format: "months",
+    label: "OpEx MTD",
+    actual: 550000,
+    budget: 565000,
+    variance: -15000,
+    variancePercent: -2.7,
+    format: "currency",
   },
 ];
 

@@ -33,12 +33,11 @@ export const KPICard = ({ metric, onClick }: KPICardProps) => {
   };
 
   const getStatusColor = (variance: number, label: string) => {
-    // Special handling for Runway card
-    if (label === "Runway") {
-      const months = metric.actual;
-      if (months < 3) return "bg-[#dc3545]/10 border-[#dc3545]/30";
-      if (months < 6) return "bg-[#ffc107]/15 border-[#ffc107]/40";
-      return "bg-[#22d3ee]/10 border-[#22d3ee]/30";
+    // Special handling for OpEx card (inverted logic - under budget is good)
+    if (label === "OpEx MTD") {
+      if (variance <= 5) return "bg-[#22d3ee]/10 border-[#22d3ee]/30"; // Under/on budget = good
+      if (variance <= 10) return "bg-[#ffc107]/15 border-[#ffc107]/40"; // Slightly over
+      return "bg-[#dc3545]/10 border-[#dc3545]/30"; // Significantly over
     }
     
     if (variance >= 0) return "bg-[#22d3ee]/10 border-[#22d3ee]/30";
@@ -68,22 +67,27 @@ export const KPICard = ({ metric, onClick }: KPICardProps) => {
             <span className="text-base md:text-sm text-muted-foreground">--</span>
             <span className="text-sm md:text-xs text-muted-foreground">No budget comparison</span>
           </div>
-        ) : metric.label === "Runway" ? (
-          <div className="flex items-center gap-2">
-            <span className="text-sm md:text-xs text-muted-foreground">
-              vs Target: {metric.budget.toFixed(1)} mo
-            </span>
-          </div>
         ) : (
           <>
             <div className="flex items-center gap-2">
               <div className={`flex items-center gap-1 ${getVarianceColor(metric.variancePercent)}`}>
-                {metric.variancePercent < 0 ? (
-                  <TrendingDown className="h-5 w-5 md:h-4 md:w-4" />
+                {/* For OpEx, invert the icon logic (negative variance = under budget = good) */}
+                {metric.label === "OpEx MTD" ? (
+                  metric.variancePercent < 0 ? (
+                    <TrendingDown className="h-5 w-5 md:h-4 md:w-4" />
+                  ) : (
+                    <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />
+                  )
                 ) : (
-                  <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />
+                  metric.variancePercent < 0 ? (
+                    <TrendingDown className="h-5 w-5 md:h-4 md:w-4" />
+                  ) : (
+                    <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />
+                  )
                 )}
-                <span className="text-base md:text-sm font-semibold">{metric.variancePercent.toFixed(1)}%</span>
+                <span className="text-base md:text-sm font-semibold">
+                  {Math.abs(metric.variancePercent).toFixed(1)}%
+                </span>
               </div>
               <span className="text-sm md:text-xs text-muted-foreground">vs Budget</span>
             </div>

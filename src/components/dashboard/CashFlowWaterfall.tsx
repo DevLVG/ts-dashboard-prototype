@@ -71,11 +71,23 @@ export const CashFlowWaterfall = ({ data }: CashFlowWaterfallProps) => {
               "",
             ]}
             contentStyle={{
-              backgroundColor: "hsl(var(--card))",
+              backgroundColor: "hsl(var(--popover))",
               border: "2px solid hsl(var(--gold))",
               borderRadius: "var(--radius)",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+              padding: "12px 16px",
+            }}
+            labelStyle={{
+              color: "hsl(var(--popover-foreground))",
+              fontWeight: 700,
+              fontSize: "15px",
+              marginBottom: "8px",
+            }}
+            itemStyle={{
+              color: "hsl(var(--popover-foreground))",
               fontWeight: 600,
+              fontSize: "14px",
+              padding: "4px 0",
             }}
           />
           <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={2} />

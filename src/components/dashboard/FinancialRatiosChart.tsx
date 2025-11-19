@@ -12,49 +12,73 @@ interface FinancialRatiosChartProps {
 
 export const FinancialRatiosChart = ({ data }: FinancialRatiosChartProps) => {
   return (
-    <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300">
-      <h3 className="text-xl font-heading tracking-wide mb-6">FINANCIAL RATIOS TREND</h3>
-      <ResponsiveContainer width="100%" height={300}>
+    <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300 group">
+      <h3 className="text-xl font-heading tracking-wide mb-6 transition-colors group-hover:text-gold">
+        FINANCIAL RATIOS TREND
+      </h3>
+      <ResponsiveContainer width="100%" height={320}>
         <LineChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-          <XAxis dataKey="month" className="text-xs" />
+          <CartesianGrid 
+            strokeDasharray="3 3" 
+            stroke="hsl(var(--border))" 
+            strokeOpacity={0.3}
+          />
+          <XAxis 
+            dataKey="month" 
+            className="text-sm font-medium"
+            stroke="hsl(var(--muted-foreground))"
+            tick={{ fill: 'hsl(var(--foreground))' }}
+          />
           <YAxis
             tickFormatter={(value) => `${value}%`}
-            className="text-xs"
+            className="text-sm font-medium"
+            stroke="hsl(var(--muted-foreground))"
+            tick={{ fill: 'hsl(var(--muted-foreground))' }}
             domain={[0, 60]}
           />
           <Tooltip
             formatter={(value: number) => [`${value.toFixed(1)}%`, ""]}
             contentStyle={{
               backgroundColor: "hsl(var(--card))",
-              border: "1px solid hsl(var(--border))",
+              border: "2px solid hsl(var(--gold))",
               borderRadius: "var(--radius)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              fontWeight: 600,
             }}
           />
-          <Legend />
+          <Legend 
+            wrapperStyle={{ 
+              paddingTop: '10px',
+              fontWeight: 600,
+              fontSize: '14px'
+            }}
+          />
           <Line
             type="monotone"
             dataKey="gmPercent"
-            stroke="hsl(var(--chart-1))"
-            strokeWidth={2}
+            stroke="hsl(var(--gold))"
+            strokeWidth={3}
             name="Gross Margin %"
-            dot={{ fill: "hsl(var(--chart-1))", r: 4 }}
+            dot={{ fill: "hsl(var(--gold))", r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }}
+            activeDot={{ r: 7, strokeWidth: 3 }}
           />
           <Line
             type="monotone"
             dataKey="ebitdaPercent"
-            stroke="hsl(var(--chart-2))"
-            strokeWidth={2}
+            stroke="hsl(var(--success))"
+            strokeWidth={3}
             name="EBITDA %"
-            dot={{ fill: "hsl(var(--chart-2))", r: 4 }}
+            dot={{ fill: "hsl(var(--success))", r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }}
+            activeDot={{ r: 7, strokeWidth: 3 }}
           />
           <Line
             type="monotone"
             dataKey="opexPercent"
-            stroke="hsl(var(--chart-3))"
-            strokeWidth={2}
+            stroke="hsl(var(--destructive))"
+            strokeWidth={3}
             name="OpEx %"
-            dot={{ fill: "hsl(var(--chart-3))", r: 4 }}
+            dot={{ fill: "hsl(var(--destructive))", r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }}
+            activeDot={{ r: 7, strokeWidth: 3 }}
           />
         </LineChart>
       </ResponsiveContainer>

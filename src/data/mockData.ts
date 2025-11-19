@@ -157,10 +157,122 @@ export const cashFlowData: CashFlowData[] = [
 ];
 
 export const financialRatiosData = [
-  { month: "Jun", gmPercent: 50.2, ebitdaPercent: 16.5, opexPercent: 33.7 },
-  { month: "Jul", gmPercent: 49.8, ebitdaPercent: 15.2, opexPercent: 34.6 },
-  { month: "Aug", gmPercent: 51.5, ebitdaPercent: 17.8, opexPercent: 33.7 },
-  { month: "Sep", gmPercent: 50.8, ebitdaPercent: 16.9, opexPercent: 33.9 },
-  { month: "Oct", gmPercent: 49.2, ebitdaPercent: 14.8, opexPercent: 34.4 },
-  { month: "Nov", gmPercent: 48.2, ebitdaPercent: 14.1, opexPercent: 34.1 },
+  { 
+    month: "Jun", 
+    gmPercent: 50.2, 
+    gmBudget: 50.0,
+    ebitdaPercent: 16.5, 
+    ebitdaBudget: 17.6,
+    opexPercent: 33.7,
+    opexBudget: 32.0
+  },
+  { 
+    month: "Jul", 
+    gmPercent: 49.8, 
+    gmBudget: 50.0,
+    ebitdaPercent: 15.2, 
+    ebitdaBudget: 17.6,
+    opexPercent: 34.6,
+    opexBudget: 32.0
+  },
+  { 
+    month: "Aug", 
+    gmPercent: 51.5, 
+    gmBudget: 50.0,
+    ebitdaPercent: 17.8, 
+    ebitdaBudget: 17.6,
+    opexPercent: 33.7,
+    opexBudget: 32.0
+  },
+  { 
+    month: "Sep", 
+    gmPercent: 50.8, 
+    gmBudget: 50.0,
+    ebitdaPercent: 16.9, 
+    ebitdaBudget: 17.6,
+    opexPercent: 33.9,
+    opexBudget: 32.0
+  },
+  { 
+    month: "Oct", 
+    gmPercent: 49.2, 
+    gmBudget: 50.0,
+    ebitdaPercent: 14.8, 
+    ebitdaBudget: 17.6,
+    opexPercent: 34.4,
+    opexBudget: 32.0
+  },
+  { 
+    month: "Nov", 
+    gmPercent: 48.2, 
+    gmBudget: 50.0,
+    ebitdaPercent: 14.1, 
+    ebitdaBudget: 17.6,
+    opexPercent: 34.1,
+    opexBudget: 32.0
+  },
+];
+
+export const buMarginComparisonData = [
+  {
+    name: "Equestrian",
+    gmActual: 50.0,
+    gmBudget: 50.0,
+    ebitdaActual: 18.4,
+    ebitdaBudget: 24.4,
+  },
+  {
+    name: "Events",
+    gmActual: 40.0,
+    gmBudget: 40.0,
+    ebitdaActual: 2.0,
+    ebitdaBudget: 24.3,
+  },
+  {
+    name: "Retail",
+    gmActual: 40.0,
+    gmBudget: 40.0,
+    ebitdaActual: 10.0,
+    ebitdaBudget: 9.2,
+  },
+  {
+    name: "Advisory",
+    gmActual: 80.0,
+    gmBudget: 80.0,
+    ebitdaActual: 38.8,
+    ebitdaBudget: 37.1,
+  },
+];
+
+export const costStructureData = [
+  {
+    name: "Equestrian",
+    directCosts: 50.0,
+    opex: 31.6,
+    ebitda: 18.4,
+  },
+  {
+    name: "Events",
+    directCosts: 60.0,
+    opex: 38.0,
+    ebitda: 2.0,
+  },
+  {
+    name: "Retail",
+    directCosts: 60.0,
+    opex: 30.0,
+    ebitda: 10.0,
+  },
+  {
+    name: "Advisory",
+    directCosts: 20.0,
+    opex: 41.2,
+    ebitda: 38.8,
+  },
+  {
+    name: "Total",
+    directCosts: 52.2,
+    opex: 33.7,
+    ebitda: 14.1,
+  },
 ];

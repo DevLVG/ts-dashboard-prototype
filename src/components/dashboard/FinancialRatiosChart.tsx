@@ -5,8 +5,11 @@ interface FinancialRatiosChartProps {
   data: Array<{
     month: string;
     gmPercent: number;
+    gmBudget: number;
     ebitdaPercent: number;
+    ebitdaBudget: number;
     opexPercent: number;
+    opexBudget: number;
   }>;
 }
 
@@ -65,32 +68,62 @@ export const FinancialRatiosChart = ({ data }: FinancialRatiosChartProps) => {
               fontSize: '14px'
             }}
           />
+          {/* Actual Lines - Solid */}
           <Line
             type="monotone"
             dataKey="gmPercent"
-            stroke="hsl(var(--gold))"
+            stroke="#22d3ee"
             strokeWidth={3}
-            name="Gross Margin %"
-            dot={{ fill: "hsl(var(--gold))", r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }}
+            name="GM % Actual"
+            dot={{ fill: "#22d3ee", r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }}
             activeDot={{ r: 7, strokeWidth: 3 }}
           />
           <Line
             type="monotone"
             dataKey="ebitdaPercent"
-            stroke="hsl(var(--success))"
+            stroke="#fbbf24"
             strokeWidth={3}
-            name="EBITDA %"
-            dot={{ fill: "hsl(var(--success))", r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }}
+            name="EBITDA % Actual"
+            dot={{ fill: "#fbbf24", r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }}
             activeDot={{ r: 7, strokeWidth: 3 }}
           />
           <Line
             type="monotone"
             dataKey="opexPercent"
-            stroke="hsl(var(--destructive))"
+            stroke="#f87171"
             strokeWidth={3}
-            name="OpEx %"
-            dot={{ fill: "hsl(var(--destructive))", r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }}
+            name="OpEx % Actual"
+            dot={{ fill: "#f87171", r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }}
             activeDot={{ r: 7, strokeWidth: 3 }}
+          />
+          
+          {/* Budget Lines - Dashed */}
+          <Line
+            type="monotone"
+            dataKey="gmBudget"
+            stroke="hsl(var(--muted-foreground))"
+            strokeWidth={2}
+            strokeDasharray="5 5"
+            name="GM % Budget"
+            dot={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="ebitdaBudget"
+            stroke="hsl(var(--muted-foreground))"
+            strokeWidth={2}
+            strokeDasharray="5 5"
+            name="EBITDA % Budget"
+            dot={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="opexBudget"
+            stroke="hsl(var(--muted-foreground))"
+            strokeWidth={2}
+            strokeDasharray="5 5"
+            name="OpEx % Budget"
+            dot={false}
           />
         </LineChart>
       </ResponsiveContainer>

@@ -34,8 +34,8 @@ export const CashFlowWaterfall = ({ data }: CashFlowWaterfallProps) => {
   };
 
   return (
-    <Card className="p-6">
-      <h3 className="text-lg font-semibold mb-4">Cash Flow Waterfall</h3>
+    <Card className="p-6 shadow-sm">
+      <h3 className="text-xl font-heading tracking-wide mb-6">CASH FLOW WATERFALL</h3>
       <ResponsiveContainer width="100%" height={350}>
         <BarChart data={waterfallData}>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />

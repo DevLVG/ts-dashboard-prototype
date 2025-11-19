@@ -26,8 +26,8 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
   };
 
   return (
-    <Card className="p-6">
-      <h3 className="text-lg font-semibold mb-4">BU Performance</h3>
+    <Card className="p-6 shadow-sm">
+      <h3 className="text-xl font-heading tracking-wide mb-6">BU PERFORMANCE</h3>
       <ResponsiveContainer width="100%" height={300}>
         <BarChart data={chartData} layout="vertical" onClick={(data) => data && onClick?.(data.activeLabel as string)}>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />

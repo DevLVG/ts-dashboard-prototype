@@ -8,26 +8,27 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 215 25% 15%;
+    /* Trio Sporting Brand Colors */
+    --background: 36 25% 92%;
+    --foreground: 0 0% 0%;
 
     --card: 0 0% 100%;
-    --card-foreground: 215 25% 15%;
+    --card-foreground: 0 0% 0%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 215 25% 15%;
+    --popover-foreground: 0 0% 0%;
 
-    --primary: 215 85% 45%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 0 0% 0%;
+    --primary-foreground: 36 25% 92%;
 
-    --secondary: 215 20% 92%;
-    --secondary-foreground: 215 25% 20%;
+    --secondary: 36 25% 92%;
+    --secondary-foreground: 0 0% 0%;
 
-    --muted: 215 15% 95%;
-    --muted-foreground: 215 15% 50%;
+    --muted: 36 18% 88%;
+    --muted-foreground: 0 0% 35%;
 
-    --accent: 145 60% 45%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 42 45% 66%;
+    --accent-foreground: 0 0% 0%;
 
     --destructive: 0 70% 55%;
     --destructive-foreground: 0 0% 100%;
@@ -35,20 +36,23 @@ All colors MUST be HSL.
     --success: 145 60% 45%;
     --success-foreground: 0 0% 100%;
     
-    --warning: 38 95% 55%;
-    --warning-foreground: 0 0% 100%;
+    --warning: 42 45% 66%;
+    --warning-foreground: 0 0% 0%;
 
-    --border: 215 15% 88%;
-    --input: 215 15% 90%;
-    --ring: 215 85% 45%;
+    --border: 36 18% 85%;
+    --input: 36 18% 88%;
+    --ring: 0 0% 0%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
     
-    --chart-1: 215 85% 45%;
-    --chart-2: 145 60% 45%;
-    --chart-3: 38 95% 55%;
-    --chart-4: 280 60% 55%;
-    --chart-5: 0 70% 55%;
+    --gold: 42 45% 66%;
+    --gold-foreground: 0 0% 0%;
+    
+    --chart-1: 0 0% 0%;
+    --chart-2: 42 45% 66%;
+    --chart-3: 145 60% 45%;
+    --chart-4: 0 70% 55%;
+    --chart-5: 36 18% 70%;
 
     --sidebar-background: 0 0% 98%;
 
@@ -68,26 +72,27 @@ All colors MUST be HSL.
   }
 
   .dark {
-    --background: 215 30% 8%;
-    --foreground: 210 20% 95%;
+    /* Trio Sporting Dark Mode */
+    --background: 0 0% 8%;
+    --foreground: 36 25% 92%;
 
-    --card: 215 25% 12%;
-    --card-foreground: 210 20% 95%;
+    --card: 0 0% 12%;
+    --card-foreground: 36 25% 92%;
 
-    --popover: 215 25% 12%;
-    --popover-foreground: 210 20% 95%;
+    --popover: 0 0% 12%;
+    --popover-foreground: 36 25% 92%;
 
-    --primary: 215 85% 55%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 42 45% 66%;
+    --primary-foreground: 0 0% 0%;
 
-    --secondary: 215 20% 18%;
-    --secondary-foreground: 210 20% 95%;
+    --secondary: 0 0% 18%;
+    --secondary-foreground: 36 25% 92%;
 
-    --muted: 215 20% 15%;
-    --muted-foreground: 215 15% 60%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 36 18% 70%;
 
-    --accent: 145 60% 50%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 42 45% 66%;
+    --accent-foreground: 0 0% 0%;
 
     --destructive: 0 70% 60%;
     --destructive-foreground: 0 0% 100%;
@@ -95,18 +100,21 @@ All colors MUST be HSL.
     --success: 145 60% 50%;
     --success-foreground: 0 0% 100%;
     
-    --warning: 38 95% 60%;
-    --warning-foreground: 0 0% 100%;
+    --warning: 42 45% 66%;
+    --warning-foreground: 0 0% 0%;
 
-    --border: 215 20% 20%;
-    --input: 215 20% 18%;
-    --ring: 215 85% 55%;
+    --border: 0 0% 20%;
+    --input: 0 0% 18%;
+    --ring: 42 45% 66%;
     
-    --chart-1: 215 85% 55%;
-    --chart-2: 145 60% 50%;
-    --chart-3: 38 95% 60%;
-    --chart-4: 280 60% 60%;
-    --chart-5: 0 70% 60%;
+    --gold: 42 45% 66%;
+    --gold-foreground: 0 0% 0%;
+    
+    --chart-1: 42 45% 66%;
+    --chart-2: 36 25% 92%;
+    --chart-3: 145 60% 50%;
+    --chart-4: 0 70% 60%;
+    --chart-5: 36 18% 70%;
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;
     --sidebar-primary: 224.3 76.3% 48%;
@@ -124,6 +132,10 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-body;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
   }
 }

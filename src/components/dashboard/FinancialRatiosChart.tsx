@@ -12,8 +12,8 @@ interface FinancialRatiosChartProps {
 
 export const FinancialRatiosChart = ({ data }: FinancialRatiosChartProps) => {
   return (
-    <Card className="p-6">
-      <h3 className="text-lg font-semibold mb-4">Financial Ratios Trend</h3>
+    <Card className="p-6 shadow-sm">
+      <h3 className="text-xl font-heading tracking-wide mb-6">FINANCIAL RATIOS TREND</h3>
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={data}>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />

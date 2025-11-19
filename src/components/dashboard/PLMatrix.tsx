@@ -39,13 +39,13 @@ export const PLMatrix = ({ data, onServiceClick }: PLMatrixProps) => {
 
   const getVarianceColor = (percent: number) => {
     if (percent >= 0) return "text-success";
-    if (percent > -10) return "text-warning";
+    if (percent > -10) return "text-gold";
     return "text-destructive";
   };
 
   const getBackgroundColor = (percent: number) => {
     if (percent >= 0) return "bg-success/10";
-    if (percent > -10) return "bg-warning/10";
+    if (percent > -10) return "bg-gold/15";
     return "bg-destructive/10";
   };
 
@@ -64,8 +64,8 @@ export const PLMatrix = ({ data, onServiceClick }: PLMatrixProps) => {
   };
 
   return (
-    <Card className="p-6 overflow-x-auto">
-      <h3 className="text-lg font-semibold mb-4">P&L Matrix - Drillable</h3>
+    <Card className="p-6 overflow-x-auto shadow-sm">
+      <h3 className="text-xl font-heading tracking-wide mb-6">P&L MATRIX - DRILLABLE</h3>
       <div className="min-w-[800px]">
         <div className="grid grid-cols-5 gap-4 mb-4 pb-2 border-b">
           <div className="font-semibold">Business Unit / Service</div>

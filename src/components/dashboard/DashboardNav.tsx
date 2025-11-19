@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { LayoutDashboard, TrendingUp, Wallet, BarChart3 } from "lucide-react";
 import { PageType } from "@/types/dashboard";
+import tsLogo from "@/assets/ts-logo.png";
 
 interface DashboardNavProps {
   currentPage: PageType;
@@ -16,16 +17,14 @@ export const DashboardNav = ({ currentPage, onPageChange }: DashboardNavProps) =
   ];
 
   return (
-    <nav className="border-b bg-card">
+    <nav className="border-b bg-card shadow-sm">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between py-4">
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">TS</span>
-            </div>
-            <div>
-              <h1 className="font-bold text-lg">Trio Sporting</h1>
-              <p className="text-xs text-muted-foreground">Management Dashboard</p>
+          <div className="flex items-center gap-3">
+            <img src={tsLogo} alt="Trio Sporting" className="h-12 w-auto" />
+            <div className="border-l border-border pl-3">
+              <h1 className="font-heading text-2xl tracking-wide">TRIO SPORTING</h1>
+              <p className="text-xs text-muted-foreground font-light">Management Dashboard</p>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-2">

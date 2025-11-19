@@ -28,24 +28,24 @@ export const KPICard = ({ metric, onClick }: KPICardProps) => {
 
   const getVarianceColor = (variance: number) => {
     if (variance >= 0) return "text-success";
-    if (variance > -10) return "text-warning";
+    if (variance > -10) return "text-gold";
     return "text-destructive";
   };
 
   const getStatusColor = (variance: number) => {
-    if (variance >= 0) return "bg-success/10 border-success/20";
-    if (variance > -10) return "bg-warning/10 border-warning/20";
-    return "bg-destructive/10 border-destructive/20";
+    if (variance >= 0) return "bg-success/10 border-success/30";
+    if (variance > -10) return "bg-gold/15 border-gold/40";
+    return "bg-destructive/10 border-destructive/30";
   };
 
   return (
     <Card
-      className={`p-4 cursor-pointer transition-all hover:shadow-md border-2 ${getStatusColor(metric.variancePercent)}`}
+      className={`p-5 cursor-pointer transition-all hover:shadow-lg border-2 ${getStatusColor(metric.variancePercent)}`}
       onClick={onClick}
     >
       <div className="space-y-2">
-        <p className="text-sm text-muted-foreground font-medium">{metric.label}</p>
-        <p className="text-2xl font-bold">{formatValue(metric.actual, metric.format)}</p>
+        <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide">{metric.label}</p>
+        <p className="text-3xl font-heading tracking-tight">{formatValue(metric.actual, metric.format)}</p>
         {metric.label !== "Cash Balance" && (
           <div className="flex items-center gap-2">
             <div className={`flex items-center gap-1 ${getVarianceColor(metric.variancePercent)}`}>

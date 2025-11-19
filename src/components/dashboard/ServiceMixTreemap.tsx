@@ -28,10 +28,10 @@ export const ServiceMixTreemap = ({ data }: ServiceMixTreemapProps) => {
     return `SAR ${(value / 1000).toFixed(0)}K`;
   };
 
-  // Transform BU data into treemap hierarchical format and create lookup
+  // Transform BU data into flat treemap format with lookup
   const dataLookup: Record<string, any> = {};
   
-  const children = data.map((bu) => {
+  const treemapData = data.map((bu) => {
     const gmPercent = (bu.grossMargin.actual / bu.revenue.actual) * 100;
     const ebitdaPercent = (bu.ebitda.actual / bu.revenue.actual) * 100;
     
@@ -51,19 +51,8 @@ export const ServiceMixTreemap = ({ data }: ServiceMixTreemapProps) => {
     return item;
   });
 
-  // Recharts Treemap requires a root node with children
-  const treemapData = [
-    {
-      name: "Business Units",
-      children: children,
-    }
-  ];
-
   const CustomizedContent = (props: any) => {
     const { x, y, width, height, name, depth } = props;
-    
-    // Only render leaf nodes (depth 1 in our case)
-    if (depth !== 1) return null;
     
     // Only show content if rectangle has valid coordinates and name
     if (!x || !y || !width || !height || !name) return null;

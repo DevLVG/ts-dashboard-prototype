@@ -8,7 +8,6 @@ import { CashFlowWaterfall } from "@/components/dashboard/CashFlowWaterfall";
 import { FinancialRatiosChart } from "@/components/dashboard/FinancialRatiosChart";
 import { OpExDrawer } from "@/components/dashboard/OpExDrawer";
 import { GrossMarginDrawer } from "@/components/dashboard/GrossMarginDrawer";
-import { ServiceMixTreemap } from "@/components/dashboard/ServiceMixTreemap";
 import { PageType } from "@/types/dashboard";
 import { kpiData, trendData, buPerformance, cashFlowData, financialRatiosData } from "@/data/mockData";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -214,7 +213,6 @@ const Index = () => {
           setGmDrawerOpen(true);
         }}
       />
-      <ServiceMixTreemap data={buPerformance} />
     </div>
   );
 

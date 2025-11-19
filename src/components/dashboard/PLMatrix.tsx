@@ -64,7 +64,7 @@ export const PLMatrix = ({ data, onServiceClick }: PLMatrixProps) => {
   };
 
   return (
-    <Card className="p-6 overflow-x-auto shadow-sm">
+    <Card className="p-6 overflow-x-auto shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300">
       <h3 className="text-xl font-heading tracking-wide mb-6">P&L MATRIX - DRILLABLE</h3>
       <div className="min-w-[800px]">
         <div className="grid grid-cols-5 gap-4 mb-4 pb-2 border-b">
@@ -81,8 +81,8 @@ export const PLMatrix = ({ data, onServiceClick }: PLMatrixProps) => {
           
           return (
             <div key={bu.name} className={`mb-2 rounded-lg ${getBackgroundColor(revenueVar.variancePercent)}`}>
-              <div
-                className="grid grid-cols-5 gap-4 p-3 cursor-pointer hover:bg-muted/50 rounded-lg"
+            <div
+                className="grid grid-cols-5 gap-4 p-3 cursor-pointer hover:bg-muted/50 rounded-lg transition-all duration-200 hover:scale-[1.01]"
                 onClick={() => toggleBU(bu.name)}
               >
                 <div className="flex items-center gap-2 font-medium">
@@ -100,7 +100,7 @@ export const PLMatrix = ({ data, onServiceClick }: PLMatrixProps) => {
                   {bu.services.map((service) => (
                     <div
                       key={service.name}
-                      className="grid grid-cols-5 gap-4 p-2 text-sm hover:bg-muted/50 rounded cursor-pointer"
+                      className="grid grid-cols-5 gap-4 p-2 text-sm hover:bg-muted/50 rounded cursor-pointer transition-all duration-200 hover:translate-x-1"
                       onClick={() => onServiceClick?.(bu.name, service.name)}
                     >
                       <div className="text-muted-foreground pl-6">{service.name}</div>

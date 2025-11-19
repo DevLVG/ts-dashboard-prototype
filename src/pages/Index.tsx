@@ -41,7 +41,7 @@ const Index = () => {
   );
 
   const renderOverview = () => (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       {renderFilters()}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {kpiData.map((metric, index) => (
@@ -66,17 +66,20 @@ const Index = () => {
   );
 
   const renderPerformance = () => (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       {renderFilters()}
       <PLMatrix data={buPerformance} />
       <div className="grid grid-cols-1 gap-6">
-        <Card className="p-6 shadow-sm">
+        <Card className="p-6 shadow-sm animate-fade-in-delay hover:shadow-xl transition-all duration-300">
           <h3 className="text-xl font-heading tracking-wide mb-6">SERVICE MIX ANALYSIS</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {buPerformance.map((bu) => {
               const gmPercent = (bu.grossMargin.actual / bu.revenue.actual) * 100;
               return (
-                <div key={bu.name} className="p-4 border rounded-lg">
+                <div 
+                  key={bu.name} 
+                  className="p-4 border rounded-lg hover:shadow-lg hover:-translate-y-1 transition-all duration-300 cursor-pointer"
+                >
                   <p className="text-sm font-medium mb-2">{bu.name}</p>
                   <p className="text-2xl font-bold">{gmPercent.toFixed(1)}%</p>
                   <p className="text-xs text-muted-foreground">Gross Margin</p>
@@ -90,18 +93,18 @@ const Index = () => {
   );
 
   const renderCash = () => (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       {renderFilters()}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="p-6 shadow-sm">
+        <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
           <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide mb-2">Cash Balance</p>
           <p className="text-3xl font-heading">2.8M SAR</p>
         </Card>
-        <Card className="p-6 shadow-sm">
+        <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
           <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide mb-2">Monthly Burn</p>
           <p className="text-3xl font-heading text-destructive">-667K</p>
         </Card>
-        <Card className="p-6 shadow-sm bg-gold/15 border-gold/40">
+        <Card className="p-6 shadow-sm bg-gold/15 border-gold/40 animate-fade-in hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
           <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide mb-2">Runway</p>
           <p className="text-3xl font-heading text-foreground">4.2 months</p>
         </Card>
@@ -111,11 +114,11 @@ const Index = () => {
   );
 
   const renderRatios = () => (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       {renderFilters()}
       <FinancialRatiosChart data={financialRatiosData} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="p-6 shadow-sm">
+        <Card className="p-6 shadow-sm animate-fade-in-delay hover:shadow-xl transition-all duration-300">
           <h3 className="text-xl font-heading tracking-wide mb-6">CURRENT MONTH RATIOS</h3>
           <div className="space-y-4">
             <div className="flex justify-between items-center p-3 bg-muted/50 rounded">
@@ -132,7 +135,7 @@ const Index = () => {
             </div>
           </div>
         </Card>
-        <Card className="p-6 shadow-sm">
+        <Card className="p-6 shadow-sm animate-fade-in-delay hover:shadow-xl transition-all duration-300">
           <h3 className="text-xl font-heading tracking-wide mb-6">BU COMPARISON</h3>
           <div className="space-y-3">
             {buPerformance.map((bu) => {

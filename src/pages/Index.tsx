@@ -93,7 +93,7 @@ const Index = () => {
         ))}
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <RevenueTrendChart data={trendData} scenario={selectedScenario} />
+        <RevenueTrendChart scenario={selectedScenario} />
         <BUPerformanceChart data={buPerformance} onClick={() => setCurrentPage("performance")} />
       </div>
     </div>

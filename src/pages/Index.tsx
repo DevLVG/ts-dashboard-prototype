@@ -15,7 +15,13 @@ import { RunwayScenarios } from "@/components/dashboard/RunwayScenarios";
 import { Statements } from "@/pages/Statements";
 import { PageType } from "@/types/dashboard";
 import { trendData, buPerformance, cashFlowData, financialRatiosData, buMarginComparisonData, costStructureData } from "@/data/mockData";
-import { getMonthlyPLData, calculateGM, calculateEBITDA } from "@/data/financialData";
+import { 
+  getPLDataForPeriod, 
+  type PLPeriodData,
+  CURRENT_DATE,
+  businessUnits as buCodes,
+  businessUnitLabels 
+} from "@/data/financialData";
 import { BUMarginComparison } from "@/components/dashboard/BUMarginComparison";
 import { CostStructureChart } from "@/components/dashboard/CostStructureChart";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -36,7 +42,7 @@ const Index = () => {
   
   const [currentPage, setCurrentPage] = useState<PageType>(getCurrentPageFromPath());
   const [selectedMonth, setSelectedMonth] = useState("MTD");
-  const [selectedScenario, setSelectedScenario] = useState("base");
+  const [selectedScenario, setSelectedScenario] = useState<'Budget_Base' | 'Budget_Worst' | 'Budget_Best' | 'PY'>("Budget_Base");
   const [selectedBU, setSelectedBU] = useState("All Company");
   const [opexDrawerOpen, setOpexDrawerOpen] = useState(false);
   const [selectedOpExBreakdown, setSelectedOpExBreakdown] = useState<any>(null);
@@ -75,115 +81,113 @@ const Index = () => {
   ];
 
   const scenarioOptions = [
-    { value: "base", label: "Actual vs Budget Base" },
-    { value: "worst", label: "Actual vs Budget Worst" },
-    { value: "best", label: "Actual vs Budget Best" },
-    { value: "py", label: "Actual vs PY" },
+    { value: "Budget_Base", label: "Actual vs Budget Base" },
+    { value: "Budget_Worst", label: "Actual vs Budget Worst" },
+    { value: "Budget_Best", label: "Actual vs Budget Best" },
+    { value: "PY", label: "Actual vs PY" },
   ];
+
+  // Calculate date range based on selected month
+  const getDateRange = (): { startDate: string; endDate: string } => {
+    const currentDate = new Date(CURRENT_DATE); // "2025-11-20"
+    
+    if (selectedMonth === "MTD") {
+      // Month to Date: Nov 1 to Nov 20, 2025
+      const year = currentDate.getFullYear();
+      const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+      const day = String(currentDate.getDate()).padStart(2, '0');
+      return {
+        startDate: `${year}-${month}-01`,
+        endDate: `${year}-${month}-${day}`
+      };
+    } else if (selectedMonth === "QTD") {
+      // Quarter to Date: Oct 1 to Nov 20 (Q4: Aug-Oct in guide, but seems to be Oct-Dec)
+      return {
+        startDate: "2025-10-01",
+        endDate: CURRENT_DATE
+      };
+    } else if (selectedMonth === "YTD") {
+      // Year to Date: Nov 1, 2024 to Nov 20, 2025 (fiscal year)
+      return {
+        startDate: "2024-11-01",
+        endDate: CURRENT_DATE
+      };
+    } else {
+      // Specific month selected (e.g., "January" -> "2025-01-01" to "2025-01-31")
+      const monthMap: Record<string, { month: string; year: string; lastDay: string }> = {
+        "December": { month: "12", year: "2024", lastDay: "31" },
+        "January": { month: "01", year: "2025", lastDay: "31" },
+        "February": { month: "02", year: "2025", lastDay: "28" },
+        "March": { month: "03", year: "2025", lastDay: "31" },
+        "April": { month: "04", year: "2025", lastDay: "30" },
+        "May": { month: "05", year: "2025", lastDay: "31" },
+        "June": { month: "06", year: "2025", lastDay: "30" },
+        "July": { month: "07", year: "2025", lastDay: "31" },
+        "August": { month: "08", year: "2025", lastDay: "31" },
+        "September": { month: "09", year: "2025", lastDay: "30" },
+        "October": { month: "10", year: "2025", lastDay: "31" },
+        "November": { month: "11", year: "2025", lastDay: "30" },
+      };
+      
+      const monthInfo = monthMap[selectedMonth] || monthMap["November"];
+      return {
+        startDate: `${monthInfo.year}-${monthInfo.month}-01`,
+        endDate: `${monthInfo.year}-${monthInfo.month}-${monthInfo.lastDay}`
+      };
+    }
+  };
 
   // Filter/aggregate data based on selected BU using new financialData system
   const getFilteredKPIData = () => {
-    const plData = getMonthlyPLData(selectedBU === "All Company" ? undefined : selectedBU);
+    const { startDate, endDate } = getDateRange();
     
-    // Determine which months to include based on selectedMonth
-    let monthsToInclude: string[] = [];
-    const allMonths = ["Dec '24", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov"];
+    // Map BU display name to code
+    const buMap: Record<string, string> = {
+      "Equestrian": "BU1_Equestrian",
+      "Events": "BU2_Events",
+      "Retail": "BU3_Retail",
+      "Advisory": "BU4_Advisory"
+    };
+    const buCode = selectedBU === "All Company" ? undefined : buMap[selectedBU];
     
-    if (selectedMonth === "MTD") {
-      // Month to Date - use only the latest month
-      monthsToInclude = [allMonths[allMonths.length - 1]];
-    } else if (selectedMonth === "QTD") {
-      // Quarter to Date - last 3 months
-      monthsToInclude = allMonths.slice(-3);
-    } else if (selectedMonth === "YTD") {
-      // Year to Date - all months
-      monthsToInclude = allMonths;
-    } else {
-      // Specific month selected
-      const monthMap: Record<string, string> = {
-        "December": "Dec '24",
-        "January": "Jan",
-        "February": "Feb",
-        "March": "Mar",
-        "April": "Apr",
-        "May": "May",
-        "June": "Jun",
-        "July": "Jul",
-        "August": "Aug",
-        "September": "Sep",
-        "October": "Oct",
-        "November": "Nov",
-      };
-      monthsToInclude = [monthMap[selectedMonth] || "Nov"];
-    }
+    // Get the correct budget scenario
+    const budgetScenario = selectedScenario === 'PY' ? 'Budget_Base' : selectedScenario;
     
-    // Filter data for selected months
-    const filteredData = plData.filter(m => monthsToInclude.includes(m.month));
-    
-    // Debug: Log what data we're aggregating
-    console.log('Index.tsx - Aggregating data for months:', monthsToInclude);
-    console.log('Index.tsx - Filtered PL data:', filteredData);
-    
-    // Sum up the values
-    let revActual = 0, revBudget = 0, revPY = 0;
-    let cogsActual = 0, cogsBudget = 0, cogsPY = 0;
-    let opexActual = 0, opexBudget = 0, opexPY = 0;
-    
-    filteredData.forEach(month => {
-      revActual += month.revenues.actual;
-      revBudget += month.revenues.budget;
-      revPY += month.revenues.previousYear;
-      cogsActual += month.cogs.actual;
-      cogsBudget += month.cogs.budget;
-      cogsPY += month.cogs.previousYear;
-      opexActual += month.opex.actual;
-      opexBudget += month.opex.budget;
-      opexPY += month.opex.previousYear;
-    });
-    
-    // Debug: Log aggregated values
-    console.log('Index.tsx - Aggregated Actual values:', JSON.stringify({
-      revenue: revActual,
-      cogs: cogsActual,
-      opex: opexActual,
-      grossMargin: revActual + cogsActual,
-      ebitda: revActual + cogsActual + opexActual
-    }, null, 2));
+    // Get P&L data for the period
+    const plData = getPLDataForPeriod(startDate, endDate, budgetScenario, buCode);
     
     // Determine comparison values based on scenario
-    let revComparison = revBudget;
-    let cogsComparison = cogsBudget;
-    let opexComparison = opexBudget;
+    let revComparison: number, cogsComparison: number, opexComparison: number;
     
-    if (selectedScenario === "worst") {
-      // Budget Worst: -20% revenue, +10% opex
-      revComparison = revBudget * 0.8;
-      cogsComparison = cogsBudget * 0.8; // proportional to revenue
-      opexComparison = opexBudget * 1.1;
-    } else if (selectedScenario === "best") {
-      // Budget Best: +15% revenue, -5% opex
-      revComparison = revBudget * 1.15;
-      cogsComparison = cogsBudget * 1.15; // proportional to revenue
-      opexComparison = opexBudget * 0.95;
-    } else if (selectedScenario === "py") {
+    if (selectedScenario === 'PY') {
       // Compare against Previous Year
-      revComparison = revPY;
-      cogsComparison = cogsPY;
-      opexComparison = opexPY;
+      revComparison = plData.previousYear.revenue;
+      cogsComparison = plData.previousYear.cogs;
+      opexComparison = plData.previousYear.opex;
+    } else {
+      // Compare against selected budget scenario
+      revComparison = plData.budget.revenue;
+      cogsComparison = plData.budget.cogs;
+      opexComparison = plData.budget.opex;
     }
     
-    const gmActual = calculateGM(revActual, cogsActual);
-    const gmComparison = calculateGM(revComparison, cogsComparison);
-    const ebitdaActual = calculateEBITDA(revActual, cogsActual, opexActual);
-    const ebitdaComparison = calculateEBITDA(revComparison, cogsComparison, opexComparison);
+    const gmActual = plData.actual.grossMargin;
+    const gmComparison = selectedScenario === 'PY' 
+      ? plData.previousYear.grossMargin 
+      : plData.budget.grossMargin;
+    
+    const ebitdaActual = plData.actual.ebitda;
+    const ebitdaComparison = selectedScenario === 'PY'
+      ? plData.previousYear.ebitda
+      : plData.budget.ebitda;
 
     return [
       {
         label: "Revenue",
-        actual: revActual,
+        actual: plData.actual.revenue,
         budget: revComparison,
-        variance: revActual - revComparison,
-        variancePercent: revComparison !== 0 ? ((revActual - revComparison) / Math.abs(revComparison)) * 100 : 0,
+        variance: plData.actual.revenue - revComparison,
+        variancePercent: revComparison !== 0 ? ((plData.actual.revenue - revComparison) / Math.abs(revComparison)) * 100 : 0,
         format: "currency" as const,
       },
       {
@@ -196,10 +200,10 @@ const Index = () => {
       },
       {
         label: "OpEx",
-        actual: Math.abs(opexActual),
+        actual: Math.abs(plData.actual.opex),
         budget: Math.abs(opexComparison),
-        variance: Math.abs(opexActual) - Math.abs(opexComparison),
-        variancePercent: opexComparison !== 0 ? ((Math.abs(opexActual) - Math.abs(opexComparison)) / Math.abs(opexComparison)) * 100 : 0,
+        variance: Math.abs(plData.actual.opex) - Math.abs(opexComparison),
+        variancePercent: opexComparison !== 0 ? ((Math.abs(plData.actual.opex) - Math.abs(opexComparison)) / Math.abs(opexComparison)) * 100 : 0,
         format: "currency" as const,
       },
       {
@@ -207,9 +211,8 @@ const Index = () => {
         actual: ebitdaActual,
         budget: ebitdaComparison,
         variance: ebitdaActual - ebitdaComparison,
-        // When EBITDA crosses zero (pos to neg or neg to pos), percentage is meaningless
         variancePercent: (ebitdaActual > 0 && ebitdaComparison < 0) || (ebitdaActual < 0 && ebitdaComparison > 0)
-          ? 999999 // Special flag to indicate "N/A" or show absolute value
+          ? 999999
           : ebitdaComparison !== 0 
             ? ((ebitdaActual - ebitdaComparison) / Math.abs(ebitdaComparison)) * 100
             : 0,
@@ -224,107 +227,36 @@ const Index = () => {
       return [];
     }
     
-    // Get data for all BUs - use the BU codes from the JSON
-    const buCodes = [
-      { code: "BU1_Equestrian", label: "Equestrian" },
-      { code: "BU2_Events", label: "Events" },
-      { code: "BU3_Retail", label: "Retail" },
-      { code: "BU4_Advisory", label: "Advisory" }
-    ];
+    const { startDate, endDate } = getDateRange();
+    const budgetScenario = selectedScenario === 'PY' ? 'Budget_Base' : selectedScenario;
     
-    return buCodes.map(({ code, label }) => {
-      const plData = getMonthlyPLData(code);
+    // Get data for all BUs
+    return buCodes.map(buCode => {
+      const plData = getPLDataForPeriod(startDate, endDate, budgetScenario, buCode);
+      const label = businessUnitLabels[buCode];
       
-      // Determine which months to include based on selectedMonth
-      let monthsToInclude: string[] = [];
-      const allMonths = ["Dec '24", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov"];
-      
-      if (selectedMonth === "MTD") {
-        monthsToInclude = [allMonths[allMonths.length - 1]];
-      } else if (selectedMonth === "QTD") {
-        monthsToInclude = allMonths.slice(-3);
-      } else if (selectedMonth === "YTD") {
-        monthsToInclude = allMonths;
-      } else {
-        const monthMap: Record<string, string> = {
-          "December": "Dec '24",
-          "January": "Jan",
-          "February": "Feb",
-          "March": "Mar",
-          "April": "Apr",
-          "May": "May",
-          "June": "Jun",
-          "July": "Jul",
-          "August": "Aug",
-          "September": "Sep",
-          "October": "Oct",
-          "November": "Nov",
-        };
-        monthsToInclude = [monthMap[selectedMonth] || "Nov"];
-      }
-      
-      // Filter and sum data
-      const filteredData = plData.filter(m => monthsToInclude.includes(m.month));
-      
-      let revActual = 0, revBudget = 0, revPY = 0;
-      let cogsActual = 0, cogsBudget = 0, cogsPY = 0;
-      let opexActual = 0, opexBudget = 0, opexPY = 0;
-      
-      filteredData.forEach(month => {
-        revActual += month.revenues.actual;
-        revBudget += month.revenues.budget;
-        revPY += month.revenues.previousYear;
-        cogsActual += month.cogs.actual;
-        cogsBudget += month.cogs.budget;
-        cogsPY += month.cogs.previousYear;
-        opexActual += month.opex.actual;
-        opexBudget += month.opex.budget;
-        opexPY += month.opex.previousYear;
-      });
-      
-      // Apply scenario adjustments
-      let revComparison = revBudget;
-      let cogsComparison = cogsBudget;
-      let opexComparison = opexBudget;
-      
-      if (selectedScenario === "worst") {
-        revComparison = revBudget * 0.8;
-        cogsComparison = cogsBudget * 0.8;
-        opexComparison = opexBudget * 1.1;
-      } else if (selectedScenario === "best") {
-        revComparison = revBudget * 1.15;
-        cogsComparison = cogsBudget * 1.15;
-        opexComparison = opexBudget * 0.95;
-      } else if (selectedScenario === "py") {
-        revComparison = revPY;
-        cogsComparison = cogsPY;
-        opexComparison = opexPY;
-      }
-      
-      const gmActual = calculateGM(revActual, cogsActual);
-      const gmComparison = calculateGM(revComparison, cogsComparison);
-      const ebitdaActual = calculateEBITDA(revActual, cogsActual, opexActual);
-      const ebitdaComparison = calculateEBITDA(revComparison, cogsComparison, opexComparison);
+      // Determine comparison values based on scenario
+      const comparison = selectedScenario === 'PY' ? plData.previousYear : plData.budget;
       
       return {
         name: label,
         revenue: {
-          actual: revActual,
-          budget: revComparison,
+          actual: plData.actual.revenue,
+          budget: comparison.revenue,
         },
         grossMargin: {
-          actual: gmActual,
-          budget: gmComparison,
+          actual: plData.actual.grossMargin,
+          budget: comparison.grossMargin,
         },
         opex: {
-          actual: Math.abs(opexActual),
-          budget: Math.abs(opexComparison),
+          actual: Math.abs(plData.actual.opex),
+          budget: Math.abs(comparison.opex),
         },
         ebitda: {
-          actual: ebitdaActual,
-          budget: ebitdaComparison,
+          actual: plData.actual.ebitda,
+          budget: comparison.ebitda,
         },
-        services: undefined, // Services data not available from new system yet
+        services: undefined,
       };
     });
   };
@@ -346,7 +278,10 @@ const Index = () => {
           ))}
         </SelectContent>
       </Select>
-      <Select value={selectedScenario} onValueChange={setSelectedScenario}>
+      <Select 
+        value={selectedScenario} 
+        onValueChange={(value) => setSelectedScenario(value as typeof selectedScenario)}
+      >
         <SelectTrigger className="w-56 bg-background font-medium">
           <SelectValue />
         </SelectTrigger>

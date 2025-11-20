@@ -265,13 +265,38 @@ export interface MonthlyPLData {
   taxes?: { actual: number; budget: number; previousYear: number };
 }
 
+// Type for P&L period data
+export interface PLPeriodData {
+  actual: {
+    revenue: number;
+    cogs: number;
+    opex: number;
+    grossMargin: number;
+    ebitda: number;
+  };
+  budget: {
+    revenue: number;
+    cogs: number;
+    opex: number;
+    grossMargin: number;
+    ebitda: number;
+  };
+  previousYear: {
+    revenue: number;
+    cogs: number;
+    opex: number;
+    grossMargin: number;
+    ebitda: number;
+  };
+}
+
 // NEW: Get P&L data for a specific period with proper PY offset
 export const getPLDataForPeriod = (
   startDate: string,
   endDate: string,
   scenario: 'Budget_Base' | 'Budget_Worst' | 'Budget_Best',
   bu?: string
-): { actual: number; budget: number; previousYear: number } => {
+): PLPeriodData => {
   // Actual data for current period
   const actualRev = getRevenuesForPeriod('Actual', startDate, endDate, bu);
   const actualCogs = getCogsForPeriod('Actual', startDate, endDate, bu);
@@ -311,7 +336,7 @@ export const getPLDataForPeriod = (
       grossMargin: pyRev - pyCogs,
       ebitda: pyRev - pyCogs - pyOpex
     }
-  } as any;
+  };
 };
 
 // LEGACY: Keep for compatibility with existing charts

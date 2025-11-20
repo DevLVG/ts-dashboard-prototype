@@ -104,7 +104,8 @@ export const getMonthLabel = (date: string): string => {
   const year = d.getFullYear();
   const month = monthNames[d.getMonth()];
   
-  // Nov 2024 is PY baseline, Dec 2024 starts the projection period labeled as "Dec '24"
+  // CRITICAL: Nov 2024 (PY) must return "Nov" to match Nov 2025 for YoY comparison
+  if (month === "Nov" && year === 2024) return "Nov";
   if (month === "Dec" && year === 2024) return "Dec '24";
   if (year === 2025) return month;
   return `${month} '${year.toString().slice(-2)}`;

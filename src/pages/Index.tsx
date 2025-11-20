@@ -66,6 +66,7 @@ const Index = () => {
           <SelectItem value="base">Actual vs Budget Base</SelectItem>
           <SelectItem value="best">Actual vs Budget Best</SelectItem>
           <SelectItem value="worst">Actual vs Budget Worst</SelectItem>
+          <SelectItem value="previous-year">Actual vs Previous Year</SelectItem>
         </SelectContent>
       </Select>
     </div>

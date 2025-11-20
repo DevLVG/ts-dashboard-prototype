@@ -55,54 +55,87 @@ export const KPICard = ({ metric, onClick, periodLabel = "MTD" }: KPICardProps) 
     return "bg-[#dc3545]/10 border-[#dc3545]/30"; // Bad
   };
 
+  // Calculate bar heights for mini chart
+  const maxValue = Math.max(metric.actual, metric.budget);
+  const actualHeight = (metric.actual / maxValue) * 100;
+  const budgetHeight = (metric.budget / maxValue) * 100;
+
   return (
     <Card
       className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getStatusColor(metric.variancePercent, metric.label)}`}
       onClick={onClick}
     >
-      <div className="space-y-2">
+      <div className="space-y-3">
         <p className="text-base md:text-sm text-muted-foreground font-semibold uppercase tracking-wide transition-colors group-hover:text-foreground">
           {metric.label} {periodLabel !== "MTD" && periodLabel !== "QTD" && periodLabel !== "YTD" ? periodLabel.split(" ")[0] : periodLabel}
         </p>
-        <div className="flex items-center gap-2">
-          <p className="text-4xl md:text-3xl font-heading tracking-tight transition-transform group-hover:scale-105">
-            {formatValue(metric.actual, metric.format)}
-          </p>
-          {metric.label === "Runway" && metric.actual < 6 && (
-            <TrendingDown className="h-5 w-5 md:h-4 md:w-4 text-[#ffc107]" />
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1 space-y-2">
+            <div className="flex items-center gap-2">
+              <p className="text-4xl md:text-3xl font-heading tracking-tight transition-transform group-hover:scale-105">
+                {formatValue(metric.actual, metric.format)}
+              </p>
+              {metric.label === "Runway" && metric.actual < 6 && (
+                <TrendingDown className="h-5 w-5 md:h-4 md:w-4 text-[#ffc107]" />
+              )}
+            </div>
+            {metric.label === "Cash Balance" ? (
+              <div className="flex items-center gap-2">
+                <span className="text-base md:text-sm text-muted-foreground">--</span>
+                <span className="text-sm md:text-xs text-muted-foreground">No budget comparison</span>
+              </div>
+            ) : (
+              <>
+                <div className={`flex items-center gap-1 ${getVarianceColor(metric.variancePercent, metric.label)}`}>
+                  {/* For OpEx, invert the icon logic (negative variance = under budget = good) */}
+                  {metric.label === "OpEx" ? (
+                    metric.variancePercent < 0 ? (
+                      <TrendingDown className="h-5 w-5 md:h-4 md:w-4" />
+                    ) : (
+                      <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />
+                    )
+                  ) : (
+                    metric.variancePercent < 0 ? (
+                      <TrendingDown className="h-5 w-5 md:h-4 md:w-4" />
+                    ) : (
+                      <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />
+                    )
+                  )}
+                  <span className="text-base md:text-sm font-semibold">
+                    {Math.abs(metric.variancePercent).toFixed(1)}%
+                  </span>
+                </div>
+                <p className="text-sm md:text-xs text-muted-foreground">
+                  Budget: {formatValue(metric.budget, metric.format)}
+                </p>
+              </>
+            )}
+          </div>
+          
+          {/* Mini Bar Chart */}
+          {metric.label !== "Cash Balance" && metric.label !== "Runway" && (
+            <div className="flex items-end gap-1.5 h-16">
+              <div className="flex flex-col items-center gap-1">
+                <div className="w-8 bg-muted rounded-t-sm relative overflow-hidden" style={{ height: '48px' }}>
+                  <div 
+                    className="absolute bottom-0 w-full bg-primary transition-all duration-300"
+                    style={{ height: `${actualHeight}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-muted-foreground font-medium">AS</span>
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <div className="w-8 bg-muted rounded-t-sm relative overflow-hidden" style={{ height: '48px' }}>
+                  <div 
+                    className="absolute bottom-0 w-full bg-muted-foreground/40 transition-all duration-300"
+                    style={{ height: `${budgetHeight}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-muted-foreground font-medium">IS</span>
+              </div>
+            </div>
           )}
         </div>
-        {metric.label === "Cash Balance" ? (
-          <div className="flex items-center gap-2">
-            <span className="text-base md:text-sm text-muted-foreground">--</span>
-            <span className="text-sm md:text-xs text-muted-foreground">No budget comparison</span>
-          </div>
-        ) : (
-          <>
-            <div className={`flex items-center gap-1 ${getVarianceColor(metric.variancePercent, metric.label)}`}>
-              {/* For OpEx, invert the icon logic (negative variance = under budget = good) */}
-              {metric.label === "OpEx" ? (
-                metric.variancePercent < 0 ? (
-                  <TrendingDown className="h-5 w-5 md:h-4 md:w-4" />
-                ) : (
-                  <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />
-                )
-              ) : (
-                metric.variancePercent < 0 ? (
-                  <TrendingDown className="h-5 w-5 md:h-4 md:w-4" />
-                ) : (
-                  <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />
-                )
-              )}
-              <span className="text-base md:text-sm font-semibold">
-                {Math.abs(metric.variancePercent).toFixed(1)}%
-              </span>
-            </div>
-            <p className="text-sm md:text-xs text-muted-foreground">
-              Budget: {formatValue(metric.budget, metric.format)}
-            </p>
-          </>
-        )}
       </div>
       <TrendingUp className="absolute bottom-3 right-3 h-4 w-4 text-muted-foreground/50 transition-opacity group-hover:opacity-100" />
     </Card>

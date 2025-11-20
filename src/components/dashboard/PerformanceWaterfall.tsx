@@ -2,6 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine, LabelList } from "recharts";
 import { useState } from "react";
+import { getMonthData, calculateGM, calculateEBITDA, calculateEBT, calculateNetIncome } from "@/data/centralizedData";
 
 interface PerformanceWaterfallProps {
   selectedMonth: string;
@@ -10,28 +11,29 @@ interface PerformanceWaterfallProps {
 }
 
 export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selectedBU }: PerformanceWaterfallProps) => {
-  // Using consistent data from CEO Overview
-  const buildDownData = {
-    actual: {
-      revenues: 850000,
-      cogs: -440300,
-      opex: -550000,
-      da: -20000,
-      interest: -5000,
-      taxes: -33060
-    },
-    budget: {
-      revenues: 1000000,
-      cogs: -500000,
-      opex: -565000,
-      da: -22000,
-      interest: -5500,
-      taxes: -18500
-    }
+  // Get data from centralized source
+  const monthData = getMonthData(selectedBU, selectedMonth);
+  
+  if (!monthData) return null;
+
+  const actual = {
+    revenues: monthData.revenues.actual,
+    cogs: monthData.cogs.actual,
+    opex: monthData.opex.actual,
+    da: monthData.da.actual,
+    interest: monthData.interest.actual,
+    taxes: monthData.taxes.actual
   };
 
-  const actual = buildDownData.actual;
-  const budget = buildDownData.budget;
+  const budget = {
+    revenues: monthData.revenues.budget,
+    cogs: monthData.cogs.budget,
+    opex: monthData.opex.budget,
+    da: monthData.da.budget,
+    interest: monthData.interest.budget,
+    taxes: monthData.taxes.budget
+  };
+
   const dataSource = selectedScenario === "actual" ? actual : budget;
 
   // Calculate waterfall positions with correct build down logic

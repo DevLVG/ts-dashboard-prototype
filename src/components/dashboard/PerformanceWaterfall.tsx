@@ -162,7 +162,7 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
   const waterfallData = calculateWaterfallData();
 
   const formatCurrency = (value: number) => {
-    return `SAR ${Math.round(value).toLocaleString('en-US')}`;
+    return Math.round(value).toLocaleString('en-US');
   };
 
   const getBarColor = (value: number, comparisonValue: number, type: string) => {

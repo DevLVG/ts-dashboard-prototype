@@ -60,14 +60,8 @@ export const RevenueTrendChart = ({ scenario = "base" }: RevenueTrendChartProps)
       opex: "OPEX",
       ebitda: "EBITDA",
     };
-    
-    const periodNames = {
-      "6months": "6 MONTHS",
-      quarterly: "QUARTERLY",
-      yearly: "YEARLY",
-    };
 
-    return `${metricNames[selectedMetric]} TREND (${periodNames[selectedPeriod]})`;
+    return `${metricNames[selectedMetric]} TREND`;
   };
 
   // Determine if we should invert colors (for OpEx)

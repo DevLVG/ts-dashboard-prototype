@@ -102,15 +102,15 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
   };
 
   const getBarColor = (value: number, budgetValue: number, type: string) => {
+    const variance = ((value - budgetValue) / Math.abs(budgetValue)) * 100;
+    
     if (type === "decrease") {
-      // For decreases (negative values), lower is better
-      const variance = ((value - budgetValue) / budgetValue) * 100;
-      if (variance <= -5) return "hsl(142, 76%, 36%)"; // Green (better than budget)
-      if (variance >= 5) return "hsl(0, 84%, 60%)"; // Red (worse than budget)
+      // For costs (negative values): lower actual than budget is better
+      if (variance <= -5) return "hsl(142, 76%, 36%)"; // Green (spending less)
+      if (variance >= 5) return "hsl(0, 84%, 60%)"; // Red (spending more)
       return "hsl(48, 96%, 53%)"; // Yellow (near budget)
     } else {
-      // For totals/subtotals, higher is better
-      const variance = ((value - budgetValue) / budgetValue) * 100;
+      // For totals/subtotals: higher actual than budget is better
       if (variance >= 5) return "hsl(142, 76%, 36%)"; // Green (above budget)
       if (variance <= -5) return "hsl(0, 84%, 60%)"; // Red (below budget)
       return "hsl(48, 96%, 53%)"; // Yellow (near budget)

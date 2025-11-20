@@ -180,7 +180,15 @@ export const getOpexForPeriod = (
     o.date <= endDate &&
     (bu ? o.bu === bu : true)
   );
-  return filtered.reduce((sum, o) => sum + o.amount, 0);
+  
+  const total = filtered.reduce((sum, o) => sum + o.amount, 0);
+  
+  // Debug log for OPEX
+  if (startDate.includes('2025-09') && bu === 'BU1_Equestrian') {
+    console.log(`🔍 OPEX Sep Equestrian:`, { scenario, recordCount: filtered.length, total, sample: filtered.slice(0, 5) });
+  }
+  
+  return total;
 };
 
 // Get monthly totals for a specific scenario and BU (LEGACY - kept for compatibility)

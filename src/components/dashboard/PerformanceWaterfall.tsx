@@ -191,7 +191,18 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
       metricLabel = "EBITDA";
     }
     
-    return getVarianceHexColor(variance, metricLabel);
+    // Get base color and apply transparency (matching /overview style)
+    const baseColor = getVarianceHexColor(variance, metricLabel);
+    
+    // Convert hex to rgba with opacity
+    const hexToRgba = (hex: string, opacity: number) => {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    };
+    
+    return hexToRgba(baseColor, 0.85);
   };
 
   const renderCustomLabel = (props: any) => {

@@ -398,21 +398,24 @@ const Index = () => {
           const buData = filteredBUPerformance.find(b => b.name === bu);
           if (!buData) return;
           
-          let revenue, gmActual, gmBudget;
+          let revenue, gmActual, gmBudget, cogsActual, cogsBudget;
           if (service && buData.services) {
             const serviceData = buData.services.find(s => s.name === service);
             if (!serviceData) return;
             revenue = serviceData.revenue.actual;
             gmActual = serviceData.grossMargin.actual;
             gmBudget = serviceData.grossMargin.budget;
+            // COGS = Revenue - GM (correct formula)
+            cogsActual = revenue - gmActual;
+            cogsBudget = serviceData.revenue.budget - gmBudget;
           } else {
             revenue = buData.revenue.actual;
             gmActual = buData.grossMargin.actual;
             gmBudget = buData.grossMargin.budget;
+            // COGS = Revenue - GM (correct formula)
+            cogsActual = revenue - gmActual;
+            cogsBudget = buData.revenue.budget - gmBudget;
           }
-          
-          const cogsActual = revenue - gmActual;
-          const cogsBudget = revenue - gmBudget;
           
           // Create BU-specific COGS breakdown
           let personnelItems: { label: string; amount: number }[] = [];

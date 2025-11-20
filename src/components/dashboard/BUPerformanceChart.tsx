@@ -4,6 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell, LabelList } from "recharts";
 import { BUPerformance } from "@/types/dashboard";
 import { getMonthlyPLData, calculateGM, calculateEBITDA, businessUnitLabels } from "@/data/financialData";
+import { getVarianceHexColor } from "@/lib/varianceColors";
 
 interface BUPerformanceChartProps {
   data: BUPerformance[];
@@ -49,20 +50,13 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
     return `BU ${metricNames[selectedMetric]}`;
   };
 
-  // Determine if we should invert colors (for OpEx)
-  const isOpEx = selectedMetric === "opex";
-
-  const getBarColor = (variance: number) => {
-    if (isOpEx) {
-      // For OpEx: under budget is good (cyan), over budget is bad (yellow/red)
-      if (variance <= 0) return "#22d3ee"; // Cyan - at or under budget
-      if (variance <= 5) return "#ffc107"; // Yellow - slightly over budget (0-5%)
-      return "#dc3545"; // Red - significantly over budget (>5%)
-    } else {
-      // For Revenue/GM/EBITDA: at/over budget is good (cyan), under budget is bad (yellow/red)
-      if (variance >= -5) return "#22d3ee"; // Cyan - at or over budget
-      if (variance >= -10) return "#ffc107"; // Yellow - slightly under budget
-      return "#dc3545"; // Red - significantly under budget
+  // Get metric label for color logic
+  const getMetricLabel = () => {
+    switch (selectedMetric) {
+      case "opex": return "OpEx";
+      case "grossMargin": return "GM";
+      case "ebitda": return "EBITDA";
+      default: return "Revenue";
     }
   };
 
@@ -174,7 +168,7 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
             {chartData.map((entry, index) => (
               <Cell 
                 key={`cell-${index}`} 
-                fill={getBarColor(entry.variance)}
+                fill={getVarianceHexColor(entry.variance, getMetricLabel())}
                 className="transition-all hover:brightness-110"
               />
             ))}

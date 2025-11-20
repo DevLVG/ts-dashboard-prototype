@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { getVarianceTextColor } from "@/lib/varianceColors";
 
 interface OpExBreakdown {
   buName: string;
@@ -30,11 +31,6 @@ export const OpExDrawer = ({ isOpen, onClose, breakdown }: OpExDrawerProps) => {
   const variance = breakdown.actual - breakdown.budget;
   const variancePercent = (variance / breakdown.budget) * 100;
 
-  const getVarianceColor = (variance: number) => {
-    if (variance >= 0) return "text-[#22d3ee]";
-    if (variance > -10) return "text-[#ffc107]";
-    return "text-[#dc3545]";
-  };
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-SA", {
@@ -172,7 +168,7 @@ export const OpExDrawer = ({ isOpen, onClose, breakdown }: OpExDrawerProps) => {
             </div>
             <div className="flex justify-between items-center text-sm">
               <span className="text-muted-foreground">Variance</span>
-              <span className={`font-semibold ${getVarianceColor(variancePercent)}`}>
+              <span className={`font-semibold ${getVarianceTextColor(variancePercent, "OpEx")}`}>
                 {variancePercent >= 0 ? "+" : ""}{variancePercent.toFixed(1)}%
               </span>
             </div>

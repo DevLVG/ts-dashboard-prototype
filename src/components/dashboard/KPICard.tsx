@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { KPIMetric } from "@/types/dashboard";
 import { TrendingDown, TrendingUp } from "lucide-react";
+import { getVarianceTextColor, getVarianceBackgroundColor } from "@/lib/varianceColors";
 interface KPICardProps {
   metric: KPIMetric;
   onClick?: () => void;
@@ -30,49 +31,10 @@ export const KPICard = ({
         return value.toLocaleString();
     }
   };
-  const getVarianceColor = (variance: number, label: string) => {
-    // OpEx: under budget is good (inverted logic)
-    if (label === "OpEx") {
-      if (variance <= 0) return "text-success"; // Under/on budget = good
-      if (variance <= 5) return "text-warning"; // Slightly over
-      return "text-destructive"; // Significantly over
-    }
-
-    // All metrics: percentage variance logic
-    if (variance >= 0) return "text-success"; // Above budget
-    if (variance >= -5) return "text-warning"; // Moderately under
-    return "text-destructive"; // Under budget
-  };
-  const getStatusColor = (variance: number, label: string) => {
-    // OpEx: under budget is good (inverted logic)
-    if (label === "OpEx") {
-      if (variance <= 0) return "bg-success/10 border-success/30"; // Under/on budget = good
-      if (variance <= 5) return "bg-warning/15 border-warning/40"; // Slightly over
-      return "bg-destructive/10 border-destructive/30"; // Significantly over
-    }
-
-    // All metrics: percentage variance logic
-    if (variance >= 0) return "bg-success/10 border-success/30"; // Above budget
-    if (variance >= -5) return "bg-warning/15 border-warning/40"; // Moderately under
-    return "bg-destructive/10 border-destructive/30"; // Under budget
-  };
-  const getBarColor = (variance: number, label: string) => {
-    // OpEx: under budget is good (inverted logic)
-    if (label === "OpEx") {
-      if (variance <= 0) return "bg-success"; // Under/on budget = good
-      if (variance <= 5) return "bg-warning"; // Slightly over
-      return "bg-destructive"; // Significantly over
-    }
-
-    // All metrics: percentage variance logic
-    if (variance >= 0) return "bg-success"; // Above budget
-    if (variance >= -5) return "bg-warning"; // Moderately under
-    return "bg-destructive"; // Under budget
-  };
 
 
   const comparisonLabel = scenario === "previous-year" ? "Pr. Year" : "Budget";
-  return <Card className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getStatusColor(metric.variancePercent, metric.label)}`} onClick={onClick}>
+  return <Card className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getVarianceBackgroundColor(metric.variancePercent, metric.label)}`} onClick={onClick}>
       <div className="space-y-3">
         <p className="text-base md:text-sm text-muted-foreground font-semibold uppercase tracking-wide transition-colors group-hover:text-foreground">
           {metric.label} {periodLabel !== "MTD" && periodLabel !== "QTD" && periodLabel !== "YTD" ? periodLabel.split(" ")[0] : periodLabel}
@@ -87,7 +49,7 @@ export const KPICard = ({
             <span className="text-base md:text-sm text-muted-foreground">--</span>
             <span className="text-sm md:text-xs text-muted-foreground">No budget comparison</span>
           </div> : <>
-            <div className={`flex items-center gap-1 ${getVarianceColor(metric.variancePercent, metric.label)}`}>
+            <div className={`flex items-center gap-1 ${getVarianceTextColor(metric.variancePercent, metric.label)}`}>
               {/* For OpEx, invert the icon logic (negative variance = under budget = good) */}
               {metric.label === "OpEx" ? metric.variancePercent < 0 ? <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingUp className="h-5 w-5 md:h-4 md:w-4" /> : metric.variancePercent < 0 ? <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />}
               <span className="text-base md:text-sm font-semibold">

@@ -1,5 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts";
+import { getVarianceHexColor } from "@/lib/varianceColors";
 
 interface BUMarginData {
   name: string;
@@ -15,11 +16,9 @@ interface BUMarginComparisonProps {
 }
 
 export const BUMarginComparison = ({ data, onClick }: BUMarginComparisonProps) => {
-  const getBarColor = (actual: number, budget: number) => {
-    const variance = actual - budget;
-    if (variance >= 0) return "hsl(var(--chart-1))"; // Cyan
-    if (variance < -5) return "hsl(var(--destructive))"; // Red
-    return "hsl(var(--warning))"; // Yellow
+  const getBarColor = (actual: number, budget: number, metricType: "GM" | "EBITDA") => {
+    const variance = budget !== 0 ? ((actual - budget) / Math.abs(budget)) * 100 : 0;
+    return getVarianceHexColor(variance, metricType);
   };
 
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -58,7 +57,7 @@ export const BUMarginComparison = ({ data, onClick }: BUMarginComparisonProps) =
       metric: "GM",
       Actual: bu.gmActual,
       Budget: bu.gmBudget,
-      color: getBarColor(bu.gmActual, bu.gmBudget)
+      color: getBarColor(bu.gmActual, bu.gmBudget, "GM")
     },
     {
       name: `${bu.name} EBITDA`,
@@ -66,7 +65,7 @@ export const BUMarginComparison = ({ data, onClick }: BUMarginComparisonProps) =
       metric: "EBITDA",
       Actual: bu.ebitdaActual,
       Budget: bu.ebitdaBudget,
-      color: getBarColor(bu.ebitdaActual, bu.ebitdaBudget)
+      color: getBarColor(bu.ebitdaActual, bu.ebitdaBudget, "EBITDA")
     }
   ]);
 

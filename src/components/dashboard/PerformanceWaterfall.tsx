@@ -3,6 +3,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine, LabelList } from "recharts";
 import { useState } from "react";
 import { getMonthlyPLData, calculateGM, calculateEBITDA } from "@/data/financialData";
+import { getVarianceHexColor } from "@/lib/varianceColors";
 
 interface PerformanceWaterfallProps {
   selectedMonth: string;
@@ -165,22 +166,22 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     return Math.round(value).toLocaleString('en-US');
   };
 
-  const getBarColor = (value: number, comparisonValue: number, type: string) => {
+  const getBarColor = (value: number, comparisonValue: number, type: string, label: string) => {
     const variance = comparisonValue !== 0 
       ? ((value - comparisonValue) / Math.abs(comparisonValue)) * 100 
       : 0;
     
-    if (type === "decrease") {
-      // For costs (negative values): lower actual than budget is better
-      if (variance <= -5) return "#22d3ee"; // Cyan (spending less)
-      if (variance >= 5) return "#dc3545"; // Red (spending more)
-      return "#ffc107"; // Yellow (near budget)
-    } else {
-      // For totals/subtotals: higher actual than budget is better
-      if (variance >= 5) return "#22d3ee"; // Cyan (above budget)
-      if (variance <= -5) return "#dc3545"; // Red (below budget)
-      return "#ffc107"; // Yellow (near budget)
+    // Determine metric label for color logic
+    let metricLabel = "Revenue";
+    if (label.includes("OpEx") || type === "decrease") {
+      metricLabel = "OpEx"; // Costs use inverted logic
+    } else if (label.includes("GM") || label.includes("Gross")) {
+      metricLabel = "GM";
+    } else if (label.includes("EBITDA")) {
+      metricLabel = "EBITDA";
     }
+    
+    return getVarianceHexColor(variance, metricLabel);
   };
 
   const renderCustomLabel = (props: any) => {
@@ -398,7 +399,7 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
             {waterfallData.map((entry, index) => (
               <Cell 
                 key={`cell-${index}`} 
-                fill={getBarColor(entry.value, entry.comparisonValue, entry.type)}
+                fill={getBarColor(entry.value, entry.comparisonValue, entry.type, entry.label)}
               />
             ))}
             <LabelList content={renderCustomLabel} />

@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { getVarianceTextColor } from "@/lib/varianceColors";
 
 interface GrossMarginBreakdown {
   buName: string;
@@ -34,11 +35,6 @@ export const GrossMarginDrawer = ({ isOpen, onClose, breakdown }: GrossMarginDra
   const cogsVariance = breakdown.directCosts.total - breakdown.directCosts.budget;
   const cogsVariancePercent = (cogsVariance / breakdown.directCosts.budget) * 100;
 
-  const getVarianceColor = (variance: number) => {
-    if (variance >= 0) return "text-[#22d3ee]";
-    if (variance > -10) return "text-[#ffc107]";
-    return "text-[#dc3545]";
-  };
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-SA", {
@@ -170,7 +166,7 @@ export const GrossMarginDrawer = ({ isOpen, onClose, breakdown }: GrossMarginDra
               </div>
               <div className="flex justify-between items-center text-sm">
                 <span className="text-muted-foreground">Variance</span>
-                <span className={`font-semibold ${getVarianceColor(cogsVariancePercent)}`}>
+                <span className={`font-semibold ${getVarianceTextColor(cogsVariancePercent, "COGS")}`}>
                   {cogsVariancePercent >= 0 ? "+" : ""}{cogsVariancePercent.toFixed(1)}%
                 </span>
               </div>
@@ -199,7 +195,7 @@ export const GrossMarginDrawer = ({ isOpen, onClose, breakdown }: GrossMarginDra
             </div>
             <div className="flex justify-between items-center text-sm">
               <span className="text-muted-foreground">Variance</span>
-              <span className={`font-semibold ${getVarianceColor(gmVariancePercent)}`}>
+              <span className={`font-semibold ${getVarianceTextColor(gmVariancePercent, "GM")}`}>
                 {gmVariancePercent >= 0 ? "+" : ""}{gmVariancePercent.toFixed(1)}%
               </span>
             </div>

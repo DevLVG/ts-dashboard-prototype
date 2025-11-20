@@ -248,14 +248,15 @@ export const getMonthlyOpex = (scenario: string) => {
 };
 
 // Calculate gross margin
-// IMPORTANT: COGS in JSON are NEGATIVE values, so we ADD them to revenue
-// Example: Revenue 100K + COGS (-30K) = GM 70K
-export const calculateGM = (revenue: number, cogsAmount: number) => revenue + cogsAmount;
+// COGS in JSON are POSITIVE values (standard accounting convention)
+// Formula: Gross Margin = Revenue - COGS
+export const calculateGM = (revenue: number, cogsAmount: number) => revenue - cogsAmount;
 
-// Calculate EBITDA  
-// IMPORTANT: Both COGS and OPEX in JSON are NEGATIVE values
+// Calculate EBITDA
+// Both COGS and OPEX in JSON are POSITIVE values (standard accounting convention)
+// Formula: EBITDA = Revenue - COGS - OPEX
 export const calculateEBITDA = (revenue: number, cogsAmount: number, opexAmount: number) => 
-  revenue + cogsAmount + opexAmount;
+  revenue - cogsAmount - opexAmount;
 
 // Get combined monthly P&L data
 export interface MonthlyPLData {
@@ -317,41 +318,27 @@ export const getPLDataForPeriod = (
   const pyCogs = getCogsForPeriod('Actual', pyStartDate, pyEndDate, bu);
   const pyOpex = getOpexForPeriod('Actual', pyStartDate, pyEndDate);
   
-  // DEBUG: Log for September Equestrian 
-  if (startDate === '2025-09-01' && bu === 'BU1_Equestrian') {
-    console.log(`🔍 getPLDataForPeriod - Sep 2025 Equestrian:`, {
-      actualRev,
-      actualCogs,
-      'COGS are NEGATIVE in JSON': actualCogs < 0,
-      gmActualWRONG: actualRev - actualCogs, // WRONG if COGS is negative
-      gmActualCORRECT: actualRev + actualCogs, // CORRECT - COGS already negative
-      budgetRev,
-      budgetCogs,
-      gmBudgetCORRECT: budgetRev + budgetCogs
-    });
-  }
-  
   return {
     actual: {
       revenue: actualRev,
       cogs: actualCogs,
       opex: actualOpex,
-      grossMargin: actualRev + actualCogs, // FIX: COGS are negative, so ADD them
-      ebitda: actualRev + actualCogs + actualOpex // FIX: Both are negative
+      grossMargin: actualRev - actualCogs, // COGS are positive, so SUBTRACT
+      ebitda: actualRev - actualCogs - actualOpex // Both are positive, so SUBTRACT
     },
     budget: {
       revenue: budgetRev,
       cogs: budgetCogs,
       opex: budgetOpex,
-      grossMargin: budgetRev + budgetCogs, // FIX: COGS are negative, so ADD them
-      ebitda: budgetRev + budgetCogs + budgetOpex // FIX: Both are negative
+      grossMargin: budgetRev - budgetCogs, // COGS are positive, so SUBTRACT
+      ebitda: budgetRev - budgetCogs - budgetOpex // Both are positive, so SUBTRACT
     },
     previousYear: {
       revenue: pyRev,
       cogs: pyCogs,
       opex: pyOpex,
-      grossMargin: pyRev + pyCogs, // FIX: COGS are negative, so ADD them
-      ebitda: pyRev + pyCogs + pyOpex // FIX: Both are negative
+      grossMargin: pyRev - pyCogs, // COGS are positive, so SUBTRACT
+      ebitda: pyRev - pyCogs - pyOpex // Both are positive, so SUBTRACT
     }
   };
 };
@@ -397,18 +384,6 @@ export const getMonthlyPLData = (bu?: string, scenario: 'Budget_Base' | 'Budget_
     const revPY = getRevenuesForPeriod('Actual', pyStartDate, pyEndDate, bu);
     const cogPY = getCogsForPeriod('Actual', pyStartDate, pyEndDate, bu);
     const opPY = getOpexForPeriod('Actual', pyStartDate, pyEndDate);
-    
-    // DEBUG: Log September data for Equestrian
-    if (month === "Sep" && bu === "BU1_Equestrian") {
-      console.log(`🔍 getMonthlyPLData - Sep Equestrian:`, {
-        revActual,
-        cogActual,
-        gmActual: revActual + cogActual, // calculateGM
-        revBudget,
-        cogBudget,
-        gmBudget: revBudget + cogBudget
-      });
-    }
     
     return {
       month,

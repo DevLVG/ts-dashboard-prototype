@@ -210,6 +210,15 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     const minBarHeightForInside = totalTextHeight * 1.1; // 30.8px
     const hasSpaceInside = barHeight >= minBarHeightForInside;
     
+    // Chart boundaries to avoid axes overlap
+    const chartTopMargin = 20; // Top margin from chart config
+    const yAxisWidth = 60; // Y-axis occupies ~60px on the left (labels + padding)
+    const xAxisHeight = 80; // X-axis occupies ~80px at bottom
+    const chartHeight = 400; // From ResponsiveContainer
+    const chartBottomY = chartHeight - xAxisHeight; // Y coordinate where X-axis starts
+    const minYForText = chartTopMargin + 15; // Minimum Y to avoid top overlap
+    const maxYForText = chartBottomY - 15; // Maximum Y to avoid bottom overlap
+    
     // Determine position based on bar direction and space
     let valueY: number;
     let percentY: number;
@@ -223,28 +232,48 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     } else {
       // Place outside the bar
       const isPositiveBar = height > 0;
-      const chartTopMargin = 20; // From chart margin config
-      const chartBottomY = 400 - 60; // Height - bottom margin
       
       if (isPositiveBar) {
-        // Bar goes up - place text above
-        valueY = y - 20;
-        percentY = y - 5;
+        // Bar goes up - try placing text above
+        let proposedValueY = y - 20;
+        let proposedPercentY = y - 5;
         
-        // Check if too close to top, if so place below instead
-        if (valueY < chartTopMargin) {
+        // Check if it would overlap with top or Y-axis labels
+        if (proposedValueY < minYForText) {
+          // Not enough space above, place below instead
           valueY = y + Math.abs(height) + 15;
           percentY = y + Math.abs(height) + 30;
+          
+          // Check if placing below would overlap with X-axis
+          if (percentY > maxYForText) {
+            // Force it above but clamp to minimum
+            valueY = Math.max(minYForText, proposedValueY);
+            percentY = Math.max(minYForText + 15, proposedPercentY);
+          }
+        } else {
+          valueY = proposedValueY;
+          percentY = proposedPercentY;
         }
       } else {
-        // Bar goes down - place text below
-        valueY = y + Math.abs(height) + 15;
-        percentY = y + Math.abs(height) + 30;
+        // Bar goes down - try placing text below
+        let proposedValueY = y + Math.abs(height) + 15;
+        let proposedPercentY = y + Math.abs(height) + 30;
         
-        // Check if too close to bottom, if so place above instead
-        if (percentY > chartBottomY) {
+        // Check if it would overlap with bottom or X-axis labels
+        if (proposedPercentY > maxYForText) {
+          // Not enough space below, place above instead
           valueY = y - 20;
           percentY = y - 5;
+          
+          // Check if placing above would overlap with top
+          if (valueY < minYForText) {
+            // Force it below but clamp to maximum
+            valueY = Math.min(maxYForText - 30, proposedValueY);
+            percentY = Math.min(maxYForText - 15, proposedPercentY);
+          }
+        } else {
+          valueY = proposedValueY;
+          percentY = proposedPercentY;
         }
       }
       

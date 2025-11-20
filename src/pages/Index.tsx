@@ -21,6 +21,7 @@ const Index = () => {
   const [currentPage, setCurrentPage] = useState<PageType>("overview");
   const [selectedMonth, setSelectedMonth] = useState("MTD");
   const [selectedScenario, setSelectedScenario] = useState("base");
+  const [selectedBU, setSelectedBU] = useState("All Company");
   const [opexDrawerOpen, setOpexDrawerOpen] = useState(false);
   const [selectedOpExBreakdown, setSelectedOpExBreakdown] = useState<any>(null);
   const [gmDrawerOpen, setGmDrawerOpen] = useState(false);
@@ -44,10 +45,73 @@ const Index = () => {
     { value: "YTD", label: "YTD (Year to Date)" },
   ];
 
+  const businessUnits = [
+    { value: "All Company", label: "All Company" },
+    { value: "Equestrian", label: "Equestrian" },
+    { value: "Events", label: "Events" },
+    { value: "Retail", label: "Retail" },
+    { value: "Advisory", label: "Advisory" },
+  ];
+
+  // Filter/aggregate data based on selected BU
+  const getFilteredKPIData = () => {
+    if (selectedBU === "All Company") {
+      return kpiData;
+    }
+    
+    const bu = buPerformance.find(b => b.name === selectedBU);
+    if (!bu) return kpiData;
+
+    return [
+      {
+        label: "Revenue",
+        actual: bu.revenue.actual,
+        budget: bu.revenue.budget,
+        variance: bu.revenue.actual - bu.revenue.budget,
+        variancePercent: ((bu.revenue.actual - bu.revenue.budget) / bu.revenue.budget) * 100,
+        format: "currency" as const,
+      },
+      {
+        label: "Gross Margin",
+        actual: bu.grossMargin.actual,
+        budget: bu.grossMargin.budget,
+        variance: bu.grossMargin.actual - bu.grossMargin.budget,
+        variancePercent: ((bu.grossMargin.actual - bu.grossMargin.budget) / bu.grossMargin.budget) * 100,
+        format: "currency" as const,
+      },
+      {
+        label: "OpEx",
+        actual: bu.opex.actual,
+        budget: bu.opex.budget,
+        variance: bu.opex.actual - bu.opex.budget,
+        variancePercent: ((bu.opex.actual - bu.opex.budget) / bu.opex.budget) * 100,
+        format: "currency" as const,
+      },
+      {
+        label: "EBITDA",
+        actual: bu.ebitda.actual,
+        budget: bu.ebitda.budget,
+        variance: bu.ebitda.actual - bu.ebitda.budget,
+        variancePercent: ((bu.ebitda.actual - bu.ebitda.budget) / bu.ebitda.budget) * 100,
+        format: "currency" as const,
+      },
+    ];
+  };
+
+  const getFilteredBUPerformance = () => {
+    if (selectedBU === "All Company") {
+      return buPerformance;
+    }
+    return buPerformance.filter(bu => bu.name === selectedBU);
+  };
+
+  const filteredKPIData = getFilteredKPIData();
+  const filteredBUPerformance = getFilteredBUPerformance();
+
   const renderFilters = () => (
     <div className="flex flex-wrap gap-4 mb-6">
       <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-        <SelectTrigger className="w-56">
+        <SelectTrigger className="w-56 bg-background font-medium">
           <SelectValue />
         </SelectTrigger>
         <SelectContent className="max-h-[300px]">
@@ -59,7 +123,7 @@ const Index = () => {
         </SelectContent>
       </Select>
       <Select value={selectedScenario} onValueChange={setSelectedScenario}>
-        <SelectTrigger className="w-48">
+        <SelectTrigger className="w-56 bg-background font-medium">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -69,6 +133,18 @@ const Index = () => {
           <SelectItem value="previous-year">Actual vs Previous Year</SelectItem>
         </SelectContent>
       </Select>
+      <Select value={selectedBU} onValueChange={setSelectedBU}>
+        <SelectTrigger className="w-56 bg-background font-medium">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {businessUnits.map((bu) => (
+            <SelectItem key={bu.value} value={bu.value}>
+              {bu.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 
@@ -76,7 +152,7 @@ const Index = () => {
     <div className="space-y-6 animate-fade-in">
       {renderFilters()}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpiData.map((metric, index) => (
+        {filteredKPIData.map((metric, index) => (
           <KPICard
             key={index}
             metric={metric}
@@ -94,7 +170,7 @@ const Index = () => {
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <RevenueTrendChart scenario={selectedScenario} />
-        <BUPerformanceChart data={buPerformance} onClick={() => setCurrentPage("performance")} />
+        <BUPerformanceChart data={filteredBUPerformance} onClick={() => setCurrentPage("performance")} />
       </div>
     </div>
   );
@@ -103,10 +179,10 @@ const Index = () => {
     <div className="space-y-6 animate-fade-in">
       {renderFilters()}
       <PLMatrix 
-        data={buPerformance} 
+        data={filteredBUPerformance} 
         onOpExClick={(bu, service) => {
           // Generate OpEx breakdown data based on actual BU data
-          const buData = buPerformance.find(b => b.name === bu);
+          const buData = filteredBUPerformance.find(b => b.name === bu);
           if (!buData) return;
           
           let actual, budget;
@@ -154,7 +230,7 @@ const Index = () => {
         }}
         onGrossMarginClick={(bu, service) => {
           // Generate GM breakdown data based on actual BU data
-          const buData = buPerformance.find(b => b.name === bu);
+          const buData = filteredBUPerformance.find(b => b.name === bu);
           if (!buData) return;
           
           let revenue, gmActual, gmBudget;

@@ -70,6 +70,16 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     opexPY += month.opex.previousYear;
   });
   
+  // Debug log for verification
+  console.log(`🔍 Waterfall ${selectedMonth} ${selectedBU}:`, {
+    monthsIncluded: monthsToInclude,
+    revActual,
+    cogsActual,
+    opexActual,
+    gmActual: revActual - cogsActual,
+    ebitdaActual: revActual - cogsActual - opexActual
+  });
+  
   // Select comparison values based on scenario
   let revComparison: number;
   let cogsComparison: number;

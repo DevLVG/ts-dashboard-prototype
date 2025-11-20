@@ -10,6 +10,7 @@ import { OpExDrawer } from "@/components/dashboard/OpExDrawer";
 import { GrossMarginDrawer } from "@/components/dashboard/GrossMarginDrawer";
 import { CashTrendChart } from "@/components/dashboard/CashTrendChart";
 import { RunwayScenarios } from "@/components/dashboard/RunwayScenarios";
+import { Statements } from "@/pages/Statements";
 import { PageType } from "@/types/dashboard";
 import { kpiData, trendData, buPerformance, cashFlowData, financialRatiosData, buMarginComparisonData, costStructureData } from "@/data/mockData";
 import { BUMarginComparison } from "@/components/dashboard/BUMarginComparison";
@@ -480,6 +481,10 @@ const Index = () => {
     );
   };
 
+  const renderStatements = () => {
+    return <Statements />;
+  };
+
   const renderContent = () => {
     switch (currentPage) {
       case "overview":
@@ -490,6 +495,8 @@ const Index = () => {
         return renderCash();
       case "ratios":
         return renderRatios();
+      case "statements":
+        return renderStatements();
       default:
         return renderOverview();
     }

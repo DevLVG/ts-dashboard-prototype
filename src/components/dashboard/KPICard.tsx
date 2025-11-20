@@ -56,7 +56,6 @@ export const KPICard = ({
     if (variance >= -5) return "bg-warning/15 border-warning/40"; // Moderately under
     return "bg-destructive/10 border-destructive/30"; // Under budget
   };
-
   const getBarColor = (variance: number, label: string) => {
     // OpEx: under budget is good (inverted logic)
     if (label === "OpEx") {
@@ -75,7 +74,6 @@ export const KPICard = ({
   const maxValue = Math.max(Math.abs(metric.actual), Math.abs(metric.budget));
   const actualHeight = Math.abs(metric.actual) / maxValue * 100;
   const budgetHeight = Math.abs(metric.budget) / maxValue * 100;
-  
   const comparisonLabel = scenario === "previous-year" ? "Pr. Year" : "Budget";
   return <Card className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getStatusColor(metric.variancePercent, metric.label)}`} onClick={onClick}>
       <div className="space-y-3">
@@ -105,22 +103,20 @@ export const KPICard = ({
             
             {/* Mini Bar Chart - Below content */}
             {metric.label !== "Runway" && <div className="pt-2 mt-2 border-t border-border/50">
-                <div className="flex items-end justify-center gap-3 h-20">
+                <div className="gap-3 h-20 items-end justify-center flex flex-row">
                   <div className="flex flex-col items-center gap-1.5 flex-1 max-w-[80px]">
                     <div className="mini-bar-container">
-                      <div 
-                        className={`mini-bar-actual ${getBarColor(metric.variancePercent, metric.label)}`}
-                        style={{ height: `${actualHeight}%` }}
-                      />
+                      <div className={`mini-bar-actual ${getBarColor(metric.variancePercent, metric.label)}`} style={{
+                  height: `${actualHeight}%`
+                }} />
                     </div>
                     <span className="text-xs text-muted-foreground font-semibold">Actual</span>
                   </div>
                   <div className="flex flex-col items-center gap-1.5 flex-1 max-w-[80px]">
                     <div className="mini-bar-container">
-                      <div 
-                        className="mini-bar-budget"
-                        style={{ height: `${budgetHeight}%` }}
-                      />
+                      <div className="mini-bar-budget" style={{
+                  height: `${budgetHeight}%`
+                }} />
                     </div>
                     <span className="text-xs text-muted-foreground font-semibold">{comparisonLabel}</span>
                   </div>

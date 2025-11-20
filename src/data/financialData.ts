@@ -268,6 +268,14 @@ export const getMonthlyPLData = (bu?: string): MonthlyPLData[] => {
   const opexActual = getMonthlyOpex('Actual');
   const opexBudget = getMonthlyOpex('Budget_Base');
   
+  // Debug: Log OpEx data
+  const novOpex = opexActual.find(o => o.month === 'Nov');
+  console.log('getMonthlyPLData - OpEx for Nov before mapping:', JSON.stringify({
+    found: !!novOpex,
+    amount: novOpex?.amount,
+    bu: bu || 'All Company'
+  }, null, 2));
+  
   const months = ["Dec '24", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov"];
   
   const result = months.map(month => {

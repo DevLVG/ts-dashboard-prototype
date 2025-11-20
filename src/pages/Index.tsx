@@ -190,11 +190,16 @@ const Index = () => {
       return [];
     }
     
-    // Get data for all BUs
-    const businessUnits = ["Equestrian", "Events", "Retail", "Advisory"];
+    // Get data for all BUs - use the BU codes from the JSON
+    const buCodes = [
+      { code: "BU1_Equestrian", label: "Equestrian" },
+      { code: "BU2_Events", label: "Events" },
+      { code: "BU3_Retail", label: "Retail" },
+      { code: "BU4_Advisory", label: "Advisory" }
+    ];
     
-    return businessUnits.map(buName => {
-      const plData = getMonthlyPLData(buName);
+    return buCodes.map(({ code, label }) => {
+      const plData = getMonthlyPLData(code);
       
       // Determine which months to include based on selectedMonth
       let monthsToInclude: string[] = [];
@@ -268,7 +273,7 @@ const Index = () => {
       const ebitdaComparison = calculateEBITDA(revComparison, cogsComparison, opexComparison);
       
       return {
-        name: buName,
+        name: label,
         revenue: {
           actual: revActual,
           budget: revComparison,

@@ -14,11 +14,12 @@ export const RevenueTrendChart = ({ data, scenario = "base" }: RevenueTrendChart
   
   const comparisonLabel = scenario === "previous-year" ? "Pr. Year" : "Budget";
 
-  // Create data with variance shading
+  // Create data with variance shading between the two lines
   const chartData = data.map((item) => ({
     ...item,
-    varianceArea: item.actual > item.budget ? item.actual : null,
-    negativeVarianceArea: item.actual < item.budget ? item.actual : null,
+    baseArea: Math.min(item.actual, item.budget),
+    positiveVariance: item.actual > item.budget ? item.actual - item.budget : 0,
+    negativeVariance: item.budget > item.actual ? item.budget - item.actual : 0,
   }));
 
   return (
@@ -91,18 +92,27 @@ export const RevenueTrendChart = ({ data, scenario = "base" }: RevenueTrendChart
               fontSize: '15px'
             }}
           />
-          {/* Area shading for variance */}
+          {/* Area shading between the two lines */}
           <Area
             type="monotone"
-            dataKey="budget"
-            fill="url(#negativeVariance)"
+            dataKey="baseArea"
+            stackId="1"
+            fill="transparent"
+            stroke="none"
+          />
+          <Area
+            type="monotone"
+            dataKey="positiveVariance"
+            stackId="1"
+            fill="url(#positiveVariance)"
             stroke="none"
             fillOpacity={1}
           />
           <Area
             type="monotone"
-            dataKey="varianceArea"
-            fill="url(#positiveVariance)"
+            dataKey="negativeVariance"
+            stackId="1"
+            fill="url(#negativeVariance)"
             stroke="none"
             fillOpacity={1}
           />

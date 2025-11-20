@@ -210,16 +210,27 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     const minBarHeightForInside = totalTextHeight * 1.1; // 30.8px
     const hasSpaceInside = barHeight >= minBarHeightForInside;
     
-    // Chart boundaries to avoid axes overlap
-    const chartTopMargin = 20; // Top margin from chart config
-    const yAxisWidth = 60; // Y-axis occupies ~60px on the left (labels + padding)
-    const xAxisHeight = 80; // X-axis occupies ~80px at bottom
-    const chartHeight = 400; // From ResponsiveContainer
-    const chartBottomY = chartHeight - xAxisHeight; // Y coordinate where X-axis starts
-    const minYForText = chartTopMargin + 15; // Minimum Y to avoid top overlap
-    const maxYForText = chartBottomY - 15; // Maximum Y to avoid bottom overlap
+    // Chart configuration
+    const chartTopMargin = 20;
+    const chartHeight = 400;
+    const chartBottomMargin = 60;
     
-    // Determine position based on bar direction and space
+    // Calculate where the X-axis (0 line) is positioned in pixel coordinates
+    // Based on yAxisDomain from the chart config
+    const yAxisDomain = [-300000, 900000];
+    const chartDrawHeight = chartHeight - chartTopMargin - chartBottomMargin; // 320px
+    const zeroPixelY = chartTopMargin + (chartDrawHeight * (yAxisDomain[1] - 0) / (yAxisDomain[1] - yAxisDomain[0]));
+    // This gives us the Y pixel position where value=0 is drawn
+    
+    // Define exclusion zones
+    const xAxisZoneHeight = 18; // Pixels to avoid around the X-axis line
+    const xAxisTopBoundary = zeroPixelY - xAxisZoneHeight;
+    const xAxisBottomBoundary = zeroPixelY + xAxisZoneHeight;
+    
+    const minYForText = chartTopMargin + 15; // Avoid top margin
+    const maxYForText = chartHeight - chartBottomMargin - 15; // Avoid bottom X-axis labels
+    
+    // Determine position based on bar direction and available space
     let valueY: number;
     let percentY: number;
     let textColor: string;
@@ -233,47 +244,91 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
       // Place outside the bar
       const isPositiveBar = height > 0;
       
+      // Helper function to check if a Y position overlaps with X-axis
+      const overlapsXAxis = (textY: number) => {
+        return textY >= xAxisTopBoundary && textY <= xAxisBottomBoundary;
+      };
+      
       if (isPositiveBar) {
-        // Bar goes up - try placing text above
+        // Bar goes up - try placing text above first
         let proposedValueY = y - 20;
         let proposedPercentY = y - 5;
         
-        // Check if it would overlap with top or Y-axis labels
-        if (proposedValueY < minYForText) {
-          // Not enough space above, place below instead
-          valueY = y + Math.abs(height) + 15;
-          percentY = y + Math.abs(height) + 30;
-          
-          // Check if placing below would overlap with X-axis
-          if (percentY > maxYForText) {
-            // Force it above but clamp to minimum
-            valueY = Math.max(minYForText, proposedValueY);
-            percentY = Math.max(minYForText + 15, proposedPercentY);
-          }
-        } else {
+        // Check if above position is valid (not too high, not overlapping X-axis)
+        const aboveIsValid = proposedValueY >= minYForText && 
+                            !overlapsXAxis(proposedValueY) && 
+                            !overlapsXAxis(proposedPercentY);
+        
+        if (aboveIsValid) {
           valueY = proposedValueY;
           percentY = proposedPercentY;
+        } else {
+          // Try below
+          let belowValueY = y + Math.abs(height) + 15;
+          let belowPercentY = y + Math.abs(height) + 30;
+          
+          const belowIsValid = belowPercentY <= maxYForText && 
+                               !overlapsXAxis(belowValueY) && 
+                               !overlapsXAxis(belowPercentY);
+          
+          if (belowIsValid) {
+            valueY = belowValueY;
+            percentY = belowPercentY;
+          } else {
+            // Neither position is perfect - use the one further from X-axis
+            const distanceAbove = Math.min(Math.abs(proposedValueY - zeroPixelY), Math.abs(proposedPercentY - zeroPixelY));
+            const distanceBelow = Math.min(Math.abs(belowValueY - zeroPixelY), Math.abs(belowPercentY - zeroPixelY));
+            
+            if (distanceAbove > distanceBelow) {
+              // Above is safer
+              valueY = Math.max(minYForText, proposedValueY);
+              percentY = Math.max(minYForText + 15, proposedPercentY);
+            } else {
+              // Below is safer
+              valueY = Math.min(maxYForText - 30, belowValueY);
+              percentY = Math.min(maxYForText - 15, belowPercentY);
+            }
+          }
         }
       } else {
-        // Bar goes down - try placing text below
+        // Bar goes down - try placing text below first
         let proposedValueY = y + Math.abs(height) + 15;
         let proposedPercentY = y + Math.abs(height) + 30;
         
-        // Check if it would overlap with bottom or X-axis labels
-        if (proposedPercentY > maxYForText) {
-          // Not enough space below, place above instead
-          valueY = y - 20;
-          percentY = y - 5;
-          
-          // Check if placing above would overlap with top
-          if (valueY < minYForText) {
-            // Force it below but clamp to maximum
-            valueY = Math.min(maxYForText - 30, proposedValueY);
-            percentY = Math.min(maxYForText - 15, proposedPercentY);
-          }
-        } else {
+        const belowIsValid = proposedPercentY <= maxYForText && 
+                            !overlapsXAxis(proposedValueY) && 
+                            !overlapsXAxis(proposedPercentY);
+        
+        if (belowIsValid) {
           valueY = proposedValueY;
           percentY = proposedPercentY;
+        } else {
+          // Try above
+          let aboveValueY = y - 20;
+          let abovePercentY = y - 5;
+          
+          const aboveIsValid = aboveValueY >= minYForText && 
+                              !overlapsXAxis(aboveValueY) && 
+                              !overlapsXAxis(abovePercentY);
+          
+          if (aboveIsValid) {
+            valueY = aboveValueY;
+            percentY = abovePercentY;
+          } else {
+            // Neither position is perfect - use the one further from X-axis
+            const distanceBelow = Math.min(Math.abs(proposedValueY - zeroPixelY), Math.abs(proposedPercentY - zeroPixelY));
+            const distanceAbove = Math.min(Math.abs(aboveValueY - zeroPixelY), Math.abs(abovePercentY - zeroPixelY));
+            
+            if (distanceBelow > distanceAbove) {
+              // Below is safer
+              valueY = Math.min(maxYForText - 30, proposedValueY);
+              percentY = Math.min(maxYForText - 15, proposedPercentY);
+            } else {
+              // Above is safer
+              valueY = Math.max(minYForText, aboveValueY);
+              percentY = Math.max(minYForText + 15, abovePercentY);
+            }
+          }
         }
       }
       

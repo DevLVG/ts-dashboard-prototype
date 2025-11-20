@@ -194,9 +194,12 @@ const Index = () => {
         actual: ebitdaActual,
         budget: ebitdaComparison,
         variance: ebitdaActual - ebitdaComparison,
-        variancePercent: ebitdaComparison !== 0 
-          ? ((ebitdaActual - ebitdaComparison) / Math.abs(ebitdaComparison)) * 100
-          : 0,
+        // When EBITDA crosses zero (pos to neg or neg to pos), percentage is meaningless
+        variancePercent: (ebitdaActual > 0 && ebitdaComparison < 0) || (ebitdaActual < 0 && ebitdaComparison > 0)
+          ? 999999 // Special flag to indicate "N/A" or show absolute value
+          : ebitdaComparison !== 0 
+            ? ((ebitdaActual - ebitdaComparison) / Math.abs(ebitdaComparison)) * 100
+            : 0,
         format: "currency" as const,
       },
     ];

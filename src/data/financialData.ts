@@ -140,6 +140,14 @@ export const getMonthlyRevenues = (scenario: string, bu?: string) => {
     console.log('Sample PY record:', nov2024[0]);
   }
   
+  // Debug logging for Actual scenario Nov 2025
+  if (scenario === 'Actual') {
+    const nov2025 = filtered.filter(r => r.date.startsWith('2025-11'));
+    console.log('Actual Nov 2025 revenue records:', nov2025.length);
+    console.log('Actual Nov 2025 revenue total:', nov2025.reduce((sum, r) => sum + r.amount, 0));
+    console.log('Sample Actual Nov 2025 record:', nov2025[0]);
+  }
+  
   const grouped = groupByMonth(filtered);
   const result: Array<{ month: string; amount: number }> = [];
   
@@ -170,6 +178,13 @@ export const getMonthlyCogs = (scenario: string, bu?: string) => {
     console.log('PY Nov 2024 COGS total:', nov2024.reduce((sum, c) => sum + c.amount, 0));
   }
   
+  // Debug logging for Actual scenario Nov 2025
+  if (scenario === 'Actual') {
+    const nov2025 = filtered.filter(c => c.date.startsWith('2025-11'));
+    console.log('Actual Nov 2025 COGS records:', nov2025.length);
+    console.log('Actual Nov 2025 COGS total:', nov2025.reduce((sum, c) => sum + c.amount, 0));
+  }
+  
   const grouped = groupByMonth(filtered);
   const result: Array<{ month: string; amount: number }> = [];
   
@@ -196,6 +211,13 @@ export const getMonthlyOpex = (scenario: string) => {
     const nov2024 = filtered.filter(o => o.date.startsWith('2024-11'));
     console.log('PY Nov 2024 OpEx records:', nov2024.length);
     console.log('PY Nov 2024 OpEx total:', nov2024.reduce((sum, o) => sum + o.amount, 0));
+  }
+  
+  // Debug logging for Actual scenario Nov 2025
+  if (scenario === 'Actual') {
+    const nov2025 = filtered.filter(o => o.date.startsWith('2025-11'));
+    console.log('Actual Nov 2025 OpEx records:', nov2025.length);
+    console.log('Actual Nov 2025 OpEx total:', nov2025.reduce((sum, o) => sum + o.amount, 0));
   }
   
   const grouped = groupByMonth(filtered);

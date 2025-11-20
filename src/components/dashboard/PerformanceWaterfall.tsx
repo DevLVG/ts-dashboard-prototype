@@ -7,7 +7,7 @@ import { getVarianceHexColor } from "@/lib/varianceColors";
 
 interface PerformanceWaterfallProps {
   selectedMonth: string;
-  selectedScenario: string;
+  selectedScenario: 'Budget_Base' | 'Budget_Worst' | 'Budget_Best' | 'PY';
   selectedBU: string;
 }
 
@@ -19,7 +19,9 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     selectedBU === "Retail" ? "BU3_Retail" :
     selectedBU === "Advisory" ? "BU4_Advisory" : undefined;
   
-  const plData = getMonthlyPLData(buCode);
+  // Use the appropriate budget scenario
+  const budgetScenario = selectedScenario === "PY" ? "Budget_Base" : selectedScenario;
+  const plData = getMonthlyPLData(buCode, budgetScenario);
   
   // Determine which months to include based on selectedMonth
   let monthsToInclude: string[] = [];
@@ -68,23 +70,21 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     opexPY += month.opex.previousYear;
   });
   
-  // Apply scenario adjustments to comparison values
-  let revComparison = revBudget;
-  let cogsComparison = cogsBudget;
-  let opexComparison = opexBudget;
+  // Select comparison values based on scenario
+  let revComparison: number;
+  let cogsComparison: number;
+  let opexComparison: number;
   
-  if (selectedScenario === "worst") {
-    revComparison = revBudget * 0.8;
-    cogsComparison = cogsBudget * 0.8;
-    opexComparison = opexBudget * 1.1;
-  } else if (selectedScenario === "best") {
-    revComparison = revBudget * 1.15;
-    cogsComparison = cogsBudget * 1.15;
-    opexComparison = opexBudget * 0.95;
-  } else if (selectedScenario === "py") {
+  if (selectedScenario === "PY") {
+    // Compare against Previous Year
     revComparison = revPY;
     cogsComparison = cogsPY;
     opexComparison = opexPY;
+  } else {
+    // Use budget from selected scenario (already loaded with correct scenario)
+    revComparison = revBudget;
+    cogsComparison = cogsBudget;
+    opexComparison = opexBudget;
   }
 
   const actual = {

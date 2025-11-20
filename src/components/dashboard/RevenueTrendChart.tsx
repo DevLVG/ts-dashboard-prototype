@@ -6,14 +6,14 @@ import { TrendData } from "@/types/dashboard";
 import { getMonthlyPLData, calculateGM, calculateEBITDA } from "@/data/financialData";
 
 interface RevenueTrendChartProps {
-  scenario?: string;
+  scenario?: 'Budget_Base' | 'Budget_Worst' | 'Budget_Best' | 'PY';
   selectedBU?: string;
 }
 
 type MetricType = "revenue" | "grossMargin" | "opex" | "ebitda";
 type PeriodType = "6months" | "quarterly" | "yearly";
 
-export const RevenueTrendChart = ({ scenario = "base", selectedBU = "All Company" }: RevenueTrendChartProps) => {
+export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All Company" }: RevenueTrendChartProps) => {
   const [selectedMetric, setSelectedMetric] = useState<MetricType>("revenue");
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>("yearly");
 
@@ -21,11 +21,21 @@ export const RevenueTrendChart = ({ scenario = "base", selectedBU = "All Company
     return `${(value / 1000).toFixed(0)}K`;
   };
   
-  const comparisonLabel = scenario === "py" ? "PY" : "Budget";
+  const comparisonLabel = scenario === "PY" ? "PY" : "Budget";
 
   // Get data based on selected metric and period using new financialData system
   const getData = (): TrendData[] => {
-    const plData = getMonthlyPLData(selectedBU === "All Company" ? undefined : selectedBU);
+    // Map BU display name to code
+    const buMap: Record<string, string> = {
+      "Equestrian": "BU1_Equestrian",
+      "Events": "BU2_Events",
+      "Retail": "BU3_Retail",
+      "Advisory": "BU4_Advisory"
+    };
+    
+    const buCode = selectedBU !== "All Company" ? (buMap[selectedBU] || selectedBU) : undefined;
+    const budgetScenario = scenario === "PY" ? "Budget_Base" : scenario;
+    const plData = getMonthlyPLData(buCode, budgetScenario);
     
     // Determine how many months to show based on period
     let dataToShow = plData;
@@ -56,25 +66,20 @@ export const RevenueTrendChart = ({ scenario = "base", selectedBU = "All Company
       }
       
       // Calculate comparison values based on scenario
-      let revComparison = monthData.revenues.budget;
-      let cogsComparison = monthData.cogs.budget;
-      let opexComparison = monthData.opex.budget;
+      let revComparison: number;
+      let cogsComparison: number;
+      let opexComparison: number;
       
-      if (scenario === "worst") {
-        // Budget Worst: -20% revenue, +10% opex
-        revComparison = monthData.revenues.budget * 0.8;
-        cogsComparison = monthData.cogs.budget * 0.8;
-        opexComparison = monthData.opex.budget * 1.1;
-      } else if (scenario === "best") {
-        // Budget Best: +15% revenue, -5% opex
-        revComparison = monthData.revenues.budget * 1.15;
-        cogsComparison = monthData.cogs.budget * 1.15;
-        opexComparison = monthData.opex.budget * 0.95;
-      } else if (scenario === "py") {
+      if (scenario === "PY") {
         // Compare against Previous Year
         revComparison = monthData.revenues.previousYear;
         cogsComparison = monthData.cogs.previousYear;
         opexComparison = monthData.opex.previousYear;
+      } else {
+        // Use budget from selected scenario (Budget_Base/Worst/Best)
+        revComparison = monthData.revenues.budget;
+        cogsComparison = monthData.cogs.budget;
+        opexComparison = monthData.opex.budget;
       }
       
       // Calculate comparison metric value

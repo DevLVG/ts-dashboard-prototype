@@ -127,6 +127,7 @@ export const RevenueTrendChart = ({ data, scenario = "base" }: RevenueTrendChart
             stackId="1"
             fill="transparent"
             stroke="none"
+            legendType="none"
           />
           <Area
             type="monotone"
@@ -135,6 +136,7 @@ export const RevenueTrendChart = ({ data, scenario = "base" }: RevenueTrendChart
             fill="url(#positiveVariance)"
             stroke="none"
             fillOpacity={1}
+            legendType="none"
           />
           <Area
             type="monotone"
@@ -143,6 +145,7 @@ export const RevenueTrendChart = ({ data, scenario = "base" }: RevenueTrendChart
             fill="url(#negativeVariance)"
             stroke="none"
             fillOpacity={1}
+            legendType="none"
           />
           <Line
             type="monotone"

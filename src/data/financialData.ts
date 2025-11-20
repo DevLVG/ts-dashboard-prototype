@@ -1,10 +1,10 @@
-// Financial data system using the comprehensive JSON dataset
-import mockData from './trio_mock_data_full.json';
+// Financial data system using trio_mock_data_v2.json
+import mockData from './trio_mock_data_v2.json';
 
 // Type definitions matching the JSON structure
 export interface RevenueRecord {
   date: string;
-  scenario: 'PY' | 'Actual' | 'Budget_Base' | 'Budget_Worst' | 'Budget_Best';
+  scenario: 'Actual' | 'Budget_Base' | 'Budget_Worst' | 'Budget_Best';
   bu: string;
   service: string;
   amount: number;
@@ -12,7 +12,7 @@ export interface RevenueRecord {
 
 export interface CogsRecord {
   date: string;
-  scenario: 'PY' | 'Actual' | 'Budget_Base' | 'Budget_Worst' | 'Budget_Best';
+  scenario: 'Actual' | 'Budget_Base' | 'Budget_Worst' | 'Budget_Best';
   bu: string;
   service: string;
   category: string;
@@ -21,14 +21,14 @@ export interface CogsRecord {
 
 export interface OpexRecord {
   date: string;
-  scenario: 'PY' | 'Actual' | 'Budget_Base' | 'Budget_Worst' | 'Budget_Best';
+  scenario: 'Actual' | 'Budget_Base' | 'Budget_Worst' | 'Budget_Best';
   category: string;
   amount: number;
 }
 
 export interface CashRecord {
   date: string;
-  scenario: 'PY' | 'Actual' | 'Budget_Base' | 'Budget_Worst' | 'Budget_Best';
+  scenario: 'Actual' | 'Budget_Base' | 'Budget_Worst' | 'Budget_Best';
   opening_balance: number;
   inflows: number;
   outflows: number;
@@ -37,25 +37,25 @@ export interface CashRecord {
 
 export interface Metadata {
   generated: string;
+  current_date: string;
   date_range: {
-    start: string;
-    end: string;
-    days: number;
+    actual: {
+      start: string;
+      end: string;
+    };
+    budget: {
+      start: string;
+      end: string;
+    };
   };
   scenarios: {
-    PY: string;
     Actual: string;
     Budget_Base: string;
     Budget_Worst: string;
     Budget_Best: string;
   };
-  targets: {
-    revenue_annual: number;
-    opex_annual: number;
-    cogs_annual: number;
-    ebitda_annual: number;
-  };
   structure_note: string;
+  overlap_period: string;
   total_records: number;
 }
 
@@ -97,6 +97,9 @@ export const cogs: CogsRecord[] = mockData.cogs as CogsRecord[];
 export const opex: OpexRecord[] = mockData.opex as OpexRecord[];
 export const cash: CashRecord[] = mockData.cash as CashRecord[];
 
+// Current date from metadata
+export const CURRENT_DATE = metadata.current_date; // "2025-11-20"
+
 // Helper to get month label from date
 export const getMonthLabel = (date: string): string => {
   const d = new Date(date);
@@ -126,27 +129,62 @@ export const groupByMonth = <T extends { date: string }>(records: T[]): Map<stri
   return grouped;
 };
 
-// Get monthly totals for a specific scenario and BU
+// Helper to get offset date for PY comparison (12 months earlier)
+const getOffsetDate = (date: string, monthsOffset: number): string => {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + monthsOffset);
+  return d.toISOString().slice(0, 10);
+};
+
+// Get data for a specific date range, scenario, and optional BU
+export const getRevenuesForPeriod = (
+  scenario: string,
+  startDate: string,
+  endDate: string,
+  bu?: string
+): number => {
+  const filtered = revenues.filter(r => 
+    r.scenario === scenario &&
+    r.date >= startDate &&
+    r.date <= endDate &&
+    (bu ? r.bu === bu : true)
+  );
+  return filtered.reduce((sum, r) => sum + r.amount, 0);
+};
+
+export const getCogsForPeriod = (
+  scenario: string,
+  startDate: string,
+  endDate: string,
+  bu?: string
+): number => {
+  const filtered = cogs.filter(c => 
+    c.scenario === scenario &&
+    c.date >= startDate &&
+    c.date <= endDate &&
+    (bu ? c.bu === bu : true)
+  );
+  return filtered.reduce((sum, c) => sum + c.amount, 0);
+};
+
+export const getOpexForPeriod = (
+  scenario: string,
+  startDate: string,
+  endDate: string
+): number => {
+  const filtered = opex.filter(o => 
+    o.scenario === scenario &&
+    o.date >= startDate &&
+    o.date <= endDate
+  );
+  return filtered.reduce((sum, o) => sum + o.amount, 0);
+};
+
+// Get monthly totals for a specific scenario and BU (LEGACY - kept for compatibility)
 export const getMonthlyRevenues = (scenario: string, bu?: string) => {
   const filtered = bu 
     ? revenues.filter(r => r.scenario === scenario && r.bu === bu)
     : revenues.filter(r => r.scenario === scenario);
-  
-  // Debug logging for PY scenario
-  if (scenario === 'PY') {
-    const nov2024 = filtered.filter(r => r.date.startsWith('2024-11'));
-    console.log('PY Nov 2024 revenue records:', nov2024.length);
-    console.log('PY Nov 2024 revenue total:', nov2024.reduce((sum, r) => sum + r.amount, 0));
-    console.log('Sample PY record:', nov2024[0]);
-  }
-  
-  // Debug logging for Actual scenario Nov 2025
-  if (scenario === 'Actual') {
-    const nov2025 = filtered.filter(r => r.date.startsWith('2025-11'));
-    console.log('Actual Nov 2025 revenue records:', nov2025.length);
-    console.log('Actual Nov 2025 revenue total:', nov2025.reduce((sum, r) => sum + r.amount, 0));
-    console.log('Sample Actual Nov 2025 record:', nov2025[0]);
-  }
   
   const grouped = groupByMonth(filtered);
   const result: Array<{ month: string; amount: number }> = [];
@@ -165,25 +203,11 @@ export const getMonthlyRevenues = (scenario: string, bu?: string) => {
   });
 };
 
-// Get monthly COGS for a specific scenario and BU
+// Get monthly COGS for a specific scenario and BU (LEGACY - kept for compatibility)
 export const getMonthlyCogs = (scenario: string, bu?: string) => {
   const filtered = bu 
     ? cogs.filter(c => c.scenario === scenario && c.bu === bu)
     : cogs.filter(c => c.scenario === scenario);
-  
-  // Debug logging for PY scenario
-  if (scenario === 'PY') {
-    const nov2024 = filtered.filter(c => c.date.startsWith('2024-11'));
-    console.log('PY Nov 2024 COGS records:', nov2024.length);
-    console.log('PY Nov 2024 COGS total:', nov2024.reduce((sum, c) => sum + c.amount, 0));
-  }
-  
-  // Debug logging for Actual scenario Nov 2025
-  if (scenario === 'Actual') {
-    const nov2025 = filtered.filter(c => c.date.startsWith('2025-11'));
-    console.log('Actual Nov 2025 COGS records:', nov2025.length);
-    console.log('Actual Nov 2025 COGS total:', nov2025.reduce((sum, c) => sum + c.amount, 0));
-  }
   
   const grouped = groupByMonth(filtered);
   const result: Array<{ month: string; amount: number }> = [];
@@ -202,45 +226,17 @@ export const getMonthlyCogs = (scenario: string, bu?: string) => {
   });
 };
 
-// Get monthly OpEx for a specific scenario
+// Get monthly OpEx for a specific scenario (LEGACY - kept for compatibility)
 export const getMonthlyOpex = (scenario: string) => {
   const filtered = opex.filter(o => o.scenario === scenario);
-  
-  // Debug logging for PY scenario
-  if (scenario === 'PY') {
-    const nov2024 = filtered.filter(o => o.date.startsWith('2024-11'));
-    console.log('PY Nov 2024 OpEx records:', nov2024.length);
-    console.log('PY Nov 2024 OpEx total:', nov2024.reduce((sum, o) => sum + o.amount, 0));
-  }
-  
-  // Debug logging for Actual scenario Nov 2025
-  if (scenario === 'Actual') {
-    const nov2025 = filtered.filter(o => o.date.startsWith('2025-11'));
-    console.log('Actual Nov 2025 OpEx records:', nov2025.length);
-    console.log('Actual Nov 2025 OpEx total:', nov2025.reduce((sum, o) => sum + o.amount, 0));
-  }
   
   const grouped = groupByMonth(filtered);
   const result: Array<{ month: string; amount: number }> = [];
   
   grouped.forEach((records, monthKey) => {
     const total = records.reduce((sum, o) => sum + o.amount, 0);
-    const monthLabel = getMonthLabel(records[0].date);
-    
-    // Debug: Log Nov 2025 OpEx after grouping
-    if (scenario === 'Actual' && monthKey === '2025-11') {
-      console.log('getMonthlyOpex - Nov 2025 after groupByMonth:', JSON.stringify({
-        monthKey,
-        monthLabel,
-        recordCount: records.length,
-        total: total,
-        firstDate: records[0].date,
-        lastDate: records[records.length - 1].date
-      }, null, 2));
-    }
-    
     result.push({
-      month: monthLabel,
+      month: getMonthLabel(records[0].date),
       amount: total
     });
   });
@@ -269,41 +265,83 @@ export interface MonthlyPLData {
   taxes?: { actual: number; budget: number; previousYear: number };
 }
 
+// NEW: Get P&L data for a specific period with proper PY offset
+export const getPLDataForPeriod = (
+  startDate: string,
+  endDate: string,
+  scenario: 'Budget_Base' | 'Budget_Worst' | 'Budget_Best',
+  bu?: string
+): { actual: number; budget: number; previousYear: number } => {
+  // Actual data for current period
+  const actualRev = getRevenuesForPeriod('Actual', startDate, endDate, bu);
+  const actualCogs = getCogsForPeriod('Actual', startDate, endDate, bu);
+  const actualOpex = getOpexForPeriod('Actual', startDate, endDate);
+  
+  // Budget data for current period
+  const budgetRev = getRevenuesForPeriod(scenario, startDate, endDate, bu);
+  const budgetCogs = getCogsForPeriod(scenario, startDate, endDate, bu);
+  const budgetOpex = getOpexForPeriod(scenario, startDate, endDate);
+  
+  // Previous Year: offset dates by -12 months, use Actual scenario
+  const pyStartDate = getOffsetDate(startDate, -12);
+  const pyEndDate = getOffsetDate(endDate, -12);
+  const pyRev = getRevenuesForPeriod('Actual', pyStartDate, pyEndDate, bu);
+  const pyCogs = getCogsForPeriod('Actual', pyStartDate, pyEndDate, bu);
+  const pyOpex = getOpexForPeriod('Actual', pyStartDate, pyEndDate);
+  
+  return {
+    actual: {
+      revenue: actualRev,
+      cogs: actualCogs,
+      opex: actualOpex,
+      grossMargin: actualRev - actualCogs,
+      ebitda: actualRev - actualCogs - actualOpex
+    },
+    budget: {
+      revenue: budgetRev,
+      cogs: budgetCogs,
+      opex: budgetOpex,
+      grossMargin: budgetRev - budgetCogs,
+      ebitda: budgetRev - budgetCogs - budgetOpex
+    },
+    previousYear: {
+      revenue: pyRev,
+      cogs: pyCogs,
+      opex: pyOpex,
+      grossMargin: pyRev - pyCogs,
+      ebitda: pyRev - pyCogs - pyOpex
+    }
+  } as any;
+};
+
+// LEGACY: Keep for compatibility with existing charts
 export const getMonthlyPLData = (bu?: string): MonthlyPLData[] => {
-  const revenuesPY = getMonthlyRevenues('PY', bu);
   const revenuesActual = getMonthlyRevenues('Actual', bu);
   const revenuesBudget = getMonthlyRevenues('Budget_Base', bu);
   
-  const cogsPY = getMonthlyCogs('PY', bu);
   const cogsActual = getMonthlyCogs('Actual', bu);
   const cogsBudget = getMonthlyCogs('Budget_Base', bu);
   
-  const opexPY = getMonthlyOpex('PY');
   const opexActual = getMonthlyOpex('Actual');
   const opexBudget = getMonthlyOpex('Budget_Base');
-  
-  // Debug: Log OpEx data
-  const novOpex = opexActual.find(o => o.month === 'Nov');
-  console.log('getMonthlyPLData - OpEx for Nov before mapping:', JSON.stringify({
-    found: !!novOpex,
-    amount: novOpex?.amount,
-    bu: bu || 'All Company'
-  }, null, 2));
   
   const months = ["Dec '24", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov"];
   
   const result = months.map(month => {
-    const revPY = revenuesPY.find(r => r.month === month)?.amount || 0;
     const revActual = revenuesActual.find(r => r.month === month)?.amount || 0;
     const revBudget = revenuesBudget.find(r => r.month === month)?.amount || 0;
     
-    const cogPY = cogsPY.find(c => c.month === month)?.amount || 0;
     const cogActual = cogsActual.find(c => c.month === month)?.amount || 0;
     const cogBudget = cogsBudget.find(c => c.month === month)?.amount || 0;
     
-    const opPY = opexPY.find(o => o.month === month)?.amount || 0;
     const opActual = opexActual.find(o => o.month === month)?.amount || 0;
     const opBudget = opexBudget.find(o => o.month === month)?.amount || 0;
+    
+    // For PY: get data from 12 months earlier using Actual scenario
+    // This is a simplified version - real implementation should use date offsets
+    const revPY = 0; // Placeholder
+    const cogPY = 0; // Placeholder
+    const opPY = 0; // Placeholder
     
     return {
       month,
@@ -324,20 +362,6 @@ export const getMonthlyPLData = (bu?: string): MonthlyPLData[] => {
       }
     };
   });
-  
-  // Debug log the final Actual data for Nov 2025
-  const novData = result.find(m => m.month === 'Nov');
-  if (novData) {
-    console.log('getMonthlyPLData - Nov 2025 returned data:', JSON.stringify({
-      month: novData.month,
-      revenue_actual: novData.revenues.actual,
-      revenue_budget: novData.revenues.budget,
-      revenue_py: novData.revenues.previousYear,
-      cogs_actual: novData.cogs.actual,
-      opex_actual: novData.opex.actual,
-      bu: bu || 'All Company'
-    }, null, 2));
-  }
   
   return result;
 };

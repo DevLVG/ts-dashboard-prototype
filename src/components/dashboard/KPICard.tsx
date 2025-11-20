@@ -37,9 +37,9 @@ export const KPICard = ({
     }
 
     // All metrics: percentage variance logic
-    if (variance >= -5) return "text-[#22d3ee]"; // Good
-    if (variance >= -10) return "text-[#ffc107]"; // Borderline
-    return "text-[#dc3545]"; // Bad
+    if (variance >= 0) return "text-[#22d3ee]"; // Above budget
+    if (variance >= -5) return "text-[#ffc107]"; // Moderately under
+    return "text-[#dc3545]"; // Under budget
   };
   const getStatusColor = (variance: number, label: string) => {
     // OpEx: under budget is good (inverted logic)
@@ -50,9 +50,9 @@ export const KPICard = ({
     }
 
     // All metrics: percentage variance logic
-    if (variance >= -5) return "bg-[#22d3ee]/10 border-[#22d3ee]/30"; // Good
-    if (variance >= -10) return "bg-[#ffc107]/15 border-[#ffc107]/40"; // Borderline
-    return "bg-[#dc3545]/10 border-[#dc3545]/30"; // Bad
+    if (variance >= 0) return "bg-[#22d3ee]/10 border-[#22d3ee]/30"; // Above budget
+    if (variance >= -5) return "bg-[#ffc107]/15 border-[#ffc107]/40"; // Moderately under
+    return "bg-[#dc3545]/10 border-[#dc3545]/30"; // Under budget
   };
 
   const getBarColor = (variance: number, label: string) => {
@@ -64,9 +64,9 @@ export const KPICard = ({
     }
 
     // All metrics: percentage variance logic
-    if (variance >= -5) return "bg-[#22d3ee]"; // Good
-    if (variance >= -10) return "bg-[#ffc107]"; // Borderline
-    return "bg-[#dc3545]"; // Bad
+    if (variance >= 0) return "bg-[#22d3ee]"; // Above budget
+    if (variance >= -5) return "bg-[#ffc107]"; // Moderately under
+    return "bg-[#dc3545]"; // Under budget
   };
 
   // Calculate bar heights for mini chart

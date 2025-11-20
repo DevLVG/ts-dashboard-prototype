@@ -33,7 +33,7 @@ export const KPICard = ({
   };
 
 
-  const comparisonLabel = scenario === "previous-year" ? "Pr. Year" : "Budget";
+  const comparisonLabel = scenario === "py" ? "Pr. Year" : "Budget";
   return <Card className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getVarianceBackgroundColor(metric.variancePercent, metric.label)}`} onClick={onClick}>
       <div className="space-y-3">
         <p className="text-base md:text-sm text-muted-foreground font-semibold uppercase tracking-wide transition-colors group-hover:text-foreground">

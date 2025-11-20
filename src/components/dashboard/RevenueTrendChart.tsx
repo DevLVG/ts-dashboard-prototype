@@ -1,18 +1,77 @@
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { TrendData } from "@/types/dashboard";
+import { 
+  trendData, 
+  grossMarginTrendData, 
+  opexTrendData, 
+  ebitdaTrendData,
+  quarterlyTrendData,
+  yearlyTrendData
+} from "@/data/mockData";
 
 interface RevenueTrendChartProps {
-  data: TrendData[];
   scenario?: string;
 }
 
-export const RevenueTrendChart = ({ data, scenario = "base" }: RevenueTrendChartProps) => {
+type MetricType = "revenue" | "grossMargin" | "opex" | "ebitda";
+type PeriodType = "6months" | "quarterly" | "yearly";
+
+export const RevenueTrendChart = ({ scenario = "base" }: RevenueTrendChartProps) => {
+  const [selectedMetric, setSelectedMetric] = useState<MetricType>("revenue");
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>("6months");
+
   const formatCurrency = (value: number) => {
     return `${(value / 1000).toFixed(0)}K`;
   };
   
   const comparisonLabel = scenario === "previous-year" ? "Pr. Year" : "Budget";
+
+  // Get data based on selected metric and period
+  const getData = (): TrendData[] => {
+    if (selectedPeriod === "quarterly") {
+      return quarterlyTrendData[selectedMetric];
+    } else if (selectedPeriod === "yearly") {
+      return yearlyTrendData[selectedMetric];
+    } else {
+      // 6 months
+      switch (selectedMetric) {
+        case "grossMargin":
+          return grossMarginTrendData;
+        case "opex":
+          return opexTrendData;
+        case "ebitda":
+          return ebitdaTrendData;
+        default:
+          return trendData;
+      }
+    }
+  };
+
+  const data = getData();
+
+  // Get title based on selected metric
+  const getTitle = () => {
+    const metricNames = {
+      revenue: "REVENUE",
+      grossMargin: "GROSS MARGIN",
+      opex: "OPEX",
+      ebitda: "EBITDA",
+    };
+    
+    const periodNames = {
+      "6months": "6 MONTHS",
+      quarterly: "QUARTERLY",
+      yearly: "YEARLY",
+    };
+
+    return `${metricNames[selectedMetric]} TREND (${periodNames[selectedPeriod]})`;
+  };
+
+  // Determine if we should invert colors (for OpEx)
+  const isOpEx = selectedMetric === "opex";
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -71,18 +130,48 @@ export const RevenueTrendChart = ({ data, scenario = "base" }: RevenueTrendChart
   };
 
   // Create data with variance shading between the two lines
+  // For OpEx, invert the logic: over budget is bad (red), under budget is good (cyan)
   const chartData = data.map((item) => ({
     ...item,
     baseArea: Math.min(item.actual, item.budget),
-    positiveVariance: item.actual > item.budget ? item.actual - item.budget : 0,
-    negativeVariance: item.budget > item.actual ? item.budget - item.actual : 0,
+    positiveVariance: isOpEx 
+      ? (item.budget > item.actual ? item.budget - item.actual : 0) // For OpEx: under budget is positive (cyan)
+      : (item.actual > item.budget ? item.actual - item.budget : 0), // For others: over budget is positive (cyan)
+    negativeVariance: isOpEx
+      ? (item.actual > item.budget ? item.actual - item.budget : 0) // For OpEx: over budget is negative (red)
+      : (item.budget > item.actual ? item.budget - item.actual : 0), // For others: under budget is negative (red)
   }));
 
   return (
     <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300 group">
-      <h3 className="text-2xl md:text-xl font-heading tracking-wide mb-6 transition-colors group-hover:text-gold">
-        REVENUE TREND (6 MONTHS)
-      </h3>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+        <h3 className="text-2xl md:text-xl font-heading tracking-wide transition-colors group-hover:text-gold">
+          {getTitle()}
+        </h3>
+        <div className="flex gap-3">
+          <Select value={selectedMetric} onValueChange={(value) => setSelectedMetric(value as MetricType)}>
+            <SelectTrigger className="w-[160px] bg-background">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="revenue">Revenue</SelectItem>
+              <SelectItem value="grossMargin">Gross Margin</SelectItem>
+              <SelectItem value="opex">OpEx</SelectItem>
+              <SelectItem value="ebitda">EBITDA</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={selectedPeriod} onValueChange={(value) => setSelectedPeriod(value as PeriodType)}>
+            <SelectTrigger className="w-[140px] bg-background">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="6months">6 Months</SelectItem>
+              <SelectItem value="quarterly">Quarterly</SelectItem>
+              <SelectItem value="yearly">Yearly</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
       <ResponsiveContainer width="100%" height={320}>
         <ComposedChart data={chartData}>
           <defs>

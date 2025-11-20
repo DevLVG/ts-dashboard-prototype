@@ -44,6 +44,117 @@ export const trendData: TrendData[] = [
   { month: "Nov", actual: 850000, budget: 1000000 },
 ];
 
+export const grossMarginTrendData: TrendData[] = [
+  { month: "Jun", actual: 440000, budget: 475000 },
+  { month: "Jul", actual: 420000, budget: 485000 },
+  { month: "Aug", actual: 505000, budget: 500000 },
+  { month: "Sep", actual: 455000, budget: 490000 },
+  { month: "Oct", actual: 425000, budget: 505000 },
+  { month: "Nov", actual: 409700, budget: 500000 },
+];
+
+export const opexTrendData: TrendData[] = [
+  { month: "Jun", actual: 530000, budget: 560000 },
+  { month: "Jul", actual: 545000, budget: 565000 },
+  { month: "Aug", actual: 520000, budget: 570000 },
+  { month: "Sep", actual: 560000, budget: 565000 },
+  { month: "Oct", actual: 575000, budget: 560000 },
+  { month: "Nov", actual: 550000, budget: 565000 },
+];
+
+export const ebitdaTrendData: TrendData[] = [
+  { month: "Jun", actual: 140000, budget: 155000 },
+  { month: "Jul", actual: 125000, budget: 160000 },
+  { month: "Aug", actual: 175000, budget: 150000 },
+  { month: "Sep", actual: 135000, budget: 155000 },
+  { month: "Oct", actual: 115000, budget: 165000 },
+  { month: "Nov", actual: 120000, budget: 150000 },
+];
+
+// Quarterly data (last 3 months)
+export const quarterlyTrendData = {
+  revenue: [
+    { month: "Sep", actual: 950000, budget: 980000 },
+    { month: "Oct", actual: 890000, budget: 1010000 },
+    { month: "Nov", actual: 850000, budget: 1000000 },
+  ],
+  grossMargin: [
+    { month: "Sep", actual: 455000, budget: 490000 },
+    { month: "Oct", actual: 425000, budget: 505000 },
+    { month: "Nov", actual: 409700, budget: 500000 },
+  ],
+  opex: [
+    { month: "Sep", actual: 560000, budget: 565000 },
+    { month: "Oct", actual: 575000, budget: 560000 },
+    { month: "Nov", actual: 550000, budget: 565000 },
+  ],
+  ebitda: [
+    { month: "Sep", actual: 135000, budget: 155000 },
+    { month: "Oct", actual: 115000, budget: 165000 },
+    { month: "Nov", actual: 120000, budget: 150000 },
+  ],
+};
+
+// Yearly data (last 12 months)
+export const yearlyTrendData = {
+  revenue: [
+    { month: "Dec '24", actual: 980000, budget: 990000 },
+    { month: "Jan", actual: 960000, budget: 980000 },
+    { month: "Feb", actual: 940000, budget: 960000 },
+    { month: "Mar", actual: 1020000, budget: 1050000 },
+    { month: "Apr", actual: 970000, budget: 1000000 },
+    { month: "May", actual: 930000, budget: 970000 },
+    { month: "Jun", actual: 920000, budget: 950000 },
+    { month: "Jul", actual: 880000, budget: 970000 },
+    { month: "Aug", actual: 1050000, budget: 1000000 },
+    { month: "Sep", actual: 950000, budget: 980000 },
+    { month: "Oct", actual: 890000, budget: 1010000 },
+    { month: "Nov", actual: 850000, budget: 1000000 },
+  ],
+  grossMargin: [
+    { month: "Dec '24", actual: 470000, budget: 495000 },
+    { month: "Jan", actual: 460000, budget: 490000 },
+    { month: "Feb", actual: 450000, budget: 480000 },
+    { month: "Mar", actual: 490000, budget: 525000 },
+    { month: "Apr", actual: 465000, budget: 500000 },
+    { month: "May", actual: 445000, budget: 485000 },
+    { month: "Jun", actual: 440000, budget: 475000 },
+    { month: "Jul", actual: 420000, budget: 485000 },
+    { month: "Aug", actual: 505000, budget: 500000 },
+    { month: "Sep", actual: 455000, budget: 490000 },
+    { month: "Oct", actual: 425000, budget: 505000 },
+    { month: "Nov", actual: 409700, budget: 500000 },
+  ],
+  opex: [
+    { month: "Dec '24", actual: 540000, budget: 565000 },
+    { month: "Jan", actual: 550000, budget: 560000 },
+    { month: "Feb", actual: 535000, budget: 555000 },
+    { month: "Mar", actual: 525000, budget: 570000 },
+    { month: "Apr", actual: 555000, budget: 565000 },
+    { month: "May", actual: 540000, budget: 560000 },
+    { month: "Jun", actual: 530000, budget: 560000 },
+    { month: "Jul", actual: 545000, budget: 565000 },
+    { month: "Aug", actual: 520000, budget: 570000 },
+    { month: "Sep", actual: 560000, budget: 565000 },
+    { month: "Oct", actual: 575000, budget: 560000 },
+    { month: "Nov", actual: 550000, budget: 565000 },
+  ],
+  ebitda: [
+    { month: "Dec '24", actual: 150000, budget: 160000 },
+    { month: "Jan", actual: 145000, budget: 165000 },
+    { month: "Feb", actual: 138000, budget: 155000 },
+    { month: "Mar", actual: 180000, budget: 175000 },
+    { month: "Apr", actual: 155000, budget: 170000 },
+    { month: "May", actual: 130000, budget: 160000 },
+    { month: "Jun", actual: 140000, budget: 155000 },
+    { month: "Jul", actual: 125000, budget: 160000 },
+    { month: "Aug", actual: 175000, budget: 150000 },
+    { month: "Sep", actual: 135000, budget: 155000 },
+    { month: "Oct", actual: 115000, budget: 165000 },
+    { month: "Nov", actual: 120000, budget: 150000 },
+  ],
+};
+
 export const buPerformance: BUPerformance[] = [
   {
     name: "Equestrian",

@@ -144,7 +144,7 @@ export const RevenueTrendChart = ({ scenario = "base" }: RevenueTrendChartProps)
         </h3>
         <div className="flex gap-3">
           <Select value={selectedMetric} onValueChange={(value) => setSelectedMetric(value as MetricType)}>
-            <SelectTrigger className="w-[160px] bg-background">
+            <SelectTrigger className="w-[150px] bg-background font-medium">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -155,7 +155,7 @@ export const RevenueTrendChart = ({ scenario = "base" }: RevenueTrendChartProps)
             </SelectContent>
           </Select>
           <Select value={selectedPeriod} onValueChange={(value) => setSelectedPeriod(value as PeriodType)}>
-            <SelectTrigger className="w-[140px] bg-background">
+            <SelectTrigger className="w-[150px] bg-background font-medium">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

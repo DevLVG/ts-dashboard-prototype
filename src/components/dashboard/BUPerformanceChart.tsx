@@ -24,6 +24,10 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
     };
   });
 
+  // Calculate max value for dynamic domain to ensure labels fit
+  const maxValue = Math.max(...chartData.map(d => Math.max(d.actual, d.budget)));
+  const domainMax = maxValue * 1.2; // Add 20% padding for labels
+
   const formatCurrency = (value: number) => {
     return `${(value / 1000).toFixed(0)}K`;
   };
@@ -92,6 +96,7 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
             className="text-base md:text-sm font-medium"
             stroke="hsl(var(--muted-foreground))"
             tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 14 }}
+            domain={[0, domainMax]}
           />
           <YAxis 
             type="category" 

@@ -185,8 +185,8 @@ const Index = () => {
         label: "OpEx",
         actual: Math.abs(opexActual),
         budget: Math.abs(opexComparison),
-        variance: opexActual - opexComparison,
-        variancePercent: opexComparison !== 0 ? ((opexActual - opexComparison) / Math.abs(opexComparison)) * 100 : 0,
+        variance: Math.abs(opexActual) - Math.abs(opexComparison),
+        variancePercent: opexComparison !== 0 ? ((Math.abs(opexActual) - Math.abs(opexComparison)) / Math.abs(opexComparison)) * 100 : 0,
         format: "currency" as const,
       },
       {

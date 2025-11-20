@@ -2,7 +2,7 @@ import { BUPerformance, TrendData, CashFlowData, KPIMetric } from "@/types/dashb
 
 export const kpiData: KPIMetric[] = [
   {
-    label: "Revenue MTD",
+    label: "Revenue",
     actual: 850000,
     budget: 1000000,
     variance: -150000,
@@ -10,15 +10,15 @@ export const kpiData: KPIMetric[] = [
     format: "currency",
   },
   {
-    label: "Gross Margin %",
-    actual: 48.2,
-    budget: 50.0,
-    variance: -1.8,
-    variancePercent: -3.6,
-    format: "percent",
+    label: "Gross Margin",
+    actual: 409700,
+    budget: 500000,
+    variance: -90300,
+    variancePercent: -18.1,
+    format: "currency",
   },
   {
-    label: "OpEx MTD",
+    label: "OpEx",
     actual: 550000,
     budget: 565000,
     variance: -15000,
@@ -26,7 +26,7 @@ export const kpiData: KPIMetric[] = [
     format: "currency",
   },
   {
-    label: "EBITDA MTD",
+    label: "EBITDA",
     actual: 120000,
     budget: 150000,
     variance: -30000,

@@ -79,6 +79,7 @@ const Index = () => {
           <KPICard
             key={index}
             metric={metric}
+            periodLabel={selectedMonth}
             onClick={() => {
               if (metric.label.includes("Revenue") || metric.label.includes("EBITDA") || metric.label.includes("OpEx")) {
                 setCurrentPage("performance");

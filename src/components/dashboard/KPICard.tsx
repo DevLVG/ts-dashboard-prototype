@@ -71,10 +71,10 @@ export const KPICard = ({
     return "bg-destructive"; // Under budget
   };
 
-  // Calculate bar heights for mini chart
-  const maxValue = Math.max(metric.actual, metric.budget);
-  const actualHeight = metric.actual / maxValue * 100;
-  const budgetHeight = metric.budget / maxValue * 100;
+  // Calculate bar heights for mini chart - use absolute values
+  const maxValue = Math.max(Math.abs(metric.actual), Math.abs(metric.budget));
+  const actualHeight = Math.abs(metric.actual) / maxValue * 100;
+  const budgetHeight = Math.abs(metric.budget) / maxValue * 100;
   
   const comparisonLabel = scenario === "previous-year" ? "Pr. Year" : "Budget";
   return <Card className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getStatusColor(metric.variancePercent, metric.label)}`} onClick={onClick}>

@@ -162,11 +162,7 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
   const waterfallData = calculateWaterfallData();
 
   const formatCurrency = (value: number) => {
-    const absValue = Math.abs(value);
-    if (absValue >= 1000000) {
-      return `${(value / 1000000).toFixed(1)}M`;
-    }
-    return `${(value / 1000).toFixed(0)}K`;
+    return `SAR ${Math.round(value).toLocaleString('en-US')}`;
   };
 
   const getBarColor = (value: number, comparisonValue: number, type: string) => {
@@ -193,21 +189,15 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     if (!entry) return null;
     
     const actualValue = entry.value;
-    const comparisonValue = entry.comparisonValue;
-    const variance = comparisonValue !== 0
-      ? ((actualValue - comparisonValue) / Math.abs(comparisonValue)) * 100
-      : 0;
     const displayValue = formatCurrency(Math.abs(actualValue));
     
     // Calculate text height requirements
-    const lineHeight = 12; // fontSize for value
-    const percentLineHeight = 10; // fontSize for percentage
-    const lineSpacing = 6; // space between lines
-    const totalTextHeight = lineHeight + lineSpacing + percentLineHeight; // ~28px
+    const lineHeight = 14; // fontSize for value
+    const totalTextHeight = lineHeight; // Only value text, no percentage
     
     // Bar must be at least 10% taller than text to fit inside
     const barHeight = Math.abs(height);
-    const minBarHeightForInside = totalTextHeight * 1.1; // 30.8px
+    const minBarHeightForInside = totalTextHeight * 1.1;
     const hasSpaceInside = barHeight >= minBarHeightForInside;
     
     // Chart configuration
@@ -232,13 +222,11 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     
     // Determine position based on bar direction and available space
     let valueY: number;
-    let percentY: number;
     let textColor: string;
     
     if (hasSpaceInside) {
       // Place inside the bar
-      valueY = y + height / 2 - 8;
-      percentY = y + height / 2 + 8;
+      valueY = y + height / 2 + 5; // Center vertically
       textColor = "hsl(0, 0%, 15%)";
     } else {
       // Place outside the bar
@@ -251,82 +239,66 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
       
       if (isPositiveBar) {
         // Bar goes up - try placing text above first
-        let proposedValueY = y - 20;
-        let proposedPercentY = y - 5;
+        let proposedValueY = y - 12;
         
         // Check if above position is valid (not too high, not overlapping X-axis)
         const aboveIsValid = proposedValueY >= minYForText && 
-                            !overlapsXAxis(proposedValueY) && 
-                            !overlapsXAxis(proposedPercentY);
+                            !overlapsXAxis(proposedValueY);
         
         if (aboveIsValid) {
           valueY = proposedValueY;
-          percentY = proposedPercentY;
         } else {
           // Try below
           let belowValueY = y + Math.abs(height) + 15;
-          let belowPercentY = y + Math.abs(height) + 30;
           
-          const belowIsValid = belowPercentY <= maxYForText && 
-                               !overlapsXAxis(belowValueY) && 
-                               !overlapsXAxis(belowPercentY);
+          const belowIsValid = belowValueY <= maxYForText && 
+                               !overlapsXAxis(belowValueY);
           
           if (belowIsValid) {
             valueY = belowValueY;
-            percentY = belowPercentY;
           } else {
             // Neither position is perfect - use the one further from X-axis
-            const distanceAbove = Math.min(Math.abs(proposedValueY - zeroPixelY), Math.abs(proposedPercentY - zeroPixelY));
-            const distanceBelow = Math.min(Math.abs(belowValueY - zeroPixelY), Math.abs(belowPercentY - zeroPixelY));
+            const distanceAbove = Math.abs(proposedValueY - zeroPixelY);
+            const distanceBelow = Math.abs(belowValueY - zeroPixelY);
             
             if (distanceAbove > distanceBelow) {
               // Above is safer
               valueY = Math.max(minYForText, proposedValueY);
-              percentY = Math.max(minYForText + 15, proposedPercentY);
             } else {
               // Below is safer
-              valueY = Math.min(maxYForText - 30, belowValueY);
-              percentY = Math.min(maxYForText - 15, belowPercentY);
+              valueY = Math.min(maxYForText, belowValueY);
             }
           }
         }
       } else {
         // Bar goes down - try placing text below first
         let proposedValueY = y + Math.abs(height) + 15;
-        let proposedPercentY = y + Math.abs(height) + 30;
         
-        const belowIsValid = proposedPercentY <= maxYForText && 
-                            !overlapsXAxis(proposedValueY) && 
-                            !overlapsXAxis(proposedPercentY);
+        const belowIsValid = proposedValueY <= maxYForText && 
+                            !overlapsXAxis(proposedValueY);
         
         if (belowIsValid) {
           valueY = proposedValueY;
-          percentY = proposedPercentY;
         } else {
           // Try above
-          let aboveValueY = y - 20;
-          let abovePercentY = y - 5;
+          let aboveValueY = y - 12;
           
           const aboveIsValid = aboveValueY >= minYForText && 
-                              !overlapsXAxis(aboveValueY) && 
-                              !overlapsXAxis(abovePercentY);
+                              !overlapsXAxis(aboveValueY);
           
           if (aboveIsValid) {
             valueY = aboveValueY;
-            percentY = abovePercentY;
           } else {
             // Neither position is perfect - use the one further from X-axis
-            const distanceBelow = Math.min(Math.abs(proposedValueY - zeroPixelY), Math.abs(proposedPercentY - zeroPixelY));
-            const distanceAbove = Math.min(Math.abs(aboveValueY - zeroPixelY), Math.abs(abovePercentY - zeroPixelY));
+            const distanceBelow = Math.abs(proposedValueY - zeroPixelY);
+            const distanceAbove = Math.abs(aboveValueY - zeroPixelY);
             
             if (distanceBelow > distanceAbove) {
               // Below is safer
-              valueY = Math.min(maxYForText - 30, proposedValueY);
-              percentY = Math.min(maxYForText - 15, proposedPercentY);
+              valueY = Math.min(maxYForText, proposedValueY);
             } else {
               // Above is safer
               valueY = Math.max(minYForText, aboveValueY);
-              percentY = Math.max(minYForText + 15, abovePercentY);
             }
           }
         }
@@ -347,15 +319,6 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
         >
           {displayValue}
         </text>
-        <text 
-          x={x + width / 2} 
-          y={percentY} 
-          fill={textColor} 
-          textAnchor="middle" 
-          fontSize={10}
-        >
-          ({variance > 0 ? '+' : ''}{variance.toFixed(1)}%)
-        </text>
       </g>
     );
   };
@@ -366,7 +329,8 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
         <div>
           <h3 className="text-lg font-semibold text-foreground">P&L Waterfall - Build Down</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Revenue to Net Income breakdown
+            Revenue to Net Income breakdown<br/>
+            <span className="text-xs">SAR</span>
           </p>
         </div>
       </div>

@@ -13,7 +13,8 @@ import { CashTrendChart } from "@/components/dashboard/CashTrendChart";
 import { RunwayScenarios } from "@/components/dashboard/RunwayScenarios";
 import { Statements } from "@/pages/Statements";
 import { PageType } from "@/types/dashboard";
-import { kpiData, trendData, buPerformance, cashFlowData, financialRatiosData, buMarginComparisonData, costStructureData } from "@/data/mockData";
+import { trendData, buPerformance, cashFlowData, financialRatiosData, buMarginComparisonData, costStructureData } from "@/data/mockData";
+import { getMonthlyPLData, calculateGM, calculateEBITDA } from "@/data/financialData";
 import { BUMarginComparison } from "@/components/dashboard/BUMarginComparison";
 import { CostStructureChart } from "@/components/dashboard/CostStructureChart";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -55,46 +56,56 @@ const Index = () => {
     { value: "Advisory", label: "Advisory" },
   ];
 
-  // Filter/aggregate data based on selected BU
+  // Filter/aggregate data based on selected BU using new financialData system
   const getFilteredKPIData = () => {
-    if (selectedBU === "All Company") {
-      return kpiData;
-    }
+    const plData = getMonthlyPLData(selectedBU === "All Company" ? undefined : selectedBU);
     
-    const bu = buPerformance.find(b => b.name === selectedBU);
-    if (!bu) return kpiData;
+    // Get last month's data (Nov)
+    const latestMonth = plData[plData.length - 1];
+    
+    const revActual = latestMonth.revenues.actual;
+    const revBudget = latestMonth.revenues.budget;
+    const cogsActual = latestMonth.cogs.actual;
+    const cogsBudget = latestMonth.cogs.budget;
+    const opexActual = latestMonth.opex.actual;
+    const opexBudget = latestMonth.opex.budget;
+    
+    const gmActual = calculateGM(revActual, cogsActual);
+    const gmBudget = calculateGM(revBudget, cogsBudget);
+    const ebitdaActual = calculateEBITDA(revActual, cogsActual, opexActual);
+    const ebitdaBudget = calculateEBITDA(revBudget, cogsBudget, opexBudget);
 
     return [
       {
         label: "Revenue",
-        actual: bu.revenue.actual,
-        budget: bu.revenue.budget,
-        variance: bu.revenue.actual - bu.revenue.budget,
-        variancePercent: ((bu.revenue.actual - bu.revenue.budget) / bu.revenue.budget) * 100,
+        actual: revActual,
+        budget: revBudget,
+        variance: revActual - revBudget,
+        variancePercent: ((revActual - revBudget) / revBudget) * 100,
         format: "currency" as const,
       },
       {
         label: "Gross Margin",
-        actual: bu.grossMargin.actual,
-        budget: bu.grossMargin.budget,
-        variance: bu.grossMargin.actual - bu.grossMargin.budget,
-        variancePercent: ((bu.grossMargin.actual - bu.grossMargin.budget) / bu.grossMargin.budget) * 100,
+        actual: gmActual,
+        budget: gmBudget,
+        variance: gmActual - gmBudget,
+        variancePercent: ((gmActual - gmBudget) / gmBudget) * 100,
         format: "currency" as const,
       },
       {
         label: "OpEx",
-        actual: bu.opex.actual,
-        budget: bu.opex.budget,
-        variance: bu.opex.actual - bu.opex.budget,
-        variancePercent: ((bu.opex.actual - bu.opex.budget) / bu.opex.budget) * 100,
+        actual: Math.abs(opexActual),
+        budget: Math.abs(opexBudget),
+        variance: opexActual - opexBudget,
+        variancePercent: ((opexActual - opexBudget) / opexBudget) * 100,
         format: "currency" as const,
       },
       {
         label: "EBITDA",
-        actual: bu.ebitda.actual,
-        budget: bu.ebitda.budget,
-        variance: bu.ebitda.actual - bu.ebitda.budget,
-        variancePercent: ((bu.ebitda.actual - bu.ebitda.budget) / bu.ebitda.budget) * 100,
+        actual: ebitdaActual,
+        budget: ebitdaBudget,
+        variance: ebitdaActual - ebitdaBudget,
+        variancePercent: ((ebitdaActual - ebitdaBudget) / ebitdaBudget) * 100,
         format: "currency" as const,
       },
     ];

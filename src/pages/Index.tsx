@@ -120,6 +120,10 @@ const Index = () => {
     // Filter data for selected months
     const filteredData = plData.filter(m => monthsToInclude.includes(m.month));
     
+    // Debug: Log what data we're aggregating
+    console.log('Index.tsx - Aggregating data for months:', monthsToInclude);
+    console.log('Index.tsx - Filtered PL data:', filteredData);
+    
     // Sum up the values
     let revActual = 0, revBudget = 0, revPY = 0;
     let cogsActual = 0, cogsBudget = 0, cogsPY = 0;
@@ -135,6 +139,15 @@ const Index = () => {
       opexActual += month.opex.actual;
       opexBudget += month.opex.budget;
       opexPY += month.opex.previousYear;
+    });
+    
+    // Debug: Log aggregated values
+    console.log('Index.tsx - Aggregated Actual values:', {
+      revenue: revActual,
+      cogs: cogsActual,
+      opex: opexActual,
+      grossMargin: revActual + cogsActual,
+      ebitda: revActual + cogsActual + opexActual
     });
     
     // Determine comparison values based on scenario

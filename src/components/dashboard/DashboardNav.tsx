@@ -16,7 +16,7 @@ export const DashboardNav = ({
     path: "/overview"
   }, {
     id: "performance" as PageType,
-    label: "BU Performance",
+    label: "Performance",
     icon: TrendingUp,
     path: "/performance"
   }, {

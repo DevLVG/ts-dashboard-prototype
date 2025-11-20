@@ -33,42 +33,42 @@ export const KPICard = ({
   const getVarianceColor = (variance: number, label: string) => {
     // OpEx: under budget is good (inverted logic)
     if (label === "OpEx") {
-      if (variance <= 0) return "text-[#22d3ee]"; // Under/on budget = good
-      if (variance <= 5) return "text-[#ffc107]"; // Slightly over
-      return "text-[#dc3545]"; // Significantly over
+      if (variance <= 0) return "text-success"; // Under/on budget = good
+      if (variance <= 5) return "text-warning"; // Slightly over
+      return "text-destructive"; // Significantly over
     }
 
     // All metrics: percentage variance logic
-    if (variance >= 0) return "text-[#22d3ee]"; // Above budget
-    if (variance >= -5) return "text-[#ffc107]"; // Moderately under
-    return "text-[#dc3545]"; // Under budget
+    if (variance >= 0) return "text-success"; // Above budget
+    if (variance >= -5) return "text-warning"; // Moderately under
+    return "text-destructive"; // Under budget
   };
   const getStatusColor = (variance: number, label: string) => {
     // OpEx: under budget is good (inverted logic)
     if (label === "OpEx") {
-      if (variance <= 0) return "bg-[#22d3ee]/10 border-[#22d3ee]/30"; // Under/on budget = good
-      if (variance <= 5) return "bg-[#ffc107]/15 border-[#ffc107]/40"; // Slightly over
-      return "bg-[#dc3545]/10 border-[#dc3545]/30"; // Significantly over
+      if (variance <= 0) return "bg-success/10 border-success/30"; // Under/on budget = good
+      if (variance <= 5) return "bg-warning/15 border-warning/40"; // Slightly over
+      return "bg-destructive/10 border-destructive/30"; // Significantly over
     }
 
     // All metrics: percentage variance logic
-    if (variance >= 0) return "bg-[#22d3ee]/10 border-[#22d3ee]/30"; // Above budget
-    if (variance >= -5) return "bg-[#ffc107]/15 border-[#ffc107]/40"; // Moderately under
-    return "bg-[#dc3545]/10 border-[#dc3545]/30"; // Under budget
+    if (variance >= 0) return "bg-success/10 border-success/30"; // Above budget
+    if (variance >= -5) return "bg-warning/15 border-warning/40"; // Moderately under
+    return "bg-destructive/10 border-destructive/30"; // Under budget
   };
 
   const getBarColor = (variance: number, label: string) => {
     // OpEx: under budget is good (inverted logic)
     if (label === "OpEx") {
-      if (variance <= 0) return "bg-[#22d3ee]"; // Under/on budget = good
-      if (variance <= 5) return "bg-[#ffc107]"; // Slightly over
-      return "bg-[#dc3545]"; // Significantly over
+      if (variance <= 0) return "bg-success"; // Under/on budget = good
+      if (variance <= 5) return "bg-warning"; // Slightly over
+      return "bg-destructive"; // Significantly over
     }
 
     // All metrics: percentage variance logic
-    if (variance >= 0) return "bg-[#22d3ee]"; // Above budget
-    if (variance >= -5) return "bg-[#ffc107]"; // Moderately under
-    return "bg-[#dc3545]"; // Under budget
+    if (variance >= 0) return "bg-success"; // Above budget
+    if (variance >= -5) return "bg-warning"; // Moderately under
+    return "bg-destructive"; // Under budget
   };
 
   // Calculate bar heights for mini chart
@@ -86,7 +86,7 @@ export const KPICard = ({
           <p className="text-4xl md:text-3xl font-heading tracking-tight transition-transform group-hover:scale-105">
             {formatValue(metric.actual, metric.format)}
           </p>
-          {metric.label === "Runway" && metric.actual < 6 && <TrendingDown className="h-5 w-5 md:h-4 md:w-4 text-[#ffc107]" />}
+          {metric.label === "Runway" && metric.actual < 6 && <TrendingDown className="h-5 w-5 md:h-4 md:w-4 text-warning" />}
         </div>
         {metric.label === "Cash Balance" ? <div className="flex items-center gap-2">
             <span className="text-base md:text-sm text-muted-foreground">--</span>

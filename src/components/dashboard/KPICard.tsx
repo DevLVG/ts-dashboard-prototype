@@ -55,6 +55,20 @@ export const KPICard = ({
     return "bg-[#dc3545]/10 border-[#dc3545]/30"; // Bad
   };
 
+  const getBarColor = (variance: number, label: string) => {
+    // OpEx: under budget is good (inverted logic)
+    if (label === "OpEx") {
+      if (variance <= 0) return "bg-[#22d3ee]"; // Under/on budget = good
+      if (variance <= 5) return "bg-[#ffc107]"; // Slightly over
+      return "bg-[#dc3545]"; // Significantly over
+    }
+
+    // All metrics: percentage variance logic
+    if (variance >= -5) return "bg-[#22d3ee]"; // Good
+    if (variance >= -10) return "bg-[#ffc107]"; // Borderline
+    return "bg-[#dc3545]"; // Bad
+  };
+
   // Calculate bar heights for mini chart
   const maxValue = Math.max(metric.actual, metric.budget);
   const actualHeight = metric.actual / maxValue * 100;
@@ -92,7 +106,7 @@ export const KPICard = ({
                     <div className="w-full bg-muted rounded-t relative overflow-hidden" style={{
                 height: '60px'
               }}>
-                      <div className="absolute bottom-0 w-full bg-primary transition-all duration-500 rounded-t" style={{
+                      <div className={`absolute bottom-0 w-full transition-all duration-500 rounded-t ${getBarColor(metric.variancePercent, metric.label)}`} style={{
                   height: `${actualHeight}%`
                 }} />
                     </div>
@@ -106,12 +120,11 @@ export const KPICard = ({
                   height: `${budgetHeight}%`
                 }} />
                     </div>
-                    <span className="text-xs text-muted-foreground font-semibold">IS</span>
+                    <span className="text-xs text-muted-foreground font-semibold">Budget</span>
                   </div>
                 </div>
               </div>}
           </>}
       </div>
-      <TrendingUp className="absolute bottom-3 right-3 h-4 w-4 text-muted-foreground/50 transition-opacity group-hover:opacity-100" />
     </Card>;
 };

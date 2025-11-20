@@ -9,19 +9,21 @@ import {
   opexTrendData, 
   ebitdaTrendData,
   quarterlyTrendData,
-  yearlyTrendData
+  yearlyTrendData,
+  buYearlyTrendData
 } from "@/data/mockData";
 
 interface RevenueTrendChartProps {
   scenario?: string;
+  selectedBU?: string;
 }
 
 type MetricType = "revenue" | "grossMargin" | "opex" | "ebitda";
 type PeriodType = "6months" | "quarterly" | "yearly";
 
-export const RevenueTrendChart = ({ scenario = "base" }: RevenueTrendChartProps) => {
+export const RevenueTrendChart = ({ scenario = "base", selectedBU = "All Company" }: RevenueTrendChartProps) => {
   const [selectedMetric, setSelectedMetric] = useState<MetricType>("revenue");
-  const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>("6months");
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>("yearly");
 
   const formatCurrency = (value: number) => {
     return `${(value / 1000).toFixed(0)}K`;
@@ -31,6 +33,14 @@ export const RevenueTrendChart = ({ scenario = "base" }: RevenueTrendChartProps)
 
   // Get data based on selected metric and period
   const getData = (): TrendData[] => {
+    // For BU-specific view with yearly period, return BU-specific data
+    if (selectedBU !== "All Company" && selectedPeriod === "yearly") {
+      const buData = buYearlyTrendData[selectedBU as keyof typeof buYearlyTrendData];
+      if (buData) {
+        return buData[selectedMetric];
+      }
+    }
+    
     if (selectedPeriod === "quarterly") {
       return quarterlyTrendData[selectedMetric];
     } else if (selectedPeriod === "yearly") {
@@ -61,7 +71,8 @@ export const RevenueTrendChart = ({ scenario = "base" }: RevenueTrendChartProps)
       ebitda: "EBITDA",
     };
 
-    return `${metricNames[selectedMetric]} TREND`;
+    const buLabel = selectedBU !== "All Company" ? ` - ${selectedBU}` : "";
+    return `${metricNames[selectedMetric]} TREND${buLabel}`;
   };
 
   // Determine if we should invert colors (for OpEx)

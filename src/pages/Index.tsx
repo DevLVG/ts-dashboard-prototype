@@ -168,10 +168,10 @@ const Index = () => {
           />
         ))}
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <RevenueTrendChart scenario={selectedScenario} />
+      <RevenueTrendChart scenario={selectedScenario} selectedBU={selectedBU} />
+      {selectedBU === "All Company" && (
         <BUPerformanceChart data={filteredBUPerformance} onClick={() => setCurrentPage("performance")} />
-      </div>
+      )}
     </div>
   );
 

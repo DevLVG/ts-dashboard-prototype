@@ -56,7 +56,7 @@ export const RevenueTrendChart = ({ scenario = "base" }: RevenueTrendChartProps)
   const getTitle = () => {
     const metricNames = {
       revenue: "REVENUE",
-      grossMargin: "GROSS MARGIN",
+      grossMargin: "GM",
       opex: "OPEX",
       ebitda: "EBITDA",
     };

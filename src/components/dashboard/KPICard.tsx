@@ -105,16 +105,18 @@ export const KPICard = ({
             {metric.label !== "Runway" && <div className="pt-2 mt-2 border-t border-border/50">
                 <div className="gap-3 h-20 items-end justify-center flex flex-row">
                   <div className="flex flex-col items-center gap-1.5 flex-1 max-w-[80px]">
-                    <div className="mini-bar-container">
-                      <div className={`mini-bar-actual ${getBarColor(metric.variancePercent, metric.label)}`} style={{
+                    <div className="mini-bar-container relative">
+                      {metric.actual < 0 && <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] text-destructive font-bold">−</span>}
+                      <div className={`mini-bar-actual ${getBarColor(metric.variancePercent, metric.label)} ${metric.actual < 0 ? 'opacity-70' : ''}`} style={{
                   height: `${actualHeight}%`
                 }} />
                     </div>
                     <span className="text-xs text-muted-foreground font-semibold">Actual</span>
                   </div>
                   <div className="flex flex-col items-center gap-1.5 flex-1 max-w-[80px]">
-                    <div className="mini-bar-container">
-                      <div className="mini-bar-budget" style={{
+                    <div className="mini-bar-container relative">
+                      {metric.budget < 0 && <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground font-bold">−</span>}
+                      <div className={`mini-bar-budget ${metric.budget < 0 ? 'opacity-70' : ''}`} style={{
                   height: `${budgetHeight}%`
                 }} />
                     </div>

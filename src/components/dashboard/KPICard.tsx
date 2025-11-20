@@ -105,50 +105,28 @@ export const KPICard = ({
             
             {/* Mini Bar Chart - Below content */}
             {metric.label !== "Runway" && <div className="pt-2 mt-2 border-t border-border/50">
-                <div className={`gap-3 items-center justify-center flex flex-row ${hasNegativeValues ? 'h-24' : 'h-20'}`}>
+                <div className={`gap-3 flex flex-row justify-center ${hasNegativeValues ? 'h-28' : 'h-20 items-end'}`}>
                   <div className="flex flex-col items-center gap-1.5 flex-1 max-w-[80px]">
-                    <div className={`w-full flex flex-col ${hasNegativeValues ? 'h-20' : 'h-16'} justify-center items-center`}>
-                      {metric.actual >= 0 ? (
-                        <div className="w-full flex flex-col justify-end items-center" style={{ height: hasNegativeValues ? '50%' : '100%' }}>
-                          <div className={`mini-bar-actual ${getBarColor(metric.variancePercent, metric.label)}`} style={{
-                            height: `${actualHeight}%`,
-                            width: '100%'
-                          }} />
-                        </div>
-                      ) : (
-                        <div className="w-full flex flex-col justify-start items-center" style={{ height: hasNegativeValues ? '50%' : '100%' }}>
-                          <div className={`mini-bar-actual ${getBarColor(metric.variancePercent, metric.label)} opacity-70`} style={{
-                            height: `${actualHeight}%`,
-                            width: '100%'
-                          }} />
-                        </div>
-                      )}
-                      {hasNegativeValues && metric.actual < 0 && (
-                        <div className="h-[1px] w-full bg-border absolute" style={{ top: '50%' }} />
-                      )}
+                    <div className={`relative w-full ${hasNegativeValues ? 'h-20' : 'h-full'} flex flex-col ${metric.actual >= 0 ? 'justify-end' : 'justify-start'}`}>
+                      {hasNegativeValues && <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-border" />}
+                      <div className={`w-full ${hasNegativeValues ? (metric.actual >= 0 ? 'mb-auto' : 'mt-auto') : ''}`} style={{ height: hasNegativeValues ? '50%' : '100%' }}>
+                        <div className={`mini-bar-actual ${getBarColor(metric.variancePercent, metric.label)} ${metric.actual < 0 ? 'opacity-70' : ''}`} style={{
+                          height: `${actualHeight}%`,
+                          width: '100%'
+                        }} />
+                      </div>
                     </div>
                     <span className="text-xs text-muted-foreground font-semibold">Actual</span>
                   </div>
                   <div className="flex flex-col items-center gap-1.5 flex-1 max-w-[80px]">
-                    <div className={`w-full flex flex-col ${hasNegativeValues ? 'h-20' : 'h-16'} justify-center items-center`}>
-                      {metric.budget >= 0 ? (
-                        <div className="w-full flex flex-col justify-end items-center" style={{ height: hasNegativeValues ? '50%' : '100%' }}>
-                          <div className="mini-bar-budget" style={{
-                            height: `${budgetHeight}%`,
-                            width: '100%'
-                          }} />
-                        </div>
-                      ) : (
-                        <div className="w-full flex flex-col justify-start items-center" style={{ height: hasNegativeValues ? '50%' : '100%' }}>
-                          <div className="mini-bar-budget opacity-70" style={{
-                            height: `${budgetHeight}%`,
-                            width: '100%'
-                          }} />
-                        </div>
-                      )}
-                      {hasNegativeValues && metric.budget < 0 && (
-                        <div className="h-[1px] w-full bg-border absolute" style={{ top: '50%' }} />
-                      )}
+                    <div className={`relative w-full ${hasNegativeValues ? 'h-20' : 'h-full'} flex flex-col ${metric.budget >= 0 ? 'justify-end' : 'justify-start'}`}>
+                      {hasNegativeValues && <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-border" />}
+                      <div className={`w-full ${hasNegativeValues ? (metric.budget >= 0 ? 'mb-auto' : 'mt-auto') : ''}`} style={{ height: hasNegativeValues ? '50%' : '100%' }}>
+                        <div className={`mini-bar-budget ${metric.budget < 0 ? 'opacity-70' : ''}`} style={{
+                          height: `${budgetHeight}%`,
+                          width: '100%'
+                        }} />
+                      </div>
                     </div>
                     <span className="text-xs text-muted-foreground font-semibold">{comparisonLabel}</span>
                   </div>

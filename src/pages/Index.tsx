@@ -56,56 +56,129 @@ const Index = () => {
     { value: "Advisory", label: "Advisory" },
   ];
 
+  const scenarioOptions = [
+    { value: "base", label: "Actual vs Budget Base" },
+    { value: "worst", label: "Actual vs Budget Worst" },
+    { value: "best", label: "Actual vs Budget Best" },
+    { value: "py", label: "Actual vs PY" },
+  ];
+
   // Filter/aggregate data based on selected BU using new financialData system
   const getFilteredKPIData = () => {
     const plData = getMonthlyPLData(selectedBU === "All Company" ? undefined : selectedBU);
     
-    // Get last month's data (Nov)
-    const latestMonth = plData[plData.length - 1];
+    // Determine which months to include based on selectedMonth
+    let monthsToInclude: string[] = [];
+    const allMonths = ["Dec '24", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov"];
     
-    const revActual = latestMonth.revenues.actual;
-    const revBudget = latestMonth.revenues.budget;
-    const cogsActual = latestMonth.cogs.actual;
-    const cogsBudget = latestMonth.cogs.budget;
-    const opexActual = latestMonth.opex.actual;
-    const opexBudget = latestMonth.opex.budget;
+    if (selectedMonth === "MTD") {
+      // Month to Date - use only the latest month
+      monthsToInclude = [allMonths[allMonths.length - 1]];
+    } else if (selectedMonth === "QTD") {
+      // Quarter to Date - last 3 months
+      monthsToInclude = allMonths.slice(-3);
+    } else if (selectedMonth === "YTD") {
+      // Year to Date - all months
+      monthsToInclude = allMonths;
+    } else {
+      // Specific month selected
+      const monthMap: Record<string, string> = {
+        "December": "Dec '24",
+        "January": "Jan",
+        "February": "Feb",
+        "March": "Mar",
+        "April": "Apr",
+        "May": "May",
+        "June": "Jun",
+        "July": "Jul",
+        "August": "Aug",
+        "September": "Sep",
+        "October": "Oct",
+        "November": "Nov",
+      };
+      monthsToInclude = [monthMap[selectedMonth] || "Nov"];
+    }
+    
+    // Filter data for selected months
+    const filteredData = plData.filter(m => monthsToInclude.includes(m.month));
+    
+    // Sum up the values
+    let revActual = 0, revBudget = 0, revPY = 0;
+    let cogsActual = 0, cogsBudget = 0, cogsPY = 0;
+    let opexActual = 0, opexBudget = 0, opexPY = 0;
+    
+    filteredData.forEach(month => {
+      revActual += month.revenues.actual;
+      revBudget += month.revenues.budget;
+      revPY += month.revenues.previousYear;
+      cogsActual += month.cogs.actual;
+      cogsBudget += month.cogs.budget;
+      cogsPY += month.cogs.previousYear;
+      opexActual += month.opex.actual;
+      opexBudget += month.opex.budget;
+      opexPY += month.opex.previousYear;
+    });
+    
+    // Determine comparison values based on scenario
+    let revComparison = revBudget;
+    let cogsComparison = cogsBudget;
+    let opexComparison = opexBudget;
+    
+    if (selectedScenario === "worst") {
+      // Budget Worst: -20% revenue, +10% opex
+      revComparison = revBudget * 0.8;
+      cogsComparison = cogsBudget * 0.8; // proportional to revenue
+      opexComparison = opexBudget * 1.1;
+    } else if (selectedScenario === "best") {
+      // Budget Best: +15% revenue, -5% opex
+      revComparison = revBudget * 1.15;
+      cogsComparison = cogsBudget * 1.15; // proportional to revenue
+      opexComparison = opexBudget * 0.95;
+    } else if (selectedScenario === "py") {
+      // Compare against Previous Year
+      revComparison = revPY;
+      cogsComparison = cogsPY;
+      opexComparison = opexPY;
+    }
     
     const gmActual = calculateGM(revActual, cogsActual);
-    const gmBudget = calculateGM(revBudget, cogsBudget);
+    const gmComparison = calculateGM(revComparison, cogsComparison);
     const ebitdaActual = calculateEBITDA(revActual, cogsActual, opexActual);
-    const ebitdaBudget = calculateEBITDA(revBudget, cogsBudget, opexBudget);
+    const ebitdaComparison = calculateEBITDA(revComparison, cogsComparison, opexComparison);
 
     return [
       {
         label: "Revenue",
         actual: revActual,
-        budget: revBudget,
-        variance: revActual - revBudget,
-        variancePercent: ((revActual - revBudget) / revBudget) * 100,
+        budget: revComparison,
+        variance: revActual - revComparison,
+        variancePercent: revComparison !== 0 ? ((revActual - revComparison) / Math.abs(revComparison)) * 100 : 0,
         format: "currency" as const,
       },
       {
         label: "Gross Margin",
         actual: gmActual,
-        budget: gmBudget,
-        variance: gmActual - gmBudget,
-        variancePercent: ((gmActual - gmBudget) / gmBudget) * 100,
+        budget: gmComparison,
+        variance: gmActual - gmComparison,
+        variancePercent: gmComparison !== 0 ? ((gmActual - gmComparison) / Math.abs(gmComparison)) * 100 : 0,
         format: "currency" as const,
       },
       {
         label: "OpEx",
         actual: Math.abs(opexActual),
-        budget: Math.abs(opexBudget),
-        variance: opexActual - opexBudget,
-        variancePercent: ((opexActual - opexBudget) / opexBudget) * 100,
+        budget: Math.abs(opexComparison),
+        variance: opexActual - opexComparison,
+        variancePercent: opexComparison !== 0 ? ((opexActual - opexComparison) / Math.abs(opexComparison)) * 100 : 0,
         format: "currency" as const,
       },
       {
         label: "EBITDA",
         actual: ebitdaActual,
-        budget: ebitdaBudget,
-        variance: ebitdaActual - ebitdaBudget,
-        variancePercent: ((ebitdaActual - ebitdaBudget) / ebitdaBudget) * 100,
+        budget: ebitdaComparison,
+        variance: ebitdaActual - ebitdaComparison,
+        variancePercent: ebitdaComparison !== 0 
+          ? ((ebitdaActual - ebitdaComparison) / Math.abs(ebitdaComparison)) * 100
+          : 0,
         format: "currency" as const,
       },
     ];
@@ -140,10 +213,11 @@ const Index = () => {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="base">Actual vs Budget Base</SelectItem>
-          <SelectItem value="best">Actual vs Budget Best</SelectItem>
-          <SelectItem value="worst">Actual vs Budget Worst</SelectItem>
-          <SelectItem value="previous-year">Actual vs Previous Year</SelectItem>
+          {scenarioOptions.map(option => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
       <Select value={selectedBU} onValueChange={setSelectedBU}>

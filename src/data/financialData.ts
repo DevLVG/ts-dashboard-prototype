@@ -225,8 +225,22 @@ export const getMonthlyOpex = (scenario: string) => {
   
   grouped.forEach((records, monthKey) => {
     const total = records.reduce((sum, o) => sum + o.amount, 0);
+    const monthLabel = getMonthLabel(records[0].date);
+    
+    // Debug: Log Nov 2025 OpEx after grouping
+    if (scenario === 'Actual' && monthKey === '2025-11') {
+      console.log('getMonthlyOpex - Nov 2025 after groupByMonth:', JSON.stringify({
+        monthKey,
+        monthLabel,
+        recordCount: records.length,
+        total: total,
+        firstDate: records[0].date,
+        lastDate: records[records.length - 1].date
+      }, null, 2));
+    }
+    
     result.push({
-      month: getMonthLabel(records[0].date),
+      month: monthLabel,
       amount: total
     });
   });

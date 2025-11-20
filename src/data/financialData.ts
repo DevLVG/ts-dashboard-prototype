@@ -303,13 +303,19 @@ export const getMonthlyPLData = (bu?: string): MonthlyPLData[] => {
     };
   });
   
-  // Debug log the final PY data
-  console.log('Monthly PL Data (PY values):', result.map(m => ({
-    month: m.month,
-    revPY: m.revenues.previousYear,
-    cogsPY: m.cogs.previousYear,
-    opexPY: m.opex.previousYear
-  })));
+  // Debug log the final Actual data for Nov 2025
+  const novData = result.find(m => m.month === 'Nov');
+  if (novData) {
+    console.log('getMonthlyPLData - Nov 2025 returned data:', JSON.stringify({
+      month: novData.month,
+      revenue_actual: novData.revenues.actual,
+      revenue_budget: novData.revenues.budget,
+      revenue_py: novData.revenues.previousYear,
+      cogs_actual: novData.cogs.actual,
+      opex_actual: novData.opex.actual,
+      bu: bu || 'All Company'
+    }, null, 2));
+  }
   
   return result;
 };

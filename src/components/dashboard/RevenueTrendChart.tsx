@@ -125,41 +125,24 @@ export const RevenueTrendChart = ({ scenario = "base", selectedBU = "All Company
       const delta = actual - budget;
 
       return (
-        <div
-          style={{
-            backgroundColor: "hsl(var(--popover))",
-            border: "2px solid hsl(var(--gold))",
-            borderRadius: "var(--radius)",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-            padding: "8px 12px",
-          }}
-        >
-          <p
-            style={{
-              color: "hsl(var(--popover-foreground))",
-              fontWeight: 700,
-              fontSize: "13px",
-              marginBottom: "6px",
-            }}
-          >
-            {label}
-          </p>
-          <div style={{ fontSize: "12px", fontWeight: 600 }}>
-            <p style={{ color: "hsl(var(--gold))", marginBottom: "3px" }}>
+        <div className="chart-tooltip">
+          <p className="chart-tooltip-title">{label}</p>
+          <div className="chart-tooltip-content">
+            <p className="chart-tooltip-actual">
               Actual: {new Intl.NumberFormat("en-SA", {
                 style: "currency",
                 currency: "SAR",
                 minimumFractionDigits: 0,
               }).format(actual)}
             </p>
-            <p style={{ color: "hsl(var(--muted-foreground))", marginBottom: "3px" }}>
+            <p className="chart-tooltip-budget">
               {comparisonLabel}: {new Intl.NumberFormat("en-SA", {
                 style: "currency",
                 currency: "SAR",
                 minimumFractionDigits: 0,
               }).format(budget)}
             </p>
-            <p style={{ color: delta >= 0 ? "#22d3ee" : "#dc3545", marginBottom: "0" }}>
+            <p className={delta >= 0 ? "chart-tooltip-delta-positive" : "chart-tooltip-delta-negative"}>
               Delta: {new Intl.NumberFormat("en-SA", {
                 style: "currency",
                 currency: "SAR",
@@ -188,9 +171,9 @@ export const RevenueTrendChart = ({ scenario = "base", selectedBU = "All Company
   }));
 
   return (
-    <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300 group">
+    <Card className="dashboard-card group">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-        <h3 className="text-2xl md:text-xl font-heading tracking-wide transition-colors group-hover:text-gold">
+        <h3 className="dashboard-card-title">
           {getTitle()}
         </h3>
         <div className="flex gap-3">
@@ -247,13 +230,7 @@ export const RevenueTrendChart = ({ scenario = "base", selectedBU = "All Company
             tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 14 }}
           />
           <Tooltip content={<CustomTooltip />} />
-          <Legend 
-            wrapperStyle={{ 
-              paddingTop: '10px',
-              fontWeight: 600,
-              fontSize: '15px'
-            }}
-          />
+          <Legend className="chart-legend" />
           {/* Area shading between the two lines */}
           <Area
             type="monotone"

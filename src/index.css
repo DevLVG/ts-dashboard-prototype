@@ -139,3 +139,70 @@ All colors MUST be HSL.
     @apply font-heading;
   }
 }
+
+@layer components {
+  /* Tooltip styles - reusable across all charts */
+  .chart-tooltip {
+    @apply bg-popover border-2 border-gold rounded-lg shadow-lg p-3;
+  }
+  
+  .chart-tooltip-title {
+    @apply text-popover-foreground font-bold text-sm mb-2;
+  }
+  
+  .chart-tooltip-content {
+    @apply text-xs font-semibold;
+  }
+  
+  .chart-tooltip-actual {
+    @apply text-gold mb-1;
+  }
+  
+  .chart-tooltip-budget {
+    @apply text-muted-foreground mb-1;
+  }
+  
+  .chart-tooltip-delta-positive {
+    @apply text-success mb-1;
+  }
+  
+  .chart-tooltip-delta-negative {
+    @apply text-destructive mb-1;
+  }
+  
+  .chart-tooltip-hint {
+    @apply text-muted-foreground text-[11px] mt-0.5;
+  }
+  
+  /* Legend styles */
+  .chart-legend {
+    @apply pt-2.5 font-semibold text-[15px];
+  }
+  
+  /* Bar chart label styles */
+  .chart-bar-label {
+    @apply fill-white font-bold text-xs;
+  }
+  
+  /* Card hover effect - consistent across dashboard */
+  .dashboard-card {
+    @apply p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300;
+  }
+  
+  .dashboard-card-title {
+    @apply text-2xl md:text-xl font-heading tracking-wide transition-colors group-hover:text-gold;
+  }
+  
+  /* Mini bar chart styles */
+  .mini-bar-container {
+    @apply w-full bg-muted rounded-t relative overflow-hidden h-[60px];
+  }
+  
+  .mini-bar-actual {
+    @apply absolute bottom-0 w-full transition-all duration-500 rounded-t;
+  }
+  
+  .mini-bar-budget {
+    @apply absolute bottom-0 w-full bg-muted-foreground/40 transition-all duration-500 rounded-t;
+  }
+}

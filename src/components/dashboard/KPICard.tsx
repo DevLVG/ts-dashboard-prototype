@@ -62,7 +62,7 @@ export const KPICard = ({ metric, onClick, periodLabel = "MTD" }: KPICardProps) 
     >
       <div className="space-y-2">
         <p className="text-base md:text-sm text-muted-foreground font-semibold uppercase tracking-wide transition-colors group-hover:text-foreground">
-          {metric.label} {periodLabel}
+          {metric.label} {periodLabel !== "MTD" && periodLabel !== "QTD" && periodLabel !== "YTD" ? periodLabel.split(" ")[0] : periodLabel}
         </p>
         <div className="flex items-center gap-2">
           <p className="text-4xl md:text-3xl font-heading tracking-tight transition-transform group-hover:scale-105">

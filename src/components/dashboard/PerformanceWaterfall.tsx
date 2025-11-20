@@ -199,14 +199,57 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
       : 0;
     const displayValue = formatCurrency(Math.abs(actualValue));
     
-    // Calculate if there's enough space for labels inside the bar
-    const barHeight = Math.abs(height);
-    const hasSpaceInside = barHeight > 50; // Need at least 50px for two lines of text
+    // Calculate text height requirements
+    const lineHeight = 12; // fontSize for value
+    const percentLineHeight = 10; // fontSize for percentage
+    const lineSpacing = 6; // space between lines
+    const totalTextHeight = lineHeight + lineSpacing + percentLineHeight; // ~28px
     
-    // Position labels based on available space
-    const valueY = hasSpaceInside ? y + height / 2 - 8 : (height > 0 ? y - 20 : y + Math.abs(height) + 15);
-    const percentY = hasSpaceInside ? y + height / 2 + 8 : (height > 0 ? y - 5 : y + Math.abs(height) + 30);
-    const textColor = hasSpaceInside ? "hsl(0, 0%, 15%)" : "hsl(var(--foreground))";
+    // Bar must be at least 10% taller than text to fit inside
+    const barHeight = Math.abs(height);
+    const minBarHeightForInside = totalTextHeight * 1.1; // 30.8px
+    const hasSpaceInside = barHeight >= minBarHeightForInside;
+    
+    // Determine position based on bar direction and space
+    let valueY: number;
+    let percentY: number;
+    let textColor: string;
+    
+    if (hasSpaceInside) {
+      // Place inside the bar
+      valueY = y + height / 2 - 8;
+      percentY = y + height / 2 + 8;
+      textColor = "hsl(0, 0%, 15%)";
+    } else {
+      // Place outside the bar
+      const isPositiveBar = height > 0;
+      const chartTopMargin = 20; // From chart margin config
+      const chartBottomY = 400 - 60; // Height - bottom margin
+      
+      if (isPositiveBar) {
+        // Bar goes up - place text above
+        valueY = y - 20;
+        percentY = y - 5;
+        
+        // Check if too close to top, if so place below instead
+        if (valueY < chartTopMargin) {
+          valueY = y + Math.abs(height) + 15;
+          percentY = y + Math.abs(height) + 30;
+        }
+      } else {
+        // Bar goes down - place text below
+        valueY = y + Math.abs(height) + 15;
+        percentY = y + Math.abs(height) + 30;
+        
+        // Check if too close to bottom, if so place above instead
+        if (percentY > chartBottomY) {
+          valueY = y - 20;
+          percentY = y - 5;
+        }
+      }
+      
+      textColor = "hsl(var(--foreground))";
+    }
     
     return (
       <g>

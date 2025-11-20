@@ -339,34 +339,47 @@ export const getPLDataForPeriod = (
   };
 };
 
-// LEGACY: Keep for compatibility with existing charts
-export const getMonthlyPLData = (bu?: string): MonthlyPLData[] => {
-  const revenuesActual = getMonthlyRevenues('Actual', bu);
-  const revenuesBudget = getMonthlyRevenues('Budget_Base', bu);
-  
-  const cogsActual = getMonthlyCogs('Actual', bu);
-  const cogsBudget = getMonthlyCogs('Budget_Base', bu);
-  
-  const opexActual = getMonthlyOpex('Actual');
-  const opexBudget = getMonthlyOpex('Budget_Base');
-  
+// IMPROVED: Get monthly P&L data with proper PY calculation
+export const getMonthlyPLData = (bu?: string, scenario: 'Budget_Base' | 'Budget_Worst' | 'Budget_Best' = 'Budget_Base'): MonthlyPLData[] => {
   const months = ["Dec '24", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov"];
   
-  const result = months.map(month => {
-    const revActual = revenuesActual.find(r => r.month === month)?.amount || 0;
-    const revBudget = revenuesBudget.find(r => r.month === month)?.amount || 0;
+  // Map month labels to actual dates (2024-12 to 2025-11)
+  const monthDates: Record<string, string> = {
+    "Dec '24": "2024-12",
+    "Jan": "2025-01",
+    "Feb": "2025-02",
+    "Mar": "2025-03",
+    "Apr": "2025-04",
+    "May": "2025-05",
+    "Jun": "2025-06",
+    "Jul": "2025-07",
+    "Aug": "2025-08",
+    "Sep": "2025-09",
+    "Oct": "2025-10",
+    "Nov": "2025-11"
+  };
+  
+  return months.map(month => {
+    const monthKey = monthDates[month];
+    const startDate = `${monthKey}-01`;
+    const endDate = `${monthKey}-${new Date(parseInt(monthKey.split('-')[0]), parseInt(monthKey.split('-')[1]), 0).getDate()}`;
     
-    const cogActual = cogsActual.find(c => c.month === month)?.amount || 0;
-    const cogBudget = cogsBudget.find(c => c.month === month)?.amount || 0;
+    // Get Actual data
+    const revActual = getRevenuesForPeriod('Actual', startDate, endDate, bu);
+    const cogActual = getCogsForPeriod('Actual', startDate, endDate, bu);
+    const opActual = getOpexForPeriod('Actual', startDate, endDate);
     
-    const opActual = opexActual.find(o => o.month === month)?.amount || 0;
-    const opBudget = opexBudget.find(o => o.month === month)?.amount || 0;
+    // Get Budget data
+    const revBudget = getRevenuesForPeriod(scenario, startDate, endDate, bu);
+    const cogBudget = getCogsForPeriod(scenario, startDate, endDate, bu);
+    const opBudget = getOpexForPeriod(scenario, startDate, endDate);
     
-    // For PY: get data from 12 months earlier using Actual scenario
-    // This is a simplified version - real implementation should use date offsets
-    const revPY = 0; // Placeholder
-    const cogPY = 0; // Placeholder
-    const opPY = 0; // Placeholder
+    // Get PY data (12 months earlier)
+    const pyStartDate = getOffsetDate(startDate, -12);
+    const pyEndDate = getOffsetDate(endDate, -12);
+    const revPY = getRevenuesForPeriod('Actual', pyStartDate, pyEndDate, bu);
+    const cogPY = getCogsForPeriod('Actual', pyStartDate, pyEndDate, bu);
+    const opPY = getOpexForPeriod('Actual', pyStartDate, pyEndDate);
     
     return {
       month,
@@ -376,19 +389,17 @@ export const getMonthlyPLData = (bu?: string): MonthlyPLData[] => {
         previousYear: revPY 
       },
       cogs: { 
-        actual: -Math.abs(cogActual), 
-        budget: -Math.abs(cogBudget), 
-        previousYear: -Math.abs(cogPY) 
+        actual: cogActual, 
+        budget: cogBudget, 
+        previousYear: cogPY 
       },
       opex: { 
-        actual: -Math.abs(opActual), 
-        budget: -Math.abs(opBudget), 
-        previousYear: -Math.abs(opPY) 
+        actual: opActual, 
+        budget: opBudget, 
+        previousYear: opPY 
       }
     };
   });
-  
-  return result;
 };
 
 // Get data for a specific BU or total company

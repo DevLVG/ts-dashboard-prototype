@@ -19,7 +19,7 @@ import { Card } from "@/components/ui/card";
 
 const Index = () => {
   const [currentPage, setCurrentPage] = useState<PageType>("overview");
-  const [selectedMonth, setSelectedMonth] = useState("November");
+  const [selectedMonth, setSelectedMonth] = useState("MTD");
   const [selectedScenario, setSelectedScenario] = useState("base");
   const [opexDrawerOpen, setOpexDrawerOpen] = useState(false);
   const [selectedOpExBreakdown, setSelectedOpExBreakdown] = useState<any>(null);

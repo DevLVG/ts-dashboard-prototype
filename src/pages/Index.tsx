@@ -185,10 +185,109 @@ const Index = () => {
   };
 
   const getFilteredBUPerformance = () => {
-    if (selectedBU === "All Company") {
-      return buPerformance;
+    // Only show BU performance when "All Company" is selected
+    if (selectedBU !== "All Company") {
+      return [];
     }
-    return buPerformance.filter(bu => bu.name === selectedBU);
+    
+    // Get data for all BUs
+    const businessUnits = ["Equestrian", "Events", "Retail", "Advisory"];
+    
+    return businessUnits.map(buName => {
+      const plData = getMonthlyPLData(buName);
+      
+      // Determine which months to include based on selectedMonth
+      let monthsToInclude: string[] = [];
+      const allMonths = ["Dec '24", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov"];
+      
+      if (selectedMonth === "MTD") {
+        monthsToInclude = [allMonths[allMonths.length - 1]];
+      } else if (selectedMonth === "QTD") {
+        monthsToInclude = allMonths.slice(-3);
+      } else if (selectedMonth === "YTD") {
+        monthsToInclude = allMonths;
+      } else {
+        const monthMap: Record<string, string> = {
+          "December": "Dec '24",
+          "January": "Jan",
+          "February": "Feb",
+          "March": "Mar",
+          "April": "Apr",
+          "May": "May",
+          "June": "Jun",
+          "July": "Jul",
+          "August": "Aug",
+          "September": "Sep",
+          "October": "Oct",
+          "November": "Nov",
+        };
+        monthsToInclude = [monthMap[selectedMonth] || "Nov"];
+      }
+      
+      // Filter and sum data
+      const filteredData = plData.filter(m => monthsToInclude.includes(m.month));
+      
+      let revActual = 0, revBudget = 0, revPY = 0;
+      let cogsActual = 0, cogsBudget = 0, cogsPY = 0;
+      let opexActual = 0, opexBudget = 0, opexPY = 0;
+      
+      filteredData.forEach(month => {
+        revActual += month.revenues.actual;
+        revBudget += month.revenues.budget;
+        revPY += month.revenues.previousYear;
+        cogsActual += month.cogs.actual;
+        cogsBudget += month.cogs.budget;
+        cogsPY += month.cogs.previousYear;
+        opexActual += month.opex.actual;
+        opexBudget += month.opex.budget;
+        opexPY += month.opex.previousYear;
+      });
+      
+      // Apply scenario adjustments
+      let revComparison = revBudget;
+      let cogsComparison = cogsBudget;
+      let opexComparison = opexBudget;
+      
+      if (selectedScenario === "worst") {
+        revComparison = revBudget * 0.8;
+        cogsComparison = cogsBudget * 0.8;
+        opexComparison = opexBudget * 1.1;
+      } else if (selectedScenario === "best") {
+        revComparison = revBudget * 1.15;
+        cogsComparison = cogsBudget * 1.15;
+        opexComparison = opexBudget * 0.95;
+      } else if (selectedScenario === "py") {
+        revComparison = revPY;
+        cogsComparison = cogsPY;
+        opexComparison = opexPY;
+      }
+      
+      const gmActual = calculateGM(revActual, cogsActual);
+      const gmComparison = calculateGM(revComparison, cogsComparison);
+      const ebitdaActual = calculateEBITDA(revActual, cogsActual, opexActual);
+      const ebitdaComparison = calculateEBITDA(revComparison, cogsComparison, opexComparison);
+      
+      return {
+        name: buName,
+        revenue: {
+          actual: revActual,
+          budget: revComparison,
+        },
+        grossMargin: {
+          actual: gmActual,
+          budget: gmComparison,
+        },
+        opex: {
+          actual: Math.abs(opexActual),
+          budget: Math.abs(opexComparison),
+        },
+        ebitda: {
+          actual: ebitdaActual,
+          budget: ebitdaComparison,
+        },
+        services: undefined, // Services data not available from new system yet
+      };
+    });
   };
 
   const filteredKPIData = getFilteredKPIData();
@@ -278,8 +377,8 @@ const Index = () => {
           if (!buData) return;
           
           let actual, budget;
-          if (service) {
-            const serviceData = buData.services?.find(s => s.name === service);
+          if (service && buData.services) {
+            const serviceData = buData.services.find(s => s.name === service);
             if (!serviceData) return;
             actual = serviceData.opex.actual;
             budget = serviceData.opex.budget;
@@ -326,8 +425,8 @@ const Index = () => {
           if (!buData) return;
           
           let revenue, gmActual, gmBudget;
-          if (service) {
-            const serviceData = buData.services?.find(s => s.name === service);
+          if (service && buData.services) {
+            const serviceData = buData.services.find(s => s.name === service);
             if (!serviceData) return;
             revenue = serviceData.revenue.actual;
             gmActual = serviceData.grossMargin.actual;

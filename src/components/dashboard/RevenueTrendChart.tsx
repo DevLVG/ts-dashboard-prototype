@@ -21,7 +21,7 @@ export const RevenueTrendChart = ({ scenario = "base", selectedBU = "All Company
     return `${(value / 1000).toFixed(0)}K`;
   };
   
-  const comparisonLabel = scenario === "previous-year" ? "Pr. Year" : "Budget";
+  const comparisonLabel = scenario === "py" ? "PY" : "Budget";
 
   // Get data based on selected metric and period using new financialData system
   const getData = (): TrendData[] => {
@@ -38,30 +38,64 @@ export const RevenueTrendChart = ({ scenario = "base", selectedBU = "All Company
     
     return dataToShow.map(monthData => {
       let actual = 0;
-      let budget = 0;
+      let comparison = 0;
       
+      // Calculate actual values
       switch (selectedMetric) {
         case "grossMargin":
           actual = calculateGM(monthData.revenues.actual, monthData.cogs.actual);
-          budget = calculateGM(monthData.revenues.budget, monthData.cogs.budget);
           break;
         case "opex":
           actual = Math.abs(monthData.opex.actual);
-          budget = Math.abs(monthData.opex.budget);
           break;
         case "ebitda":
           actual = calculateEBITDA(monthData.revenues.actual, monthData.cogs.actual, monthData.opex.actual);
-          budget = calculateEBITDA(monthData.revenues.budget, monthData.cogs.budget, monthData.opex.budget);
           break;
         default: // revenue
           actual = monthData.revenues.actual;
-          budget = monthData.revenues.budget;
+      }
+      
+      // Calculate comparison values based on scenario
+      let revComparison = monthData.revenues.budget;
+      let cogsComparison = monthData.cogs.budget;
+      let opexComparison = monthData.opex.budget;
+      
+      if (scenario === "worst") {
+        // Budget Worst: -20% revenue, +10% opex
+        revComparison = monthData.revenues.budget * 0.8;
+        cogsComparison = monthData.cogs.budget * 0.8;
+        opexComparison = monthData.opex.budget * 1.1;
+      } else if (scenario === "best") {
+        // Budget Best: +15% revenue, -5% opex
+        revComparison = monthData.revenues.budget * 1.15;
+        cogsComparison = monthData.cogs.budget * 1.15;
+        opexComparison = monthData.opex.budget * 0.95;
+      } else if (scenario === "py") {
+        // Compare against Previous Year
+        revComparison = monthData.revenues.previousYear;
+        cogsComparison = monthData.cogs.previousYear;
+        opexComparison = monthData.opex.previousYear;
+      }
+      
+      // Calculate comparison metric value
+      switch (selectedMetric) {
+        case "grossMargin":
+          comparison = calculateGM(revComparison, cogsComparison);
+          break;
+        case "opex":
+          comparison = Math.abs(opexComparison);
+          break;
+        case "ebitda":
+          comparison = calculateEBITDA(revComparison, cogsComparison, opexComparison);
+          break;
+        default: // revenue
+          comparison = revComparison;
       }
       
       return {
         month: monthData.month,
         actual,
-        budget
+        budget: comparison
       };
     });
   };

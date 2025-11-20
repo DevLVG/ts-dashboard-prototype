@@ -142,13 +142,13 @@ const Index = () => {
     });
     
     // Debug: Log aggregated values
-    console.log('Index.tsx - Aggregated Actual values:', {
+    console.log('Index.tsx - Aggregated Actual values:', JSON.stringify({
       revenue: revActual,
       cogs: cogsActual,
       opex: opexActual,
       grossMargin: revActual + cogsActual,
       ebitda: revActual + cogsActual + opexActual
-    });
+    }, null, 2));
     
     // Determine comparison values based on scenario
     let revComparison = revBudget;

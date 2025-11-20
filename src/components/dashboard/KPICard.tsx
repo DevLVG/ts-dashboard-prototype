@@ -1,14 +1,16 @@
 import { Card } from "@/components/ui/card";
 import { KPIMetric } from "@/types/dashboard";
 import { TrendingDown, TrendingUp } from "lucide-react";
-
 interface KPICardProps {
   metric: KPIMetric;
   onClick?: () => void;
   periodLabel?: string;
 }
-
-export const KPICard = ({ metric, onClick, periodLabel = "MTD" }: KPICardProps) => {
+export const KPICard = ({
+  metric,
+  onClick,
+  periodLabel = "MTD"
+}: KPICardProps) => {
   const formatValue = (value: number, format: KPIMetric["format"]) => {
     switch (format) {
       case "currency":
@@ -16,7 +18,7 @@ export const KPICard = ({ metric, onClick, periodLabel = "MTD" }: KPICardProps) 
           style: "currency",
           currency: "SAR",
           minimumFractionDigits: 0,
-          maximumFractionDigits: 0,
+          maximumFractionDigits: 0
         }).format(value);
       case "percent":
         return `${value.toFixed(1)}%`;
@@ -26,7 +28,6 @@ export const KPICard = ({ metric, onClick, periodLabel = "MTD" }: KPICardProps) 
         return value.toLocaleString();
     }
   };
-
   const getVarianceColor = (variance: number, label: string) => {
     // OpEx: under budget is good (inverted logic)
     if (label === "OpEx") {
@@ -34,13 +35,12 @@ export const KPICard = ({ metric, onClick, periodLabel = "MTD" }: KPICardProps) 
       if (variance <= 5) return "text-[#ffc107]"; // Slightly over
       return "text-[#dc3545]"; // Significantly over
     }
-    
+
     // All metrics: percentage variance logic
     if (variance >= -5) return "text-[#22d3ee]"; // Good
     if (variance >= -10) return "text-[#ffc107]"; // Borderline
     return "text-[#dc3545]"; // Bad
   };
-
   const getStatusColor = (variance: number, label: string) => {
     // OpEx: under budget is good (inverted logic)
     if (label === "OpEx") {
@@ -48,7 +48,7 @@ export const KPICard = ({ metric, onClick, periodLabel = "MTD" }: KPICardProps) 
       if (variance <= 5) return "bg-[#ffc107]/15 border-[#ffc107]/40"; // Slightly over
       return "bg-[#dc3545]/10 border-[#dc3545]/30"; // Significantly over
     }
-    
+
     // All metrics: percentage variance logic
     if (variance >= -5) return "bg-[#22d3ee]/10 border-[#22d3ee]/30"; // Good
     if (variance >= -10) return "bg-[#ffc107]/15 border-[#ffc107]/40"; // Borderline
@@ -57,14 +57,9 @@ export const KPICard = ({ metric, onClick, periodLabel = "MTD" }: KPICardProps) 
 
   // Calculate bar heights for mini chart
   const maxValue = Math.max(metric.actual, metric.budget);
-  const actualHeight = (metric.actual / maxValue) * 100;
-  const budgetHeight = (metric.budget / maxValue) * 100;
-
-  return (
-    <Card
-      className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getStatusColor(metric.variancePercent, metric.label)}`}
-      onClick={onClick}
-    >
+  const actualHeight = metric.actual / maxValue * 100;
+  const budgetHeight = metric.budget / maxValue * 100;
+  return <Card className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getStatusColor(metric.variancePercent, metric.label)}`} onClick={onClick}>
       <div className="space-y-3">
         <p className="text-base md:text-sm text-muted-foreground font-semibold uppercase tracking-wide transition-colors group-hover:text-foreground">
           {metric.label} {periodLabel !== "MTD" && periodLabel !== "QTD" && periodLabel !== "YTD" ? periodLabel.split(" ")[0] : periodLabel}
@@ -73,32 +68,15 @@ export const KPICard = ({ metric, onClick, periodLabel = "MTD" }: KPICardProps) 
           <p className="text-4xl md:text-3xl font-heading tracking-tight transition-transform group-hover:scale-105">
             {formatValue(metric.actual, metric.format)}
           </p>
-          {metric.label === "Runway" && metric.actual < 6 && (
-            <TrendingDown className="h-5 w-5 md:h-4 md:w-4 text-[#ffc107]" />
-          )}
+          {metric.label === "Runway" && metric.actual < 6 && <TrendingDown className="h-5 w-5 md:h-4 md:w-4 text-[#ffc107]" />}
         </div>
-        {metric.label === "Cash Balance" ? (
-          <div className="flex items-center gap-2">
+        {metric.label === "Cash Balance" ? <div className="flex items-center gap-2">
             <span className="text-base md:text-sm text-muted-foreground">--</span>
             <span className="text-sm md:text-xs text-muted-foreground">No budget comparison</span>
-          </div>
-        ) : (
-          <>
+          </div> : <>
             <div className={`flex items-center gap-1 ${getVarianceColor(metric.variancePercent, metric.label)}`}>
               {/* For OpEx, invert the icon logic (negative variance = under budget = good) */}
-              {metric.label === "OpEx" ? (
-                metric.variancePercent < 0 ? (
-                  <TrendingDown className="h-5 w-5 md:h-4 md:w-4" />
-                ) : (
-                  <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />
-                )
-              ) : (
-                metric.variancePercent < 0 ? (
-                  <TrendingDown className="h-5 w-5 md:h-4 md:w-4" />
-                ) : (
-                  <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />
-                )
-              )}
+              {metric.label === "OpEx" ? metric.variancePercent < 0 ? <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingUp className="h-5 w-5 md:h-4 md:w-4" /> : metric.variancePercent < 0 ? <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />}
               <span className="text-base md:text-sm font-semibold">
                 {Math.abs(metric.variancePercent).toFixed(1)}%
               </span>
@@ -108,34 +86,32 @@ export const KPICard = ({ metric, onClick, periodLabel = "MTD" }: KPICardProps) 
             </p>
             
             {/* Mini Bar Chart - Below content */}
-            {metric.label !== "Runway" && (
-              <div className="pt-2 mt-2 border-t border-border/50">
+            {metric.label !== "Runway" && <div className="pt-2 mt-2 border-t border-border/50">
                 <div className="flex items-end justify-center gap-3 h-20">
                   <div className="flex flex-col items-center gap-1.5 flex-1 max-w-[80px]">
-                    <div className="w-full bg-muted rounded-t relative overflow-hidden" style={{ height: '60px' }}>
-                      <div 
-                        className="absolute bottom-0 w-full bg-primary transition-all duration-500 rounded-t"
-                        style={{ height: `${actualHeight}%` }}
-                      />
+                    <div className="w-full bg-muted rounded-t relative overflow-hidden" style={{
+                height: '60px'
+              }}>
+                      <div className="absolute bottom-0 w-full bg-primary transition-all duration-500 rounded-t" style={{
+                  height: `${actualHeight}%`
+                }} />
                     </div>
-                    <span className="text-xs text-muted-foreground font-semibold">AS</span>
+                    <span className="text-xs text-muted-foreground font-semibold">Actual</span>
                   </div>
                   <div className="flex flex-col items-center gap-1.5 flex-1 max-w-[80px]">
-                    <div className="w-full bg-muted rounded-t relative overflow-hidden" style={{ height: '60px' }}>
-                      <div 
-                        className="absolute bottom-0 w-full bg-muted-foreground/40 transition-all duration-500 rounded-t"
-                        style={{ height: `${budgetHeight}%` }}
-                      />
+                    <div className="w-full bg-muted rounded-t relative overflow-hidden" style={{
+                height: '60px'
+              }}>
+                      <div className="absolute bottom-0 w-full bg-muted-foreground/40 transition-all duration-500 rounded-t" style={{
+                  height: `${budgetHeight}%`
+                }} />
                     </div>
                     <span className="text-xs text-muted-foreground font-semibold">IS</span>
                   </div>
                 </div>
-              </div>
-            )}
-          </>
-        )}
+              </div>}
+          </>}
       </div>
       <TrendingUp className="absolute bottom-3 right-3 h-4 w-4 text-muted-foreground/50 transition-opacity group-hover:opacity-100" />
-    </Card>
-  );
+    </Card>;
 };

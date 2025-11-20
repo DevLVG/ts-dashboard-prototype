@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine, LabelList } from "recharts";
 import { useState } from "react";
 
 interface PerformanceWaterfallProps {
@@ -15,44 +15,50 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     actual: {
       revenues: 850000,
       cogs: -440300,
-      grossMargin: 409700,
       opex: -550000,
-      ebitda: -140300,
       da: -20000,
       interest: -5000,
-      ebt: -165300,
-      taxes: -33060,
-      netIncome: -198360
+      taxes: -33060
     },
     budget: {
       revenues: 1000000,
       cogs: -500000,
-      grossMargin: 500000,
       opex: -565000,
-      ebitda: -65000,
       da: -22000,
       interest: -5500,
-      ebt: -92500,
-      taxes: -18500,
-      netIncome: -111000
+      taxes: -18500
     }
   };
 
-  const dataSource = selectedScenario === "actual" ? buildDownData.actual : buildDownData.budget;
+  const actual = buildDownData.actual;
+  const budget = buildDownData.budget;
+  const dataSource = selectedScenario === "actual" ? actual : budget;
 
   // Calculate waterfall positions
   const calculateWaterfallData = () => {
+    const revenues = dataSource.revenues;
+    const gm = revenues + dataSource.cogs;
+    const ebitda = gm + dataSource.opex;
+    const ebt = ebitda + dataSource.da + dataSource.interest;
+    const netIncome = ebt + dataSource.taxes;
+
+    const revenuesBudget = budget.revenues;
+    const gmBudget = revenuesBudget + budget.cogs;
+    const ebitdaBudget = gmBudget + budget.opex;
+    const ebtBudget = ebitdaBudget + budget.da + budget.interest;
+    const netIncomeBudget = ebtBudget + budget.taxes;
+
     const items = [
-      { label: "Revenues", value: dataSource.revenues, type: "total" },
-      { label: "COGS", value: dataSource.cogs, type: "decrease" },
-      { label: "GM", value: dataSource.revenues + dataSource.cogs, type: "subtotal" },
-      { label: "OpEx", value: dataSource.opex, type: "decrease" },
-      { label: "EBITDA", value: dataSource.revenues + dataSource.cogs + dataSource.opex, type: "subtotal" },
-      { label: "D&A", value: dataSource.da, type: "decrease" },
-      { label: "Interest", value: dataSource.interest, type: "decrease" },
-      { label: "EBT", value: dataSource.revenues + dataSource.cogs + dataSource.opex + dataSource.da + dataSource.interest, type: "subtotal" },
-      { label: "Taxes", value: dataSource.taxes, type: "decrease" },
-      { label: "Net Income", value: dataSource.revenues + dataSource.cogs + dataSource.opex + dataSource.da + dataSource.interest + dataSource.taxes, type: "total" }
+      { label: "Revenues", value: revenues, budgetValue: revenuesBudget, type: "total" },
+      { label: "COGS", value: dataSource.cogs, budgetValue: budget.cogs, type: "decrease" },
+      { label: "GM", value: gm, budgetValue: gmBudget, type: "subtotal" },
+      { label: "OpEx", value: dataSource.opex, budgetValue: budget.opex, type: "decrease" },
+      { label: "EBITDA", value: ebitda, budgetValue: ebitdaBudget, type: "subtotal" },
+      { label: "D&A", value: dataSource.da, budgetValue: budget.da, type: "decrease" },
+      { label: "Interest", value: dataSource.interest, budgetValue: budget.interest, type: "decrease" },
+      { label: "EBT", value: ebt, budgetValue: ebtBudget, type: "subtotal" },
+      { label: "Taxes", value: dataSource.taxes, budgetValue: budget.taxes, type: "decrease" },
+      { label: "Net Income", value: netIncome, budgetValue: netIncomeBudget, type: "total" }
     ];
 
     return items.map((item, index) => {
@@ -62,17 +68,20 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
           start: 0,
           end: item.value,
           value: item.value,
-          type: item.type
+          budgetValue: item.budgetValue,
+          type: item.type,
+          revenueBase: revenues
         };
       } else {
-        // For decreases, we need to show them as bars going down from the previous total
         const previousTotal = index > 0 ? items[index - 1].value : 0;
         return {
           label: item.label,
           start: Math.min(previousTotal + item.value, previousTotal),
           end: Math.max(previousTotal + item.value, previousTotal),
           value: item.value,
-          type: item.type
+          budgetValue: item.budgetValue,
+          type: item.type,
+          revenueBase: revenues
         };
       }
     });
@@ -88,17 +97,50 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     return `${(value / 1000).toFixed(0)}K`;
   };
 
-  const getBarColor = (type: string) => {
-    switch (type) {
-      case "total":
-        return "hsl(var(--chart-1))";
-      case "subtotal":
-        return "hsl(var(--chart-2))";
-      case "decrease":
-        return "hsl(var(--destructive))";
-      default:
-        return "hsl(var(--chart-3))";
+  const getBarColor = (value: number, budgetValue: number, type: string) => {
+    if (type === "decrease") {
+      // For decreases (negative values), lower is better
+      const variance = ((value - budgetValue) / budgetValue) * 100;
+      if (variance <= -5) return "hsl(142, 76%, 36%)"; // Green (better than budget)
+      if (variance >= 5) return "hsl(0, 84%, 60%)"; // Red (worse than budget)
+      return "hsl(48, 96%, 53%)"; // Yellow (near budget)
+    } else {
+      // For totals/subtotals, higher is better
+      const variance = ((value - budgetValue) / budgetValue) * 100;
+      if (variance >= 5) return "hsl(142, 76%, 36%)"; // Green (above budget)
+      if (variance <= -5) return "hsl(0, 84%, 60%)"; // Red (below budget)
+      return "hsl(48, 96%, 53%)"; // Yellow (near budget)
     }
+  };
+
+  const renderCustomLabel = (props: any) => {
+    const { x, y, width, height, value, revenueBase } = props;
+    const percentage = ((Math.abs(value) / Math.abs(revenueBase)) * 100).toFixed(1);
+    const displayValue = formatCurrency(Math.abs(value));
+    
+    return (
+      <g>
+        <text 
+          x={x + width / 2} 
+          y={y + height / 2 - 5} 
+          fill="hsl(var(--foreground))" 
+          textAnchor="middle" 
+          fontSize={12}
+          fontWeight={600}
+        >
+          {displayValue}
+        </text>
+        <text 
+          x={x + width / 2} 
+          y={y + height / 2 + 10} 
+          fill="hsl(var(--muted-foreground))" 
+          textAnchor="middle" 
+          fontSize={10}
+        >
+          ({percentage}%)
+        </text>
+      </g>
+    );
   };
 
   return (
@@ -145,8 +187,9 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
           {/* Visible bar */}
           <Bar dataKey={(entry) => entry.end - entry.start} stackId="a">
             {waterfallData.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={getBarColor(entry.type)} />
+              <Cell key={`cell-${index}`} fill={getBarColor(entry.value, entry.budgetValue, entry.type)} />
             ))}
+            <LabelList content={renderCustomLabel} />
           </Bar>
         </BarChart>
       </ResponsiveContainer>

@@ -2,7 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine, LabelList } from "recharts";
 import { useState } from "react";
-import { getMonthData, calculateGM, calculateEBITDA, calculateEBT, calculateNetIncome } from "@/data/centralizedData";
+import { getMonthData, calculateGM, calculateEBITDA } from "@/data/financialData";
 
 interface PerformanceWaterfallProps {
   selectedMonth: string;
@@ -20,18 +20,18 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     revenues: monthData.revenues.actual,
     cogs: monthData.cogs.actual,
     opex: monthData.opex.actual,
-    da: monthData.da.actual,
-    interest: monthData.interest.actual,
-    taxes: monthData.taxes.actual
+    da: monthData.da?.actual || 0,
+    interest: monthData.interest?.actual || 0,
+    taxes: monthData.taxes?.actual || 0
   };
 
   const budget = {
     revenues: monthData.revenues.budget,
     cogs: monthData.cogs.budget,
     opex: monthData.opex.budget,
-    da: monthData.da.budget,
-    interest: monthData.interest.budget,
-    taxes: monthData.taxes.budget
+    da: monthData.da?.budget || 0,
+    interest: monthData.interest?.budget || 0,
+    taxes: monthData.taxes?.budget || 0
   };
 
   const dataSource = selectedScenario === "actual" ? actual : budget;

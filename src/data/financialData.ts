@@ -205,6 +205,9 @@ export interface MonthlyPLData {
   revenues: { actual: number; budget: number; previousYear: number };
   cogs: { actual: number; budget: number; previousYear: number };
   opex: { actual: number; budget: number; previousYear: number };
+  da?: { actual: number; budget: number; previousYear: number };
+  interest?: { actual: number; budget: number; previousYear: number };
+  taxes?: { actual: number; budget: number; previousYear: number };
 }
 
 export const getMonthlyPLData = (bu?: string): MonthlyPLData[] => {

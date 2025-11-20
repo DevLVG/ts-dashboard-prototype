@@ -3,15 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { TrendData } from "@/types/dashboard";
-import { 
-  trendData, 
-  grossMarginTrendData, 
-  opexTrendData, 
-  ebitdaTrendData,
-  quarterlyTrendData,
-  yearlyTrendData,
-  buYearlyTrendData
-} from "@/data/mockData";
+import { getMonthlyPLData, calculateGM, calculateEBITDA } from "@/data/financialData";
 
 interface RevenueTrendChartProps {
   scenario?: string;
@@ -31,33 +23,47 @@ export const RevenueTrendChart = ({ scenario = "base", selectedBU = "All Company
   
   const comparisonLabel = scenario === "previous-year" ? "Pr. Year" : "Budget";
 
-  // Get data based on selected metric and period
+  // Get data based on selected metric and period using new financialData system
   const getData = (): TrendData[] => {
-    // For BU-specific view with yearly period, return BU-specific data
-    if (selectedBU !== "All Company" && selectedPeriod === "yearly") {
-      const buData = buYearlyTrendData[selectedBU as keyof typeof buYearlyTrendData];
-      if (buData) {
-        return buData[selectedMetric];
-      }
-    }
+    const plData = getMonthlyPLData(selectedBU === "All Company" ? undefined : selectedBU);
     
+    // Determine how many months to show based on period
+    let dataToShow = plData;
     if (selectedPeriod === "quarterly") {
-      return quarterlyTrendData[selectedMetric];
-    } else if (selectedPeriod === "yearly") {
-      return yearlyTrendData[selectedMetric];
-    } else {
-      // 6 months
+      dataToShow = plData.slice(-3); // Last 3 months
+    } else if (selectedPeriod === "6months") {
+      dataToShow = plData.slice(-6); // Last 6 months
+    }
+    // else yearly = all 12 months
+    
+    return dataToShow.map(monthData => {
+      let actual = 0;
+      let budget = 0;
+      
       switch (selectedMetric) {
         case "grossMargin":
-          return grossMarginTrendData;
+          actual = calculateGM(monthData.revenues.actual, monthData.cogs.actual);
+          budget = calculateGM(monthData.revenues.budget, monthData.cogs.budget);
+          break;
         case "opex":
-          return opexTrendData;
+          actual = Math.abs(monthData.opex.actual);
+          budget = Math.abs(monthData.opex.budget);
+          break;
         case "ebitda":
-          return ebitdaTrendData;
-        default:
-          return trendData;
+          actual = calculateEBITDA(monthData.revenues.actual, monthData.cogs.actual, monthData.opex.actual);
+          budget = calculateEBITDA(monthData.revenues.budget, monthData.cogs.budget, monthData.opex.budget);
+          break;
+        default: // revenue
+          actual = monthData.revenues.actual;
+          budget = monthData.revenues.budget;
       }
-    }
+      
+      return {
+        month: monthData.month,
+        actual,
+        budget
+      };
+    });
   };
 
   const data = getData();

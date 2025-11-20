@@ -17,16 +17,21 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
 
   const chartData = data.map((bu) => {
     const metricData = bu[selectedMetric];
+    const actual = metricData?.actual || 0;
+    const budget = metricData?.budget || 0;
+    const variance = budget !== 0 ? ((actual - budget) / Math.abs(budget)) * 100 : 0;
+    
     return {
       name: bu.name,
-      actual: metricData.actual,
-      budget: metricData.budget,
-      variance: ((metricData.actual - metricData.budget) / metricData.budget) * 100,
+      actual,
+      budget,
+      variance,
     };
   });
 
   // Calculate max value for dynamic domain to ensure labels fit
-  const maxValue = Math.max(...chartData.map(d => Math.max(d.actual, d.budget)));
+  const values = chartData.flatMap(d => [d.actual, d.budget]).filter(v => v > 0);
+  const maxValue = values.length > 0 ? Math.max(...values) : 1000;
   const domainMax = maxValue * 1.2; // Add 20% padding for labels
 
   const formatCurrency = (value: number) => {

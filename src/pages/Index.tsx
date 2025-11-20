@@ -20,7 +20,7 @@ import { Card } from "@/components/ui/card";
 const Index = () => {
   const [currentPage, setCurrentPage] = useState<PageType>("overview");
   const [selectedMonth, setSelectedMonth] = useState("November");
-  const [selectedScenario, setSelectedScenario] = useState("actual-vs-budget");
+  const [selectedScenario, setSelectedScenario] = useState("base");
   const [opexDrawerOpen, setOpexDrawerOpen] = useState(false);
   const [selectedOpExBreakdown, setSelectedOpExBreakdown] = useState<any>(null);
   const [gmDrawerOpen, setGmDrawerOpen] = useState(false);
@@ -63,8 +63,9 @@ const Index = () => {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="actual-vs-budget">Actual vs Budget Base</SelectItem>
-          <SelectItem value="actual-vs-optimistic">Actual vs Optimistic</SelectItem>
+          <SelectItem value="base">Actual vs Budget Base</SelectItem>
+          <SelectItem value="best">Actual vs Budget Best</SelectItem>
+          <SelectItem value="worst">Actual vs Budget Worst</SelectItem>
         </SelectContent>
       </Select>
     </div>

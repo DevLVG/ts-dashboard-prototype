@@ -200,7 +200,10 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     if (!entry) return null;
     
     const actualValue = entry.value;
-    const displayValue = formatCurrency(Math.abs(actualValue));
+    // Show negative sign for negative values, format absolute value
+    const displayValue = actualValue < 0 
+      ? `-${formatCurrency(Math.abs(actualValue))}`
+      : formatCurrency(actualValue);
     
     // Calculate text height requirements
     const lineHeight = 14; // fontSize for value

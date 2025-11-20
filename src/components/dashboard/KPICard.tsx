@@ -51,10 +51,25 @@ export const KPICard = ({
           </div> : <>
             <div className={`flex items-center gap-1 ${getVarianceTextColor(metric.variancePercent, metric.label)}`}>
               {/* For OpEx: positive variance (over budget) = bad = arrow UP, negative variance (under budget) = good = arrow DOWN */}
-              {metric.label === "OpEx" ? metric.variancePercent > 0 ? <TrendingUp className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : metric.variancePercent < 0 ? <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />}
-              <span className="text-base md:text-sm font-semibold">
-                {Math.abs(metric.variancePercent).toFixed(1)}%
-              </span>
+              {metric.variancePercent === 999999 ? (
+                // EBITDA crossed zero - show absolute variance instead of percentage
+                <span className="text-base md:text-sm font-semibold">
+                  {new Intl.NumberFormat("en-SA", {
+                    style: "currency",
+                    currency: "SAR",
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                    signDisplay: "always"
+                  }).format(metric.variance)} change
+                </span>
+              ) : (
+                <>
+                  {metric.label === "OpEx" ? metric.variancePercent > 0 ? <TrendingUp className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : metric.variancePercent < 0 ? <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />}
+                  <span className="text-base md:text-sm font-semibold">
+                    {Math.abs(metric.variancePercent).toFixed(1)}%
+                  </span>
+                </>
+              )}
             </div>
             <p className="text-sm md:text-xs text-muted-foreground">
               {comparisonLabel}: {formatValue(metric.budget, metric.format)}

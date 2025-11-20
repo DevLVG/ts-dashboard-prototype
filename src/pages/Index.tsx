@@ -26,16 +26,36 @@ const Index = () => {
   const [gmDrawerOpen, setGmDrawerOpen] = useState(false);
   const [selectedGMBreakdown, setSelectedGMBreakdown] = useState<any>(null);
 
+  const months = [
+    { value: "January", label: "January 2025" },
+    { value: "February", label: "February 2025" },
+    { value: "March", label: "March 2025" },
+    { value: "April", label: "April 2025" },
+    { value: "May", label: "May 2025" },
+    { value: "June", label: "June 2025" },
+    { value: "July", label: "July 2025" },
+    { value: "August", label: "August 2025" },
+    { value: "September", label: "September 2025" },
+    { value: "October", label: "October 2025" },
+    { value: "November", label: "November 2025" },
+    { value: "December", label: "December 2025" },
+    { value: "MTD", label: "MTD (Month to Date)" },
+    { value: "QTD", label: "QTD (Quarter to Date)" },
+    { value: "YTD", label: "YTD (Year to Date)" },
+  ];
+
   const renderFilters = () => (
     <div className="flex flex-wrap gap-4 mb-6">
       <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-        <SelectTrigger className="w-40">
+        <SelectTrigger className="w-56">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="November">November 2025</SelectItem>
-          <SelectItem value="October">October 2025</SelectItem>
-          <SelectItem value="September">September 2025</SelectItem>
+        <SelectContent className="max-h-[300px]">
+          {months.map((month) => (
+            <SelectItem key={month.value} value={month.value}>
+              {month.label}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
       <Select value={selectedScenario} onValueChange={setSelectedScenario}>

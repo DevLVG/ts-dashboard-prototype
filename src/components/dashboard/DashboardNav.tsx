@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, TrendingUp, Wallet, BarChart3 } from "lucide-react";
+import { LayoutDashboard, TrendingUp, Wallet, BarChart3, FileText } from "lucide-react";
 import { PageType } from "@/types/dashboard";
 import tsLogo from "@/assets/ts-logo.png";
 interface DashboardNavProps {
@@ -29,7 +29,7 @@ export const DashboardNav = ({
   }, {
     id: "statements" as PageType,
     label: "Statements",
-    icon: BarChart3
+    icon: FileText
   }];
   return <nav className="border-b bg-card shadow-sm backdrop-blur-sm sticky top-0 z-50 animate-fade-in">
       <div className="container mx-auto px-4">

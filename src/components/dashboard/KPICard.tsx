@@ -107,22 +107,20 @@ export const KPICard = ({
             {metric.label !== "Runway" && <div className="pt-2 mt-2 border-t border-border/50">
                 <div className="flex items-end justify-center gap-3 h-20">
                   <div className="flex flex-col items-center gap-1.5 flex-1 max-w-[80px]">
-                    <div className="w-full bg-muted rounded-t relative overflow-hidden" style={{
-                height: '60px'
-              }}>
-                      <div className={`absolute bottom-0 w-full transition-all duration-500 rounded-t ${getBarColor(metric.variancePercent, metric.label)}`} style={{
-                  height: `${actualHeight}%`
-                }} />
+                    <div className="mini-bar-container">
+                      <div 
+                        className={`mini-bar-actual ${getBarColor(metric.variancePercent, metric.label)}`}
+                        style={{ height: `${actualHeight}%` }}
+                      />
                     </div>
                     <span className="text-xs text-muted-foreground font-semibold">Actual</span>
                   </div>
                   <div className="flex flex-col items-center gap-1.5 flex-1 max-w-[80px]">
-                    <div className="w-full bg-muted rounded-t relative overflow-hidden" style={{
-                height: '60px'
-              }}>
-                      <div className="absolute bottom-0 w-full bg-muted-foreground/40 transition-all duration-500 rounded-t" style={{
-                  height: `${budgetHeight}%`
-                }} />
+                    <div className="mini-bar-container">
+                      <div 
+                        className="mini-bar-budget"
+                        style={{ height: `${budgetHeight}%` }}
+                      />
                     </div>
                     <span className="text-xs text-muted-foreground font-semibold">{comparisonLabel}</span>
                   </div>

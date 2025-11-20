@@ -362,9 +362,9 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
                   : 0;
                 
                 return (
-                  <div className="bg-popover border-2 border-gold rounded-lg shadow-lg p-4">
-                    <p className="font-bold text-popover-foreground mb-2">{data.label}</p>
-                    <div className="space-y-1 text-sm">
+                  <div className="chart-tooltip">
+                    <p className="chart-tooltip-title">{data.label}</p>
+                    <div className="chart-tooltip-content space-y-1">
                       <p className="text-popover-foreground">
                         <span className="font-semibold">Actual:</span> {formatCurrency(actualValue)}
                       </p>

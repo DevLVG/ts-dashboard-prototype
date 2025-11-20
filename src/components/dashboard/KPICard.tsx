@@ -34,7 +34,7 @@ export const KPICard = ({
 
 
   const comparisonLabel = scenario === "previous-year" ? "Pr. Year" : "Budget";
-  return <Card className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getVarianceBackgroundColor(metric.variancePercent, metric.label)}`} onClick={onClick}>
+  return <Card className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getVarianceBackgroundColor(metric.variancePercent, metric.label)}`} onClick={onClick}>
       <div className="space-y-3">
         <p className="text-base md:text-sm text-muted-foreground font-semibold uppercase tracking-wide transition-colors group-hover:text-foreground">
           {metric.label} {periodLabel !== "MTD" && periodLabel !== "QTD" && periodLabel !== "YTD" ? periodLabel.split(" ")[0] : periodLabel}
@@ -50,8 +50,8 @@ export const KPICard = ({
             <span className="text-sm md:text-xs text-muted-foreground">No budget comparison</span>
           </div> : <>
             <div className={`flex items-center gap-1 ${getVarianceTextColor(metric.variancePercent, metric.label)}`}>
-              {/* For OpEx, invert the icon logic (negative variance = under budget = good) */}
-              {metric.label === "OpEx" ? metric.variancePercent < 0 ? <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingUp className="h-5 w-5 md:h-4 md:w-4" /> : metric.variancePercent < 0 ? <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />}
+              {/* For OpEx: positive variance (over budget) = bad = arrow UP, negative variance (under budget) = good = arrow DOWN */}
+              {metric.label === "OpEx" ? metric.variancePercent > 0 ? <TrendingUp className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : metric.variancePercent < 0 ? <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />}
               <span className="text-base md:text-sm font-semibold">
                 {Math.abs(metric.variancePercent).toFixed(1)}%
               </span>

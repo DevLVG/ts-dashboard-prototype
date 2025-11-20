@@ -10,7 +10,7 @@ interface PerformanceWaterfallProps {
 }
 
 export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selectedBU }: PerformanceWaterfallProps) => {
-  // Mock data - this will be replaced with actual data based on filters
+  // Using consistent data from CEO Overview
   const buildDownData = {
     actual: {
       revenues: 850000,
@@ -34,31 +34,33 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
   const budget = buildDownData.budget;
   const dataSource = selectedScenario === "actual" ? actual : budget;
 
-  // Calculate waterfall positions
+  // Calculate waterfall positions with correct build down logic
   const calculateWaterfallData = () => {
     const revenues = dataSource.revenues;
     const gm = revenues + dataSource.cogs;
     const ebitda = gm + dataSource.opex;
-    const ebt = ebitda + dataSource.da + dataSource.interest;
+    const afterDA = ebitda + dataSource.da;
+    const ebt = afterDA + dataSource.interest;
     const netIncome = ebt + dataSource.taxes;
 
     const revenuesBudget = budget.revenues;
     const gmBudget = revenuesBudget + budget.cogs;
     const ebitdaBudget = gmBudget + budget.opex;
-    const ebtBudget = ebitdaBudget + budget.da + budget.interest;
+    const afterDABudget = ebitdaBudget + budget.da;
+    const ebtBudget = afterDABudget + budget.interest;
     const netIncomeBudget = ebtBudget + budget.taxes;
 
     const items = [
-      { label: "Revenues", value: revenues, budgetValue: revenuesBudget, type: "total" },
-      { label: "COGS", value: dataSource.cogs, budgetValue: budget.cogs, type: "decrease" },
-      { label: "GM", value: gm, budgetValue: gmBudget, type: "subtotal" },
-      { label: "OpEx", value: dataSource.opex, budgetValue: budget.opex, type: "decrease" },
-      { label: "EBITDA", value: ebitda, budgetValue: ebitdaBudget, type: "subtotal" },
-      { label: "D&A", value: dataSource.da, budgetValue: budget.da, type: "decrease" },
-      { label: "Interest", value: dataSource.interest, budgetValue: budget.interest, type: "decrease" },
-      { label: "EBT", value: ebt, budgetValue: ebtBudget, type: "subtotal" },
-      { label: "Taxes", value: dataSource.taxes, budgetValue: budget.taxes, type: "decrease" },
-      { label: "Net Income", value: netIncome, budgetValue: netIncomeBudget, type: "total" }
+      { label: "Revenues", value: revenues, budgetValue: revenuesBudget, type: "total", cumulative: revenues },
+      { label: "COGS", value: dataSource.cogs, budgetValue: budget.cogs, type: "decrease", cumulative: gm },
+      { label: "GM", value: gm, budgetValue: gmBudget, type: "subtotal", cumulative: gm },
+      { label: "OpEx", value: dataSource.opex, budgetValue: budget.opex, type: "decrease", cumulative: ebitda },
+      { label: "EBITDA", value: ebitda, budgetValue: ebitdaBudget, type: "subtotal", cumulative: ebitda },
+      { label: "D&A", value: dataSource.da, budgetValue: budget.da, type: "decrease", cumulative: afterDA },
+      { label: "Interest", value: dataSource.interest, budgetValue: budget.interest, type: "decrease", cumulative: ebt },
+      { label: "EBT", value: ebt, budgetValue: ebtBudget, type: "subtotal", cumulative: ebt },
+      { label: "Taxes", value: dataSource.taxes, budgetValue: budget.taxes, type: "decrease", cumulative: netIncome },
+      { label: "Net Income", value: netIncome, budgetValue: netIncomeBudget, type: "total", cumulative: netIncome }
     ];
 
     return items.map((item, index) => {
@@ -73,11 +75,11 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
           revenueBase: revenues
         };
       } else {
-        const previousTotal = index > 0 ? items[index - 1].value : 0;
+        const previousCumulative = index > 0 ? items[index - 1].cumulative : 0;
         return {
           label: item.label,
-          start: Math.min(previousTotal + item.value, previousTotal),
-          end: Math.max(previousTotal + item.value, previousTotal),
+          start: Math.min(item.cumulative, previousCumulative),
+          end: Math.max(item.cumulative, previousCumulative),
           value: item.value,
           budgetValue: item.budgetValue,
           type: item.type,
@@ -123,7 +125,7 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
         <text 
           x={x + width / 2} 
           y={y + height / 2 - 5} 
-          fill="hsl(var(--foreground))" 
+          fill="hsl(0, 0%, 15%)" 
           textAnchor="middle" 
           fontSize={12}
           fontWeight={600}
@@ -133,7 +135,7 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
         <text 
           x={x + width / 2} 
           y={y + height / 2 + 10} 
-          fill="hsl(var(--muted-foreground))" 
+          fill="hsl(0, 0%, 25%)" 
           textAnchor="middle" 
           fontSize={10}
         >

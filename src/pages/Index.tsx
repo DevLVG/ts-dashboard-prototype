@@ -3,6 +3,7 @@ import { DashboardNav } from "@/components/dashboard/DashboardNav";
 import { KPICard } from "@/components/dashboard/KPICard";
 import { RevenueTrendChart } from "@/components/dashboard/RevenueTrendChart";
 import { BUPerformanceChart } from "@/components/dashboard/BUPerformanceChart";
+import { PerformanceWaterfall } from "@/components/dashboard/PerformanceWaterfall";
 import { PLMatrix } from "@/components/dashboard/PLMatrix";
 import { CashFlowWaterfall } from "@/components/dashboard/CashFlowWaterfall";
 import { FinancialRatiosChart } from "@/components/dashboard/FinancialRatiosChart";
@@ -179,6 +180,11 @@ const Index = () => {
   const renderPerformance = () => (
     <div className="space-y-6 animate-fade-in">
       {renderFilters()}
+      <PerformanceWaterfall 
+        selectedMonth={selectedMonth}
+        selectedScenario={selectedScenario}
+        selectedBU={selectedBU}
+      />
       <PLMatrix 
         data={filteredBUPerformance} 
         onOpExClick={(bu, service) => {
@@ -247,35 +253,33 @@ const Index = () => {
             gmBudget = buData.grossMargin.budget;
           }
           
-          // Calculate direct costs (Revenue - GM)
           const cogsActual = revenue - gmActual;
           const cogsBudget = revenue - gmBudget;
           
-          // Generate BU-specific breakdown data
+          // Create BU-specific COGS breakdown
           let personnelItems: { label: string; amount: number }[] = [];
           let operationsItems: { label: string; amount: number }[] = [];
           let cogsItems: { label: string; amount: number }[] = [];
           
-          switch(bu) {
+          switch (bu) {
             case "Equestrian":
               personnelItems = [
-                { label: "Instructor Salaries", amount: Math.round(cogsActual * 0.5) },
-                { label: "Stable Staff", amount: Math.round(cogsActual * 0.12) }
+                { label: "Coaches & Instructors", amount: Math.round(cogsActual * 0.35) },
+                { label: "Stable Staff", amount: Math.round(cogsActual * 0.20) }
               ];
               operationsItems = [
-                { label: "Feed & Nutrition", amount: Math.round(cogsActual * 0.15) },
-                { label: "Veterinary", amount: Math.round(cogsActual * 0.08) },
-                { label: "Farrier", amount: Math.round(cogsActual * 0.07) },
-                { label: "Equipment & Supplies", amount: Math.round(cogsActual * 0.08) }
+                { label: "Feed & Supplements", amount: Math.round(cogsActual * 0.25) },
+                { label: "Veterinary & Farrier", amount: Math.round(cogsActual * 0.12) },
+                { label: "Equipment Maintenance", amount: Math.round(cogsActual * 0.08) }
               ];
               break;
             case "Events":
-              operationsItems = [
-                { label: "Prize Money", amount: Math.round(cogsActual * 0.33) },
-                { label: "Venue Setup", amount: Math.round(cogsActual * 0.13) },
-                { label: "Course Design", amount: Math.round(cogsActual * 0.10) },
-                { label: "Catering & F&B", amount: Math.round(cogsActual * 0.27) },
-                { label: "Event Staff", amount: Math.round(cogsActual * 0.10) },
+              cogsItems = [
+                { label: "Venue Costs", amount: Math.round(cogsActual * 0.45) },
+                { label: "Catering", amount: Math.round(cogsActual * 0.30) },
+                { label: "Event Equipment", amount: Math.round(cogsActual * 0.18) }
+              ];
+              personnelItems = [
                 { label: "Event Marketing", amount: Math.round(cogsActual * 0.07) }
               ];
               break;

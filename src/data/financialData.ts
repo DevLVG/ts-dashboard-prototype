@@ -1,5 +1,5 @@
-// Financial data system using trio_mock_data_v2.json
-import mockData from './trio_mock_data_v2.json';
+// Financial data system using trio_mock_data_v3.json
+import mockData from './trio_mock_data_v3.json';
 
 // Type definitions matching the JSON structure
 export interface RevenueRecord {
@@ -22,6 +22,7 @@ export interface CogsRecord {
 export interface OpexRecord {
   date: string;
   scenario: 'Actual' | 'Budget_Base' | 'Budget_Worst' | 'Budget_Best';
+  bu: string;
   category: string;
   amount: number;
 }
@@ -170,12 +171,14 @@ export const getCogsForPeriod = (
 export const getOpexForPeriod = (
   scenario: string,
   startDate: string,
-  endDate: string
+  endDate: string,
+  bu?: string
 ): number => {
   const filtered = opex.filter(o => 
     o.scenario === scenario &&
     o.date >= startDate &&
-    o.date <= endDate
+    o.date <= endDate &&
+    (bu ? o.bu === bu : true)
   );
   return filtered.reduce((sum, o) => sum + o.amount, 0);
 };
@@ -304,19 +307,19 @@ export const getPLDataForPeriod = (
   // Actual data for current period
   const actualRev = getRevenuesForPeriod('Actual', startDate, endDate, bu);
   const actualCogs = getCogsForPeriod('Actual', startDate, endDate, bu);
-  const actualOpex = getOpexForPeriod('Actual', startDate, endDate);
+  const actualOpex = getOpexForPeriod('Actual', startDate, endDate, bu);
   
   // Budget data for current period
   const budgetRev = getRevenuesForPeriod(scenario, startDate, endDate, bu);
   const budgetCogs = getCogsForPeriod(scenario, startDate, endDate, bu);
-  const budgetOpex = getOpexForPeriod(scenario, startDate, endDate);
+  const budgetOpex = getOpexForPeriod(scenario, startDate, endDate, bu);
   
   // Previous Year: offset dates by -12 months, use Actual scenario
   const pyStartDate = getOffsetDate(startDate, -12);
   const pyEndDate = getOffsetDate(endDate, -12);
   const pyRev = getRevenuesForPeriod('Actual', pyStartDate, pyEndDate, bu);
   const pyCogs = getCogsForPeriod('Actual', pyStartDate, pyEndDate, bu);
-  const pyOpex = getOpexForPeriod('Actual', pyStartDate, pyEndDate);
+  const pyOpex = getOpexForPeriod('Actual', pyStartDate, pyEndDate, bu);
   
   return {
     actual: {
@@ -371,19 +374,19 @@ export const getMonthlyPLData = (bu?: string, scenario: 'Budget_Base' | 'Budget_
     // Get Actual data
     const revActual = getRevenuesForPeriod('Actual', startDate, endDate, bu);
     const cogActual = getCogsForPeriod('Actual', startDate, endDate, bu);
-    const opActual = getOpexForPeriod('Actual', startDate, endDate);
+    const opActual = getOpexForPeriod('Actual', startDate, endDate, bu);
     
     // Get Budget data
     const revBudget = getRevenuesForPeriod(scenario, startDate, endDate, bu);
     const cogBudget = getCogsForPeriod(scenario, startDate, endDate, bu);
-    const opBudget = getOpexForPeriod(scenario, startDate, endDate);
+    const opBudget = getOpexForPeriod(scenario, startDate, endDate, bu);
     
     // Get PY data (12 months earlier)
     const pyStartDate = getOffsetDate(startDate, -12);
     const pyEndDate = getOffsetDate(endDate, -12);
     const revPY = getRevenuesForPeriod('Actual', pyStartDate, pyEndDate, bu);
     const cogPY = getCogsForPeriod('Actual', pyStartDate, pyEndDate, bu);
-    const opPY = getOpexForPeriod('Actual', pyStartDate, pyEndDate);
+    const opPY = getOpexForPeriod('Actual', pyStartDate, pyEndDate, bu);
     
     return {
       month,

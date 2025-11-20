@@ -1,5 +1,5 @@
-// Financial data system using trio_mock_data_v3.json
-import mockData from './trio_mock_data_v3.json';
+// Financial data system using trio_mock_data_v4.json
+import mockData from './trio_mock_data_v4.json';
 
 // Type definitions matching the JSON structure
 export interface RevenueRecord {
@@ -181,14 +181,7 @@ export const getOpexForPeriod = (
     (bu ? o.bu === bu : true)
   );
   
-  const total = filtered.reduce((sum, o) => sum + o.amount, 0);
-  
-  // Debug log for OPEX
-  if (startDate.includes('2025-09') && bu === 'BU1_Equestrian') {
-    console.log(`🔍 OPEX Sep Equestrian:`, { scenario, recordCount: filtered.length, total, sample: filtered.slice(0, 5) });
-  }
-  
-  return total;
+  return filtered.reduce((sum, o) => sum + o.amount, 0);
 };
 
 // Get monthly totals for a specific scenario and BU (LEGACY - kept for compatibility)

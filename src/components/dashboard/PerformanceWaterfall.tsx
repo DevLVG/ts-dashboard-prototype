@@ -393,6 +393,7 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
             stackId="a"
             stroke="transparent"
             strokeWidth={0}
+            radius={[8, 8, 8, 8]}
           >
             {waterfallData.map((entry, index) => (
               <Cell 

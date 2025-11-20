@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
 import { KPICard } from "@/components/dashboard/KPICard";
 import { RevenueTrendChart } from "@/components/dashboard/RevenueTrendChart";
@@ -21,7 +22,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card } from "@/components/ui/card";
 
 const Index = () => {
-  const [currentPage, setCurrentPage] = useState<PageType>("overview");
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  // Derive current page from URL path
+  const getCurrentPageFromPath = (): PageType => {
+    const path = location.pathname.slice(1); // Remove leading slash
+    if (path === "overview" || path === "performance" || path === "cash" || path === "ratios" || path === "statements") {
+      return path as PageType;
+    }
+    return "overview";
+  };
+  
+  const [currentPage, setCurrentPage] = useState<PageType>(getCurrentPageFromPath());
   const [selectedMonth, setSelectedMonth] = useState("MTD");
   const [selectedScenario, setSelectedScenario] = useState("base");
   const [selectedBU, setSelectedBU] = useState("All Company");
@@ -29,6 +42,11 @@ const Index = () => {
   const [selectedOpExBreakdown, setSelectedOpExBreakdown] = useState<any>(null);
   const [gmDrawerOpen, setGmDrawerOpen] = useState(false);
   const [selectedGMBreakdown, setSelectedGMBreakdown] = useState<any>(null);
+
+  // Sync currentPage state with URL changes
+  useEffect(() => {
+    setCurrentPage(getCurrentPageFromPath());
+  }, [location.pathname]);
 
   const months = [
     { value: "January", label: "January 2025" },
@@ -697,7 +715,7 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <DashboardNav currentPage={currentPage} onPageChange={setCurrentPage} />
+      <DashboardNav currentPage={currentPage} />
       <main className="container mx-auto px-4 py-6">{renderContent()}</main>
       <OpExDrawer 
         isOpen={opexDrawerOpen} 

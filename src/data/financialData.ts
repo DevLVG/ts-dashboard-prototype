@@ -131,6 +131,14 @@ export const getMonthlyRevenues = (scenario: string, bu?: string) => {
     ? revenues.filter(r => r.scenario === scenario && r.bu === bu)
     : revenues.filter(r => r.scenario === scenario);
   
+  // Debug logging for PY scenario
+  if (scenario === 'PY') {
+    const nov2024 = filtered.filter(r => r.date.startsWith('2024-11'));
+    console.log('PY Nov 2024 revenue records:', nov2024.length);
+    console.log('PY Nov 2024 revenue total:', nov2024.reduce((sum, r) => sum + r.amount, 0));
+    console.log('Sample PY record:', nov2024[0]);
+  }
+  
   const grouped = groupByMonth(filtered);
   const result: Array<{ month: string; amount: number }> = [];
   
@@ -154,6 +162,13 @@ export const getMonthlyCogs = (scenario: string, bu?: string) => {
     ? cogs.filter(c => c.scenario === scenario && c.bu === bu)
     : cogs.filter(c => c.scenario === scenario);
   
+  // Debug logging for PY scenario
+  if (scenario === 'PY') {
+    const nov2024 = filtered.filter(c => c.date.startsWith('2024-11'));
+    console.log('PY Nov 2024 COGS records:', nov2024.length);
+    console.log('PY Nov 2024 COGS total:', nov2024.reduce((sum, c) => sum + c.amount, 0));
+  }
+  
   const grouped = groupByMonth(filtered);
   const result: Array<{ month: string; amount: number }> = [];
   
@@ -174,6 +189,14 @@ export const getMonthlyCogs = (scenario: string, bu?: string) => {
 // Get monthly OpEx for a specific scenario
 export const getMonthlyOpex = (scenario: string) => {
   const filtered = opex.filter(o => o.scenario === scenario);
+  
+  // Debug logging for PY scenario
+  if (scenario === 'PY') {
+    const nov2024 = filtered.filter(o => o.date.startsWith('2024-11'));
+    console.log('PY Nov 2024 OpEx records:', nov2024.length);
+    console.log('PY Nov 2024 OpEx total:', nov2024.reduce((sum, o) => sum + o.amount, 0));
+  }
+  
   const grouped = groupByMonth(filtered);
   const result: Array<{ month: string; amount: number }> = [];
   
@@ -224,7 +247,7 @@ export const getMonthlyPLData = (bu?: string): MonthlyPLData[] => {
   
   const months = ["Dec '24", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov"];
   
-  return months.map(month => {
+  const result = months.map(month => {
     const revPY = revenuesPY.find(r => r.month === month)?.amount || 0;
     const revActual = revenuesActual.find(r => r.month === month)?.amount || 0;
     const revBudget = revenuesBudget.find(r => r.month === month)?.amount || 0;
@@ -256,6 +279,16 @@ export const getMonthlyPLData = (bu?: string): MonthlyPLData[] => {
       }
     };
   });
+  
+  // Debug log the final PY data
+  console.log('Monthly PL Data (PY values):', result.map(m => ({
+    month: m.month,
+    revPY: m.revenues.previousYear,
+    cogsPY: m.cogs.previousYear,
+    opexPY: m.opex.previousYear
+  })));
+  
+  return result;
 };
 
 // Get data for a specific BU or total company

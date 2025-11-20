@@ -81,6 +81,7 @@ const Index = () => {
             key={index}
             metric={metric}
             periodLabel={selectedMonth}
+            scenario={selectedScenario}
             onClick={() => {
               if (metric.label.includes("Revenue") || metric.label.includes("EBITDA") || metric.label.includes("OpEx")) {
                 setCurrentPage("performance");
@@ -92,7 +93,7 @@ const Index = () => {
         ))}
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <RevenueTrendChart data={trendData} />
+        <RevenueTrendChart data={trendData} scenario={selectedScenario} />
         <BUPerformanceChart data={buPerformance} onClick={() => setCurrentPage("performance")} />
       </div>
     </div>

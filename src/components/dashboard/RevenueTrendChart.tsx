@@ -4,12 +4,15 @@ import { TrendData } from "@/types/dashboard";
 
 interface RevenueTrendChartProps {
   data: TrendData[];
+  scenario?: string;
 }
 
-export const RevenueTrendChart = ({ data }: RevenueTrendChartProps) => {
+export const RevenueTrendChart = ({ data, scenario = "base" }: RevenueTrendChartProps) => {
   const formatCurrency = (value: number) => {
     return `${(value / 1000).toFixed(0)}K`;
   };
+  
+  const comparisonLabel = scenario === "previous-year" ? "Pr. Year" : "Budget";
 
   // Create data with variance shading
   const chartData = data.map((item) => ({
@@ -109,7 +112,7 @@ export const RevenueTrendChart = ({ data }: RevenueTrendChartProps) => {
             stroke="hsl(var(--muted-foreground) / 0.6)"
             strokeWidth={3}
             strokeDasharray="5 5"
-            name="Budget"
+            name={comparisonLabel}
             dot={false}
           />
           <Line

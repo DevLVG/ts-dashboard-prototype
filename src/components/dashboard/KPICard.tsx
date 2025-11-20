@@ -5,11 +5,13 @@ interface KPICardProps {
   metric: KPIMetric;
   onClick?: () => void;
   periodLabel?: string;
+  scenario?: string;
 }
 export const KPICard = ({
   metric,
   onClick,
-  periodLabel = "MTD"
+  periodLabel = "MTD",
+  scenario = "base"
 }: KPICardProps) => {
   const formatValue = (value: number, format: KPIMetric["format"]) => {
     switch (format) {
@@ -73,6 +75,8 @@ export const KPICard = ({
   const maxValue = Math.max(metric.actual, metric.budget);
   const actualHeight = metric.actual / maxValue * 100;
   const budgetHeight = metric.budget / maxValue * 100;
+  
+  const comparisonLabel = scenario === "previous-year" ? "Pr. Year" : "Budget";
   return <Card className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getStatusColor(metric.variancePercent, metric.label)}`} onClick={onClick}>
       <div className="space-y-3">
         <p className="text-base md:text-sm text-muted-foreground font-semibold uppercase tracking-wide transition-colors group-hover:text-foreground">
@@ -96,7 +100,7 @@ export const KPICard = ({
               </span>
             </div>
             <p className="text-sm md:text-xs text-muted-foreground">
-              Budget: {formatValue(metric.budget, metric.format)}
+              {comparisonLabel}: {formatValue(metric.budget, metric.format)}
             </p>
             
             {/* Mini Bar Chart - Below content */}
@@ -120,7 +124,7 @@ export const KPICard = ({
                   height: `${budgetHeight}%`
                 }} />
                     </div>
-                    <span className="text-xs text-muted-foreground font-semibold">Budget</span>
+                    <span className="text-xs text-muted-foreground font-semibold">{comparisonLabel}</span>
                   </div>
                 </div>
               </div>}

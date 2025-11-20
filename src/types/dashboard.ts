@@ -38,4 +38,4 @@ export interface CashFlowData {
 }
 
 export type ViewLevel = "total" | "bu" | "service";
-export type PageType = "overview" | "performance" | "cash" | "ratios";
+export type PageType = "overview" | "performance" | "cash" | "ratios" | "statements";

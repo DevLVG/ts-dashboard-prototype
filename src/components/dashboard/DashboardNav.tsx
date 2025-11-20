@@ -26,6 +26,10 @@ export const DashboardNav = ({
     id: "ratios" as PageType,
     label: "Key Ratios",
     icon: BarChart3
+  }, {
+    id: "statements" as PageType,
+    label: "Statements",
+    icon: BarChart3
   }];
   return <nav className="border-b bg-card shadow-sm backdrop-blur-sm sticky top-0 z-50 animate-fade-in">
       <div className="container mx-auto px-4">

@@ -176,19 +176,19 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     
     if (type === "decrease") {
       // For costs (negative values): lower actual than budget is better
-      if (variance <= -5) return "hsl(142, 76%, 36%)"; // Green (spending less)
-      if (variance >= 5) return "hsl(0, 84%, 60%)"; // Red (spending more)
-      return "hsl(48, 96%, 53%)"; // Yellow (near budget)
+      if (variance <= -5) return "#22d3ee"; // Cyan (spending less)
+      if (variance >= 5) return "#dc3545"; // Red (spending more)
+      return "#ffc107"; // Yellow (near budget)
     } else {
       // For totals/subtotals: higher actual than budget is better
-      if (variance >= 5) return "hsl(142, 76%, 36%)"; // Green (above budget)
-      if (variance <= -5) return "hsl(0, 84%, 60%)"; // Red (below budget)
-      return "hsl(48, 96%, 53%)"; // Yellow (near budget)
+      if (variance >= 5) return "#22d3ee"; // Cyan (above budget)
+      if (variance <= -5) return "#dc3545"; // Red (below budget)
+      return "#ffc107"; // Yellow (near budget)
     }
   };
 
   const renderCustomLabel = (props: any) => {
-    const { x, y, width, height, value, index } = props;
+    const { x, y, width, height, index } = props;
     const entry = waterfallData[index];
     if (!entry) return null;
     
@@ -199,12 +199,21 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
       : 0;
     const displayValue = formatCurrency(Math.abs(actualValue));
     
+    // Calculate if there's enough space for labels inside the bar
+    const barHeight = Math.abs(height);
+    const hasSpaceInside = barHeight > 50; // Need at least 50px for two lines of text
+    
+    // Position labels based on available space
+    const valueY = hasSpaceInside ? y + height / 2 - 8 : (height > 0 ? y - 20 : y + Math.abs(height) + 15);
+    const percentY = hasSpaceInside ? y + height / 2 + 8 : (height > 0 ? y - 5 : y + Math.abs(height) + 30);
+    const textColor = hasSpaceInside ? "hsl(0, 0%, 15%)" : "hsl(var(--foreground))";
+    
     return (
       <g>
         <text 
           x={x + width / 2} 
-          y={y + height / 2 - 5} 
-          fill="hsl(0, 0%, 15%)" 
+          y={valueY} 
+          fill={textColor} 
           textAnchor="middle" 
           fontSize={12}
           fontWeight={600}
@@ -213,8 +222,8 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
         </text>
         <text 
           x={x + width / 2} 
-          y={y + height / 2 + 10} 
-          fill="hsl(0, 0%, 25%)" 
+          y={percentY} 
+          fill={textColor} 
           textAnchor="middle" 
           fontSize={10}
         >
@@ -252,13 +261,35 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
             fontSize={12}
           />
           <Tooltip
-            formatter={(value: number) => formatCurrency(value)}
-            contentStyle={{
-              backgroundColor: "hsl(var(--card))",
-              border: "1px solid hsl(var(--border))",
-              borderRadius: "6px",
-              color: "hsl(var(--foreground))"
+            content={({ active, payload }) => {
+              if (active && payload && payload.length) {
+                const data = payload[0].payload;
+                const actualValue = data.value;
+                const comparisonValue = data.comparisonValue;
+                const variance = comparisonValue !== 0
+                  ? ((actualValue - comparisonValue) / Math.abs(comparisonValue)) * 100
+                  : 0;
+                
+                return (
+                  <div className="bg-popover border-2 border-gold rounded-lg shadow-lg p-4">
+                    <p className="font-bold text-popover-foreground mb-2">{data.label}</p>
+                    <div className="space-y-1 text-sm">
+                      <p className="text-popover-foreground">
+                        <span className="font-semibold">Actual:</span> {formatCurrency(actualValue)}
+                      </p>
+                      <p className="text-muted-foreground">
+                        <span className="font-semibold">Budget:</span> {formatCurrency(comparisonValue)}
+                      </p>
+                      <p className="text-muted-foreground">
+                        <span className="font-semibold">Variance:</span> {variance > 0 ? '+' : ''}{variance.toFixed(1)}%
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
             }}
+            cursor={{ fill: 'hsl(var(--muted))' }}
           />
           <ReferenceLine y={0} stroke="hsl(var(--foreground))" strokeWidth={1.5} />
           
@@ -266,9 +297,17 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
           <Bar dataKey="start" stackId="a" fill="transparent" />
           
           {/* Visible bar */}
-          <Bar dataKey={(entry) => entry.end - entry.start} stackId="a">
+          <Bar 
+            dataKey={(entry) => entry.end - entry.start} 
+            stackId="a"
+            stroke="transparent"
+            strokeWidth={0}
+          >
             {waterfallData.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={getBarColor(entry.value, entry.comparisonValue, entry.type)} />
+              <Cell 
+                key={`cell-${index}`} 
+                fill={getBarColor(entry.value, entry.comparisonValue, entry.type)}
+              />
             ))}
             <LabelList content={renderCustomLabel} />
           </Bar>

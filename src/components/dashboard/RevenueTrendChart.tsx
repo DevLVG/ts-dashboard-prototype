@@ -14,6 +14,62 @@ export const RevenueTrendChart = ({ data, scenario = "base" }: RevenueTrendChart
   
   const comparisonLabel = scenario === "previous-year" ? "Pr. Year" : "Budget";
 
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      const actual = payload.find((p: any) => p.dataKey === "actual")?.value || 0;
+      const budget = payload.find((p: any) => p.dataKey === "budget")?.value || 0;
+      const delta = actual - budget;
+
+      return (
+        <div
+          style={{
+            backgroundColor: "hsl(var(--popover))",
+            border: "2px solid hsl(var(--gold))",
+            borderRadius: "var(--radius)",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+            padding: "8px 12px",
+          }}
+        >
+          <p
+            style={{
+              color: "hsl(var(--popover-foreground))",
+              fontWeight: 700,
+              fontSize: "13px",
+              marginBottom: "6px",
+            }}
+          >
+            {label}
+          </p>
+          <div style={{ fontSize: "12px", fontWeight: 600 }}>
+            <p style={{ color: "hsl(var(--gold))", marginBottom: "3px" }}>
+              Actual: {new Intl.NumberFormat("en-SA", {
+                style: "currency",
+                currency: "SAR",
+                minimumFractionDigits: 0,
+              }).format(actual)}
+            </p>
+            <p style={{ color: "hsl(var(--muted-foreground))", marginBottom: "3px" }}>
+              {comparisonLabel}: {new Intl.NumberFormat("en-SA", {
+                style: "currency",
+                currency: "SAR",
+                minimumFractionDigits: 0,
+              }).format(budget)}
+            </p>
+            <p style={{ color: delta >= 0 ? "#22d3ee" : "#dc3545", marginBottom: "0" }}>
+              Delta: {new Intl.NumberFormat("en-SA", {
+                style: "currency",
+                currency: "SAR",
+                minimumFractionDigits: 0,
+                signDisplay: "always",
+              }).format(delta)}
+            </p>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
   // Create data with variance shading between the two lines
   const chartData = data.map((item) => ({
     ...item,
@@ -56,35 +112,7 @@ export const RevenueTrendChart = ({ data, scenario = "base" }: RevenueTrendChart
             stroke="hsl(var(--muted-foreground))"
             tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 14 }}
           />
-          <Tooltip
-            formatter={(value: number) => [
-              new Intl.NumberFormat("en-SA", {
-                style: "currency",
-                currency: "SAR",
-                minimumFractionDigits: 0,
-              }).format(value),
-              "",
-            ]}
-            contentStyle={{
-              backgroundColor: "hsl(var(--popover))",
-              border: "2px solid hsl(var(--gold))",
-              borderRadius: "var(--radius)",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-              padding: "12px 16px",
-            }}
-            labelStyle={{
-              color: "hsl(var(--popover-foreground))",
-              fontWeight: 700,
-              fontSize: "15px",
-              marginBottom: "8px",
-            }}
-            itemStyle={{
-              color: "hsl(var(--popover-foreground))",
-              fontWeight: 600,
-              fontSize: "14px",
-              padding: "4px 0",
-            }}
-          />
+          <Tooltip content={<CustomTooltip />} />
           <Legend 
             wrapperStyle={{ 
               paddingTop: '10px',

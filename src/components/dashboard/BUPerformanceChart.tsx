@@ -44,10 +44,10 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
 
   const getBarColor = (variance: number) => {
     if (isOpEx) {
-      // For OpEx: under/at budget is good (cyan), over budget is bad (yellow/red)
-      if (variance <= 5) return "#22d3ee"; // Cyan - at or under budget
-      if (variance <= 10) return "#ffc107"; // Yellow - slightly over budget
-      return "#dc3545"; // Red - significantly over budget
+      // For OpEx: under budget is good (cyan), over budget is bad (yellow/red)
+      if (variance <= 0) return "#22d3ee"; // Cyan - at or under budget
+      if (variance <= 5) return "#ffc107"; // Yellow - slightly over budget (0-5%)
+      return "#dc3545"; // Red - significantly over budget (>5%)
     } else {
       // For Revenue/GM/EBITDA: at/over budget is good (cyan), under budget is bad (yellow/red)
       if (variance >= -5) return "#22d3ee"; // Cyan - at or over budget

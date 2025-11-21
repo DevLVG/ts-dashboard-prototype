@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { RevenueDrilldownTable } from "@/components/drilldown/RevenueDrilldownTable";
 import { OpexDrilldownTable } from "@/components/drilldown/OpexDrilldownTable";
 import { SummaryPanel } from "@/components/drilldown/SummaryPanel";
@@ -26,17 +25,9 @@ export function WaterfallDrilldownDrawer({
   drilldownType,
   period,
   scenario,
-  comparison: initialComparison,
+  comparison,
   bu
 }: WaterfallDrilldownDrawerProps) {
-  
-  // State for active comparison scenario
-  const [activeComparison, setActiveComparison] = useState<string>(initialComparison);
-  
-  // Update active comparison when props change
-  useEffect(() => {
-    setActiveComparison(initialComparison);
-  }, [initialComparison]);
   
   // Keyboard shortcut: ESC to close drawer
   useEffect(() => {
@@ -58,27 +49,27 @@ export function WaterfallDrilldownDrawer({
     
     switch (drilldownType) {
       case 'revenue':
-        return getRevenueBreakdown(period.start, period.end, scenario, activeComparison, buCode);
+        return getRevenueBreakdown(period.start, period.end, scenario, comparison, buCode);
       case 'cogs': {
-        const revenueData = getRevenueBreakdown(period.start, period.end, scenario, activeComparison, buCode);
-        return getCogsBreakdown(period.start, period.end, scenario, activeComparison, buCode, {
+        const revenueData = getRevenueBreakdown(period.start, period.end, scenario, comparison, buCode);
+        return getCogsBreakdown(period.start, period.end, scenario, comparison, buCode, {
           actual: revenueData.totalActual,
           comparison: revenueData.totalComparison
         });
       }
       case 'gm':
-        return getGMBreakdown(period.start, period.end, scenario, activeComparison, buCode);
+        return getGMBreakdown(period.start, period.end, scenario, comparison, buCode);
       case 'opex': {
-        const revenueData = getRevenueBreakdown(period.start, period.end, scenario, activeComparison, buCode);
-        return getOpexBreakdown(period.start, period.end, scenario, activeComparison, buCode, {
+        const revenueData = getRevenueBreakdown(period.start, period.end, scenario, comparison, buCode);
+        return getOpexBreakdown(period.start, period.end, scenario, comparison, buCode, {
           actual: revenueData.totalActual,
           comparison: revenueData.totalComparison
         });
       }
       case 'ebitda': {
-        const revenueData = getRevenueBreakdown(period.start, period.end, scenario, activeComparison, buCode);
-        const gmData = getGMBreakdown(period.start, period.end, scenario, activeComparison, buCode);
-        const opexData = getOpexBreakdown(period.start, period.end, scenario, activeComparison, buCode);
+        const revenueData = getRevenueBreakdown(period.start, period.end, scenario, comparison, buCode);
+        const gmData = getGMBreakdown(period.start, period.end, scenario, comparison, buCode);
+        const opexData = getOpexBreakdown(period.start, period.end, scenario, comparison, buCode);
         const totalActual = gmData.totalActual - opexData.totalActual;
         const totalComparison = gmData.totalComparison - opexData.totalComparison;
         const actualPercent = revenueData.totalActual !== 0 ? (totalActual / revenueData.totalActual) * 100 : 0;
@@ -122,66 +113,23 @@ export function WaterfallDrilldownDrawer({
   };
 
   const getSubtitle = () => {
-    const comparisonLabel = activeComparison === "Actual" ? "vs Previous Year" : 
-                           activeComparison === "Budget_Base" ? "vs Base Budget" :
-                           activeComparison === "Budget_Worst" ? "vs Worst Case" :
-                           activeComparison === "Budget_Best" ? "vs Best Case" : "vs Budget";
+    const comparisonLabel = comparison === "Actual" ? "vs Previous Year" : 
+                           comparison === "Budget_Base" ? "vs Base Budget" :
+                           comparison === "Budget_Worst" ? "vs Worst Case" :
+                           comparison === "Budget_Best" ? "vs Best Case" : "vs Budget";
     
     return `${period.label} • ${bu || "All Company"} • ${comparisonLabel}`;
   };
-
-  // Get available comparison options based on initial comparison
-  const getComparisonOptions = () => {
-    if (initialComparison === "Actual") {
-      return [
-        { value: "Actual", label: "PY" }
-      ];
-    }
-    return [
-      { value: "Budget_Base", label: "Base" },
-      { value: "Budget_Worst", label: "Worst" },
-      { value: "Budget_Best", label: "Best" }
-    ];
-  };
-
-  const comparisonOptions = getComparisonOptions();
 
   return (
     <Drawer open={isOpen} onOpenChange={onClose}>
       <DrawerContent className="h-[90vh]">
         <DrawerHeader className="border-b">
           <div className="flex items-center justify-between">
-            <div className="flex-1">
+            <div>
               <DrawerTitle className="text-xl">{getTitle()}</DrawerTitle>
               <p className="text-sm text-muted-foreground mt-1">{getSubtitle()}</p>
             </div>
-            
-            {/* Comparison Toggle */}
-            {comparisonOptions.length > 1 && (
-              <div className="flex items-center gap-2 mr-4">
-                <span className="text-xs text-muted-foreground">Compare to:</span>
-                <ToggleGroup 
-                  type="single" 
-                  value={activeComparison}
-                  onValueChange={(value) => {
-                    if (value) setActiveComparison(value);
-                  }}
-                  className="gap-1"
-                >
-                  {comparisonOptions.map(option => (
-                    <ToggleGroupItem 
-                      key={option.value}
-                      value={option.value}
-                      aria-label={`Compare to ${option.label}`}
-                      className="text-xs px-3 h-8"
-                    >
-                      {option.label}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-            )}
-            
             <Button variant="ghost" size="icon" onClick={onClose}>
               <X className="h-4 w-4" />
             </Button>
@@ -197,7 +145,6 @@ export function WaterfallDrilldownDrawer({
                 totalComparison={data.totalComparison}
                 totalDelta={data.totalDelta}
                 totalDeltaPercent={data.totalDeltaPercent}
-                title="Revenue"
               />
               <ConcentrationPanel metrics={calculateConcentration(data.rows, data.totalActual)} />
             </>
@@ -220,7 +167,6 @@ export function WaterfallDrilldownDrawer({
                 totalComparison={data.totalComparison}
                 totalDelta={data.totalDelta}
                 totalDeltaPercent={data.totalDeltaPercent}
-                title="COGS"
               />
             </>
           )}
@@ -242,7 +188,6 @@ export function WaterfallDrilldownDrawer({
                 totalComparison={data.totalComparison}
                 totalDelta={data.totalDelta}
                 totalDeltaPercent={data.totalDeltaPercent}
-                title="Gross Margin"
               />
             </>
           )}
@@ -264,7 +209,6 @@ export function WaterfallDrilldownDrawer({
                 totalComparison={data.totalComparison}
                 totalDelta={data.totalDelta}
                 totalDeltaPercent={data.totalDeltaPercent}
-                title="Operating Expenses"
               />
             </>
           )}

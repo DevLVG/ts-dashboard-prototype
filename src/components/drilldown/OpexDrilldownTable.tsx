@@ -1,5 +1,4 @@
 import { useState, useMemo, Fragment, useEffect, useRef } from "react";
-import { Download, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -9,17 +8,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { getVarianceHexColor } from "@/lib/varianceColors";
 import { OpexRow } from "@/lib/drilldownData";
-import { exportOpexDrilldownToCSV, downloadCSV } from "@/lib/csvExport";
-import { SummaryStatistics } from "./SummaryStatistics";
-
-type SortColumn = 'bu' | 'actual' | 'comparison' | 'delta' | 'deltaPercent';
-type SortDirection = 'asc' | 'desc' | null;
 
 interface OpexDrilldownTableProps {
   rows: OpexRow[];
@@ -27,7 +19,6 @@ interface OpexDrilldownTableProps {
   totalComparison: number;
   totalDelta: number;
   totalDeltaPercent: number;
-  title?: string;
 }
 
 const formatCurrency = (value: number): string => {
@@ -39,13 +30,13 @@ const formatCurrency = (value: number): string => {
   }).format(value);
 };
 
-const formatPercent = (value: number): string => {
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
-};
-
 const formatDelta = (value: number): string => {
   const formatted = formatCurrency(Math.abs(value));
   return value >= 0 ? `+${formatted}` : `-${formatted}`;
+};
+
+const formatPercent = (value: number): string => {
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
 };
 
 const formatBUName = (bu: string): string => {
@@ -62,155 +53,22 @@ export function OpexDrilldownTable({
   totalComparison,
   totalDelta,
   totalDeltaPercent,
-  title = 'Operating Expenses'
 }: OpexDrilldownTableProps) {
   const [expandedBUs, setExpandedBUs] = useState<Set<string>>(new Set());
   const [selectedBUIndex, setSelectedBUIndex] = useState<number>(0);
-  const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
-  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
-  const [searchTerm, setSearchTerm] = useState<string>('');
   const tableRef = useRef<HTMLDivElement>(null);
 
-  const handleExportCSV = (filtered: boolean = false) => {
-    const exportRows = filtered ? Object.values(groupedData).flat() : rows;
-    const exportTotals = filtered ? filteredTotals : {
-      actual: totalActual,
-      comparison: totalComparison,
-      delta: totalDelta,
-      deltaPercent: totalDeltaPercent
-    };
-    
-    const csvContent = exportOpexDrilldownToCSV(
-      exportRows,
-      exportTotals.actual,
-      exportTotals.comparison,
-      exportTotals.delta,
-      exportTotals.deltaPercent,
-      filtered ? `${title} (Filtered)` : title
-    );
-    const timestamp = new Date().toISOString().split('T')[0];
-    const suffix = filtered ? '_filtered' : '';
-    downloadCSV(csvContent, `${title.toLowerCase().replace(/\s+/g, '_')}_drilldown${suffix}_${timestamp}.csv`);
-  };
-
-  const handleSort = (column: SortColumn) => {
-    if (sortColumn === column) {
-      // Cycle through: asc -> desc -> null
-      if (sortDirection === 'asc') {
-        setSortDirection('desc');
-      } else if (sortDirection === 'desc') {
-        setSortDirection(null);
-        setSortColumn(null);
-      }
-    } else {
-      setSortColumn(column);
-      setSortDirection('asc');
-    }
-  };
-
-  const handleReset = () => {
-    setSearchTerm("");
-    setSortColumn(null);
-    setSortDirection(null);
-  };
-
-  const hasActiveFilters = searchTerm !== "" || sortColumn !== null;
-
-  const getSortIcon = (column: SortColumn) => {
-    if (sortColumn !== column) {
-      return <ArrowUpDown className="h-3 w-3 ml-1 opacity-50" />;
-    }
-    if (sortDirection === 'asc') {
-      return <ArrowUp className="h-3 w-3 ml-1" />;
-    }
-    return <ArrowDown className="h-3 w-3 ml-1" />;
-  };
-
-  // Group data by BU, then by Category with search filtering
+  // Group data by BU, then by Category
   const groupedData = useMemo(() => {
-    let filteredRows = rows;
-    
-    // Apply search filter
-    if (searchTerm.trim()) {
-      const searchLower = searchTerm.toLowerCase();
-      filteredRows = rows.filter(row => {
-        const buName = (row.buDisplay || row.bu).toLowerCase();
-        const categoryName = row.subCategory.replace(/_/g, ' ').toLowerCase();
-        return buName.includes(searchLower) || categoryName.includes(searchLower);
-      });
-    }
-    
     const grouped: Record<string, OpexRow[]> = {};
-    filteredRows.forEach(row => {
+    rows.forEach(row => {
       if (!grouped[row.bu]) {
         grouped[row.bu] = [];
       }
       grouped[row.bu].push(row);
     });
-    
-    // Auto-expand if search is active
-    if (searchTerm.trim() && expandedBUs.size === 0) {
-      setExpandedBUs(new Set(Object.keys(grouped)));
-    }
-    
     return grouped;
-  }, [rows, searchTerm]);
-
-  // Sort grouped data
-  const sortedBUEntries = useMemo(() => {
-    const entries = Object.entries(groupedData);
-    
-    if (!sortColumn || !sortDirection) {
-      return entries;
-    }
-
-    return entries.sort(([buA, categoriesA], [buB, categoriesB]) => {
-      let valueA: number;
-      let valueB: number;
-
-      if (sortColumn === 'bu') {
-        return sortDirection === 'asc' 
-          ? buA.localeCompare(buB)
-          : buB.localeCompare(buA);
-      }
-
-      // Calculate BU totals for sorting
-      const totalA = categoriesA.reduce((sum, c) => ({
-        actual: sum.actual + c.actual,
-        comparison: sum.comparison + c.comparison,
-        delta: sum.delta + c.delta,
-      }), { actual: 0, comparison: 0, delta: 0 });
-
-      const totalB = categoriesB.reduce((sum, c) => ({
-        actual: sum.actual + c.actual,
-        comparison: sum.comparison + c.comparison,
-        delta: sum.delta + c.delta,
-      }), { actual: 0, comparison: 0, delta: 0 });
-
-      switch (sortColumn) {
-        case 'actual':
-          valueA = totalA.actual;
-          valueB = totalB.actual;
-          break;
-        case 'comparison':
-          valueA = totalA.comparison;
-          valueB = totalB.comparison;
-          break;
-        case 'delta':
-          valueA = totalA.delta;
-          valueB = totalB.delta;
-          break;
-        case 'deltaPercent':
-          valueA = totalA.comparison !== 0 ? (totalA.delta / Math.abs(totalA.comparison)) * 100 : 0;
-          valueB = totalB.comparison !== 0 ? (totalB.delta / Math.abs(totalB.comparison)) * 100 : 0;
-          break;
-        default:
-          return 0;
-      }
-
-      return sortDirection === 'asc' ? valueA - valueB : valueB - valueA;
-    });
-  }, [groupedData, sortColumn, sortDirection]);
+  }, [rows]);
 
   const toggleBU = (bu: string) => {
     setExpandedBUs(prev => {
@@ -233,17 +91,6 @@ export function OpexDrilldownTable({
   };
 
   const buKeys = Object.keys(groupedData);
-  
-  // Calculate filtered totals for display
-  const filteredTotals = useMemo(() => {
-    const allFilteredCategories = Object.values(groupedData).flat();
-    const actual = allFilteredCategories.reduce((sum, c) => sum + c.actual, 0);
-    const comparison = allFilteredCategories.reduce((sum, c) => sum + c.comparison, 0);
-    const delta = actual - comparison;
-    const deltaPercent = comparison !== 0 ? (delta / Math.abs(comparison)) * 100 : 0;
-    
-    return { actual, comparison, delta, deltaPercent, count: allFilteredCategories.length };
-  }, [groupedData]);
 
   // Keyboard shortcuts: Arrow keys to navigate and expand/collapse BUs
   useEffect(() => {
@@ -290,142 +137,27 @@ export function OpexDrilldownTable({
 
   return (
     <div ref={tableRef} tabIndex={0}>
-      <div className="flex items-center justify-between gap-3 mb-2">
-        <div className="text-xs text-muted-foreground">
-          <kbd className="px-2 py-1 bg-muted rounded">↑↓</kbd> Navigate • 
-          <kbd className="px-2 py-1 bg-muted rounded ml-1">→</kbd> Expand • 
-          <kbd className="px-2 py-1 bg-muted rounded ml-1">←</kbd> Collapse • 
-          <kbd className="px-2 py-1 bg-muted rounded ml-1">ESC</kbd> Close
-        </div>
-        <div className="flex gap-2">
-          {hasActiveFilters && (
-            <Button 
-              variant="default" 
-              size="sm" 
-              onClick={() => handleExportCSV(true)}
-              className="gap-2"
-            >
-              <Download className="h-4 w-4" />
-              Export Filtered
-            </Button>
-          )}
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={() => handleExportCSV(false)}
-            className="gap-2"
-          >
-            <Download className="h-4 w-4" />
-            Export All
-          </Button>
-        </div>
+      <div className="text-xs text-muted-foreground mb-2">
+        <kbd className="px-2 py-1 bg-muted rounded">↑↓</kbd> Navigate • 
+        <kbd className="px-2 py-1 bg-muted rounded ml-1">→</kbd> Expand • 
+        <kbd className="px-2 py-1 bg-muted rounded ml-1">←</kbd> Collapse • 
+        <kbd className="px-2 py-1 bg-muted rounded ml-1">ESC</kbd> Close
       </div>
-
-      {/* Search Bar and Reset */}
-      <div className="flex gap-2 mb-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            type="text"
-            placeholder="Search BUs or categories..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 pr-10"
-          />
-          {searchTerm && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
-              onClick={() => setSearchTerm('')}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-        {hasActiveFilters && (
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={handleReset}
-            title="Reset all filters and sorting"
-          >
-            <RotateCcw className="h-4 w-4" />
-          </Button>
-        )}
-      </div>
-
-      {/* Search Results Info */}
-      {searchTerm && (
-        <div className="text-sm text-muted-foreground mb-4">
-          Found {filteredTotals.count} {filteredTotals.count === 1 ? 'item' : 'items'} matching "{searchTerm}"
-          {filteredTotals.count > 0 && (
-            <span className="ml-2">
-              • Total: {formatCurrency(filteredTotals.actual)} 
-              ({formatPercent(filteredTotals.deltaPercent)})
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Summary Statistics */}
-      <SummaryStatistics rows={rows} metricLabel={title} />
-
       {/* Desktop Table */}
       <div className="hidden md:block rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead 
-                className="w-[35%] cursor-pointer hover:bg-muted/50"
-                onClick={() => handleSort('bu')}
-              >
-                <div className="flex items-center">
-                  BU / Category
-                  {getSortIcon('bu')}
-                </div>
-              </TableHead>
+              <TableHead className="w-[35%]">BU / Category</TableHead>
               <TableHead className="w-[12%]">Type</TableHead>
-              <TableHead 
-                className="text-right w-[15%] cursor-pointer hover:bg-muted/50"
-                onClick={() => handleSort('actual')}
-              >
-                <div className="flex items-center justify-end">
-                  Actual
-                  {getSortIcon('actual')}
-                </div>
-              </TableHead>
-              <TableHead 
-                className="text-right w-[15%] cursor-pointer hover:bg-muted/50"
-                onClick={() => handleSort('comparison')}
-              >
-                <div className="flex items-center justify-end">
-                  Comparison
-                  {getSortIcon('comparison')}
-                </div>
-              </TableHead>
-              <TableHead 
-                className="text-right w-[12%] cursor-pointer hover:bg-muted/50"
-                onClick={() => handleSort('delta')}
-              >
-                <div className="flex items-center justify-end">
-                  Δ
-                  {getSortIcon('delta')}
-                </div>
-              </TableHead>
-              <TableHead 
-                className="text-right w-[11%] cursor-pointer hover:bg-muted/50"
-                onClick={() => handleSort('deltaPercent')}
-              >
-                <div className="flex items-center justify-end">
-                  Δ%
-                  {getSortIcon('deltaPercent')}
-                </div>
-              </TableHead>
+              <TableHead className="text-right w-[15%]">Actual</TableHead>
+              <TableHead className="text-right w-[15%]">Comparison</TableHead>
+              <TableHead className="text-right w-[12%]">Δ</TableHead>
+              <TableHead className="text-right w-[11%]">Δ%</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sortedBUEntries.map(([bu, categories], index) => {
+            {Object.entries(groupedData).map(([bu, categories], index) => {
               const buTotals = getBUTotals(categories);
               const buDeltaPercent = buTotals.comparison !== 0 
                 ? (buTotals.delta / Math.abs(buTotals.comparison)) * 100 
@@ -526,7 +258,7 @@ export function OpexDrilldownTable({
 
       {/* Mobile Card Layout */}
       <div className="md:hidden space-y-3">
-        {sortedBUEntries.map(([bu, categories]) => {
+        {Object.entries(groupedData).map(([bu, categories]) => {
           const buTotals = getBUTotals(categories);
           const buDeltaPercent = buTotals.comparison !== 0 
             ? (buTotals.delta / Math.abs(buTotals.comparison)) * 100 

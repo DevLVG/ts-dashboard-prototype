@@ -1,5 +1,5 @@
 import { useState, useMemo, Fragment, useEffect, useRef } from "react";
-import { ChevronDown, ChevronRight, Download, ArrowUpDown, ArrowUp, ArrowDown, Search, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,6 +64,14 @@ export function RevenueDrilldownTable({
       setSortDirection('asc');
     }
   };
+
+  const handleReset = () => {
+    setSearchTerm("");
+    setSortColumn(null);
+    setSortDirection(null);
+  };
+
+  const hasActiveFilters = searchTerm !== "" || sortColumn !== null;
 
   const getSortIcon = (column: SortColumn) => {
     if (sortColumn !== column) {
@@ -257,24 +265,36 @@ export function RevenueDrilldownTable({
         </Button>
       </div>
 
-      {/* Search Bar */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          type="text"
-          placeholder="Search BUs or services..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10 pr-10"
-        />
-        {searchTerm && (
+      {/* Search Bar and Reset */}
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            type="text"
+            placeholder="Search BUs or services..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 pr-10"
+          />
+          {searchTerm && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
+              onClick={() => setSearchTerm('')}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+        {hasActiveFilters && (
           <Button
-            variant="ghost"
-            size="sm"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
-            onClick={() => setSearchTerm('')}
+            variant="outline"
+            size="icon"
+            onClick={handleReset}
+            title="Reset all filters and sorting"
           >
-            <X className="h-4 w-4" />
+            <RotateCcw className="h-4 w-4" />
           </Button>
         )}
       </div>

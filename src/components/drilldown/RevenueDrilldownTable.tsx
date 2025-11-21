@@ -1,4 +1,4 @@
-import { useState, useMemo, Fragment } from "react";
+import { useState, useMemo, Fragment, useEffect, useRef } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,8 @@ export function RevenueDrilldownTable({
   totalDeltaPercent 
 }: RevenueDrilldownTableProps) {
   const [expandedBUs, setExpandedBUs] = useState<Set<string>>(new Set());
+  const [selectedBUIndex, setSelectedBUIndex] = useState<number>(0);
+  const tableRef = useRef<HTMLDivElement>(null);
 
   // Group data by BU
   const groupedData = useMemo(() => {
@@ -61,8 +63,59 @@ export function RevenueDrilldownTable({
     };
   };
 
+  const buKeys = Object.keys(groupedData);
+
+  // Keyboard shortcuts: Arrow keys to navigate and expand/collapse BUs
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (buKeys.length === 0) return;
+
+      switch (event.key) {
+        case 'ArrowDown':
+          event.preventDefault();
+          setSelectedBUIndex(prev => Math.min(prev + 1, buKeys.length - 1));
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          setSelectedBUIndex(prev => Math.max(prev - 1, 0));
+          break;
+        case 'ArrowRight':
+        case 'Enter':
+          event.preventDefault();
+          const buToExpand = buKeys[selectedBUIndex];
+          if (buToExpand && !expandedBUs.has(buToExpand)) {
+            toggleBU(buToExpand);
+          }
+          break;
+        case 'ArrowLeft':
+          event.preventDefault();
+          const buToCollapse = buKeys[selectedBUIndex];
+          if (buToCollapse && expandedBUs.has(buToCollapse)) {
+            toggleBU(buToCollapse);
+          }
+          break;
+      }
+    };
+
+    if (tableRef.current) {
+      tableRef.current.addEventListener('keydown', handleKeyDown);
+    }
+
+    return () => {
+      if (tableRef.current) {
+        tableRef.current.removeEventListener('keydown', handleKeyDown);
+      }
+    };
+  }, [selectedBUIndex, buKeys, expandedBUs]);
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" ref={tableRef} tabIndex={0}>
+      <div className="text-xs text-muted-foreground mb-2">
+        <kbd className="px-2 py-1 bg-muted rounded">↑↓</kbd> Navigate • 
+        <kbd className="px-2 py-1 bg-muted rounded ml-1">→</kbd> Expand • 
+        <kbd className="px-2 py-1 bg-muted rounded ml-1">←</kbd> Collapse • 
+        <kbd className="px-2 py-1 bg-muted rounded ml-1">ESC</kbd> Close
+      </div>
       {/* Desktop Table */}
       <div className="hidden md:block border rounded-lg">
         <Table>
@@ -76,18 +129,22 @@ export function RevenueDrilldownTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {Object.entries(groupedData).map(([bu, services]) => {
+            {Object.entries(groupedData).map(([bu, services], index) => {
               const totals = getBUTotals(services);
               const buDeltaPercent = totals.comparison !== 0 
                 ? (totals.delta / Math.abs(totals.comparison)) * 100 
                 : 0;
               const isExpanded = expandedBUs.has(bu);
+              const isSelected = index === selectedBUIndex;
 
               return (
                 <Fragment key={bu}>
                   {/* BU Row - Collapsible */}
                   <TableRow 
-                    className="font-semibold cursor-pointer hover:bg-muted/50 bg-muted/20"
+                    className={cn(
+                      "font-semibold cursor-pointer hover:bg-muted/50 bg-muted/20",
+                      isSelected && "ring-2 ring-primary"
+                    )}
                     onClick={() => toggleBU(bu)}
                   >
                     <TableCell className="flex items-center gap-2">

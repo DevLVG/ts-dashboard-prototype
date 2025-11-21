@@ -37,17 +37,26 @@ export function RevenueDrilldownTable({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const tableRef = useRef<HTMLDivElement>(null);
 
-  const handleExportCSV = () => {
+  const handleExportCSV = (filtered: boolean = false) => {
+    const exportRows = filtered ? Object.values(groupedData).flat() : rows;
+    const exportTotals = filtered ? filteredTotals : {
+      actual: totalActual,
+      comparison: totalComparison,
+      delta: totalDelta,
+      deltaPercent: totalDeltaPercent
+    };
+    
     const csvContent = exportRevenueDrilldownToCSV(
-      rows,
-      totalActual,
-      totalComparison,
-      totalDelta,
-      totalDeltaPercent,
-      title
+      exportRows,
+      exportTotals.actual,
+      exportTotals.comparison,
+      exportTotals.delta,
+      exportTotals.deltaPercent,
+      filtered ? `${title} (Filtered)` : title
     );
     const timestamp = new Date().toISOString().split('T')[0];
-    downloadCSV(csvContent, `${title.toLowerCase()}_drilldown_${timestamp}.csv`);
+    const suffix = filtered ? '_filtered' : '';
+    downloadCSV(csvContent, `${title.toLowerCase()}_drilldown${suffix}_${timestamp}.csv`);
   };
 
   const handleSort = (column: SortColumn) => {
@@ -254,15 +263,28 @@ export function RevenueDrilldownTable({
           <kbd className="px-2 py-1 bg-muted rounded ml-1">←</kbd> Collapse • 
           <kbd className="px-2 py-1 bg-muted rounded ml-1">ESC</kbd> Close
         </div>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={handleExportCSV}
-          className="gap-2"
-        >
-          <Download className="h-4 w-4" />
-          Export CSV
-        </Button>
+        <div className="flex gap-2">
+          {hasActiveFilters && (
+            <Button 
+              variant="default" 
+              size="sm" 
+              onClick={() => handleExportCSV(true)}
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Export Filtered
+            </Button>
+          )}
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => handleExportCSV(false)}
+            className="gap-2"
+          >
+            <Download className="h-4 w-4" />
+            Export All
+          </Button>
+        </div>
       </div>
 
       {/* Search Bar and Reset */}

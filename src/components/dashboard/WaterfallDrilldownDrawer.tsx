@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { RevenueDrilldownTable } from "@/components/drilldown/RevenueDrilldownTable";
+import { OpexDrilldownTable } from "@/components/drilldown/OpexDrilldownTable";
 import { SummaryPanel } from "@/components/drilldown/SummaryPanel";
 import { ConcentrationPanel } from "@/components/drilldown/ConcentrationPanel";
 import { getRevenueBreakdown, getCogsBreakdown, getOpexBreakdown, getGMBreakdown } from "@/lib/drilldownData";
@@ -189,7 +190,7 @@ export function WaterfallDrilldownDrawer({
                   colorLogic="lower-is-better"
                 />
               )}
-              <RevenueDrilldownTable 
+              <OpexDrilldownTable 
                 rows={data.rows}
                 totalActual={data.totalActual}
                 totalComparison={data.totalComparison}

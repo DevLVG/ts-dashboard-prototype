@@ -176,7 +176,35 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
             }}
             cursor={{ fill: 'hsl(var(--gold) / 0.1)' }}
           />
-          <Legend className="chart-legend" />
+          <Legend 
+            content={({ payload }) => {
+              // Get the color from the first BU's variance for the Actual legend
+              const firstBUVariance = chartData.length > 0 ? chartData[0].variance : 0;
+              const actualColor = getBarFill(firstBUVariance);
+              
+              return (
+                <ul className="flex items-center justify-center gap-6 mt-4">
+                  <li className="flex items-center gap-2">
+                    <div 
+                      className="w-4 h-4 rounded" 
+                      style={{ backgroundColor: '#6c757d', opacity: 0.7 }}
+                    />
+                    <span className="text-sm text-muted-foreground">Budget</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <div 
+                      className="w-4 h-4 rounded border-2" 
+                      style={{ 
+                        backgroundColor: actualColor,
+                        borderColor: getBarStroke(firstBUVariance)
+                      }}
+                    />
+                    <span className="text-sm text-muted-foreground">Actual</span>
+                  </li>
+                </ul>
+              );
+            }}
+          />
           <Bar 
             dataKey="budget" 
             fill="#6c757d" 

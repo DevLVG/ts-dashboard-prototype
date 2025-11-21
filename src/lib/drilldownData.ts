@@ -14,7 +14,12 @@ export interface DrilldownRow {
   deltaPercent: number;
 }
 
-export interface OpexRow extends DrilldownRow {
+export interface OpexRow {
+  category: string;
+  actual: number;
+  comparison: number;
+  delta: number;
+  deltaPercent: number;
   allocationType?: 'direct' | 'indirect';
 }
 
@@ -275,7 +280,7 @@ export function getCogsBreakdown(
 }
 
 /**
- * Get OPEX breakdown by BU and Category
+ * Get OPEX breakdown by Category (flat list, no BU grouping)
  */
 export function getOpexBreakdown(
   startDate: string,
@@ -292,7 +297,7 @@ export function getOpexBreakdown(
     (bu === 'All Company' || !bu || o.bu === bu)
   );
   
-  // Group by BU and Category
+  // Group by Category only (aggregate across all BUs)
   const scenarioData = filtered.filter(o => o.scenario === scenario);
   const comparisonData = filtered.filter(o => o.scenario === comparison);
   
@@ -300,16 +305,14 @@ export function getOpexBreakdown(
   
   // Aggregate actual values
   scenarioData.forEach(opex => {
-    const key = `${opex.bu}-${opex.category}`;
+    const key = opex.category;
     const existing = rowMap.get(key);
     
     if (existing) {
       existing.actual += opex.amount;
     } else {
       rowMap.set(key, {
-        bu: opex.bu,
-        buDisplay: formatBUName(opex.bu),
-        subCategory: opex.category,
+        category: opex.category,
         actual: opex.amount,
         comparison: 0,
         delta: 0,
@@ -321,16 +324,14 @@ export function getOpexBreakdown(
   
   // Aggregate comparison values
   comparisonData.forEach(opex => {
-    const key = `${opex.bu}-${opex.category}`;
+    const key = opex.category;
     const existing = rowMap.get(key);
     
     if (existing) {
       existing.comparison += opex.amount;
     } else {
       rowMap.set(key, {
-        bu: opex.bu,
-        buDisplay: formatBUName(opex.bu),
-        subCategory: opex.category,
+        category: opex.category,
         actual: 0,
         comparison: opex.amount,
         delta: 0,

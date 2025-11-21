@@ -140,13 +140,13 @@ export function WaterfallDrilldownDrawer({
           {drilldownType === 'revenue' && (
             <>
               <RevenueDrilldownTable 
-                rows={data.rows}
+                rows={data.rows as any}
                 totalActual={data.totalActual}
                 totalComparison={data.totalComparison}
                 totalDelta={data.totalDelta}
                 totalDeltaPercent={data.totalDeltaPercent}
               />
-              <ConcentrationPanel metrics={calculateConcentration(data.rows, data.totalActual)} />
+              <ConcentrationPanel metrics={calculateConcentration(data.rows as any, data.totalActual)} />
             </>
           )}
           
@@ -162,7 +162,7 @@ export function WaterfallDrilldownDrawer({
                 />
               )}
               <RevenueDrilldownTable 
-                rows={data.rows}
+                rows={data.rows as any}
                 totalActual={data.totalActual}
                 totalComparison={data.totalComparison}
                 totalDelta={data.totalDelta}
@@ -183,7 +183,7 @@ export function WaterfallDrilldownDrawer({
                 />
               )}
               <RevenueDrilldownTable 
-                rows={data.rows}
+                rows={data.rows as any}
                 totalActual={data.totalActual}
                 totalComparison={data.totalComparison}
                 totalDelta={data.totalDelta}
@@ -204,7 +204,7 @@ export function WaterfallDrilldownDrawer({
                 />
               )}
               <OpexDrilldownTable 
-                rows={data.rows}
+                rows={data.rows as any}
                 totalActual={data.totalActual}
                 totalComparison={data.totalComparison}
                 totalDelta={data.totalDelta}

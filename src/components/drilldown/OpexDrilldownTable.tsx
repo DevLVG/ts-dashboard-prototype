@@ -1,5 +1,5 @@
 import { useState, useMemo, Fragment, useEffect, useRef } from "react";
-import { Download, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw } from "lucide-react";
+import { Download, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw, Eye } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -12,6 +12,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { getVarianceHexColor } from "@/lib/varianceColors";
 import { OpexRow } from "@/lib/drilldownData";
@@ -70,6 +72,32 @@ export function OpexDrilldownTable({
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const tableRef = useRef<HTMLDivElement>(null);
+  
+  // Column visibility state with localStorage persistence
+  const [visibleColumns, setVisibleColumns] = useState(() => {
+    const saved = localStorage.getItem('opex-column-visibility');
+    return saved ? JSON.parse(saved) : {
+      type: true,
+      actual: true,
+      comparison: true,
+      delta: true,
+      deltaPercent: true
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('opex-column-visibility', JSON.stringify(visibleColumns));
+  }, [visibleColumns]);
+
+  const toggleColumn = (column: keyof typeof visibleColumns) => {
+    const newVisibility = { ...visibleColumns, [column]: !visibleColumns[column] };
+    const hasAtLeastOneVisible = Object.values(newVisibility).some(v => v);
+    if (hasAtLeastOneVisible) {
+      setVisibleColumns(newVisibility);
+    }
+  };
+
+  const visibleCount = Object.values(visibleColumns).filter(Boolean).length;
 
   const handleExportCSV = (filtered: boolean = false) => {
     const exportRows = filtered ? Object.values(groupedData).flat() : rows;
@@ -112,6 +140,13 @@ export function OpexDrilldownTable({
     setSearchTerm("");
     setSortColumn(null);
     setSortDirection(null);
+    setVisibleColumns({
+      type: true,
+      actual: true,
+      comparison: true,
+      delta: true,
+      deltaPercent: true
+    });
   };
 
   const hasActiveFilters = searchTerm !== "" || sortColumn !== null;
@@ -298,6 +333,56 @@ export function OpexDrilldownTable({
           <kbd className="px-2 py-1 bg-muted rounded ml-1">ESC</kbd> Close
         </div>
         <div className="flex gap-2">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-2">
+                <Eye className="h-4 w-4" />
+                Columns ({visibleCount}/5)
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-56">
+              <div className="space-y-3">
+                <h4 className="font-semibold text-sm">Toggle Columns</h4>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox 
+                      checked={visibleColumns.type}
+                      onCheckedChange={() => toggleColumn('type')}
+                    />
+                    <span className="text-sm">Type</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox 
+                      checked={visibleColumns.actual}
+                      onCheckedChange={() => toggleColumn('actual')}
+                    />
+                    <span className="text-sm">Actual</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox 
+                      checked={visibleColumns.comparison}
+                      onCheckedChange={() => toggleColumn('comparison')}
+                    />
+                    <span className="text-sm">Comparison</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox 
+                      checked={visibleColumns.delta}
+                      onCheckedChange={() => toggleColumn('delta')}
+                    />
+                    <span className="text-sm">Delta (Δ)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox 
+                      checked={visibleColumns.deltaPercent}
+                      onCheckedChange={() => toggleColumn('deltaPercent')}
+                    />
+                    <span className="text-sm">Delta % (Δ%)</span>
+                  </label>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
           {hasActiveFilters && (
             <Button 
               variant="default" 
@@ -385,43 +470,53 @@ export function OpexDrilldownTable({
                   {getSortIcon('bu')}
                 </div>
               </TableHead>
-              <TableHead className="w-[12%]">Type</TableHead>
-              <TableHead 
-                className="text-right w-[15%] cursor-pointer hover:bg-muted/50"
-                onClick={() => handleSort('actual')}
-              >
-                <div className="flex items-center justify-end">
-                  Actual
-                  {getSortIcon('actual')}
-                </div>
-              </TableHead>
-              <TableHead 
-                className="text-right w-[15%] cursor-pointer hover:bg-muted/50"
-                onClick={() => handleSort('comparison')}
-              >
-                <div className="flex items-center justify-end">
-                  Comparison
-                  {getSortIcon('comparison')}
-                </div>
-              </TableHead>
-              <TableHead 
-                className="text-right w-[12%] cursor-pointer hover:bg-muted/50"
-                onClick={() => handleSort('delta')}
-              >
-                <div className="flex items-center justify-end">
-                  Δ
-                  {getSortIcon('delta')}
-                </div>
-              </TableHead>
-              <TableHead 
-                className="text-right w-[11%] cursor-pointer hover:bg-muted/50"
-                onClick={() => handleSort('deltaPercent')}
-              >
-                <div className="flex items-center justify-end">
-                  Δ%
-                  {getSortIcon('deltaPercent')}
-                </div>
-              </TableHead>
+              {visibleColumns.type && (
+                <TableHead className="w-[12%]">Type</TableHead>
+              )}
+              {visibleColumns.actual && (
+                <TableHead 
+                  className="text-right w-[15%] cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('actual')}
+                >
+                  <div className="flex items-center justify-end">
+                    Actual
+                    {getSortIcon('actual')}
+                  </div>
+                </TableHead>
+              )}
+              {visibleColumns.comparison && (
+                <TableHead 
+                  className="text-right w-[15%] cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('comparison')}
+                >
+                  <div className="flex items-center justify-end">
+                    Comparison
+                    {getSortIcon('comparison')}
+                  </div>
+                </TableHead>
+              )}
+              {visibleColumns.delta && (
+                <TableHead 
+                  className="text-right w-[12%] cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('delta')}
+                >
+                  <div className="flex items-center justify-end">
+                    Δ
+                    {getSortIcon('delta')}
+                  </div>
+                </TableHead>
+              )}
+              {visibleColumns.deltaPercent && (
+                <TableHead 
+                  className="text-right w-[11%] cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('deltaPercent')}
+                >
+                  <div className="flex items-center justify-end">
+                    Δ%
+                    {getSortIcon('deltaPercent')}
+                  </div>
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -449,51 +544,71 @@ export function OpexDrilldownTable({
                         {formatBUName(bu)}
                       </span>
                     </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        Mixed
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">{formatCurrency(buTotals.actual)}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(buTotals.comparison)}</TableCell>
-                    <TableCell className="text-right">{formatDelta(buTotals.delta)}</TableCell>
-                    <TableCell className="text-right">
-                      <Badge 
-                        style={{ 
-                          backgroundColor: `${getVarianceHexColor(buDeltaPercent, 'OpEx')}20`,
-                          color: getVarianceHexColor(buDeltaPercent, 'OpEx'),
-                          borderColor: getVarianceHexColor(buDeltaPercent, 'OpEx')
-                        }}
-                        className="border"
-                      >
-                        {formatPercent(buDeltaPercent)}
-                      </Badge>
-                    </TableCell>
+                    {visibleColumns.type && (
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">
+                          Mixed
+                        </Badge>
+                      </TableCell>
+                    )}
+                    {visibleColumns.actual && (
+                      <TableCell className="text-right">{formatCurrency(buTotals.actual)}</TableCell>
+                    )}
+                    {visibleColumns.comparison && (
+                      <TableCell className="text-right">{formatCurrency(buTotals.comparison)}</TableCell>
+                    )}
+                    {visibleColumns.delta && (
+                      <TableCell className="text-right">{formatDelta(buTotals.delta)}</TableCell>
+                    )}
+                    {visibleColumns.deltaPercent && (
+                      <TableCell className="text-right">
+                        <Badge 
+                          style={{ 
+                            backgroundColor: `${getVarianceHexColor(buDeltaPercent, 'OpEx')}20`,
+                            color: getVarianceHexColor(buDeltaPercent, 'OpEx'),
+                            borderColor: getVarianceHexColor(buDeltaPercent, 'OpEx')
+                          }}
+                          className="border"
+                        >
+                          {formatPercent(buDeltaPercent)}
+                        </Badge>
+                      </TableCell>
+                    )}
                   </TableRow>
                   
                   {/* Category Rows - Collapsible */}
                   {isExpanded && categories.map((category, idx) => (
                     <TableRow key={`${bu}-${category.subCategory}-${idx}`} className="text-sm">
                       <TableCell className="pl-10">{formatCategoryName(category.subCategory)}</TableCell>
-                      <TableCell>
-                        <Badge 
-                          variant={category.allocationType === 'direct' ? 'default' : 'secondary'}
-                          className="text-xs capitalize"
-                        >
-                          {category.allocationType}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">{formatCurrency(category.actual)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(category.comparison)}</TableCell>
-                      <TableCell className="text-right">{formatDelta(category.delta)}</TableCell>
-                      <TableCell className="text-right">
-                        <span 
-                          className="inline-flex items-center gap-1 font-medium"
-                          style={{ color: getVarianceHexColor(category.deltaPercent, 'OpEx') }}
-                        >
-                          {formatPercent(category.deltaPercent)}
-                        </span>
-                      </TableCell>
+                      {visibleColumns.type && (
+                        <TableCell>
+                          <Badge 
+                            variant={category.allocationType === 'direct' ? 'default' : 'secondary'}
+                            className="text-xs capitalize"
+                          >
+                            {category.allocationType}
+                          </Badge>
+                        </TableCell>
+                      )}
+                      {visibleColumns.actual && (
+                        <TableCell className="text-right">{formatCurrency(category.actual)}</TableCell>
+                      )}
+                      {visibleColumns.comparison && (
+                        <TableCell className="text-right">{formatCurrency(category.comparison)}</TableCell>
+                      )}
+                      {visibleColumns.delta && (
+                        <TableCell className="text-right">{formatDelta(category.delta)}</TableCell>
+                      )}
+                      {visibleColumns.deltaPercent && (
+                        <TableCell className="text-right">
+                          <span 
+                            className="inline-flex items-center gap-1 font-medium"
+                            style={{ color: getVarianceHexColor(category.deltaPercent, 'OpEx') }}
+                          >
+                            {formatPercent(category.deltaPercent)}
+                          </span>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </Fragment>
@@ -503,22 +618,32 @@ export function OpexDrilldownTable({
             {/* Total Row */}
             <TableRow className="font-bold border-t-2 bg-muted/30">
               <TableCell className="font-bold">TOTAL</TableCell>
-              <TableCell></TableCell>
-              <TableCell className="text-right font-bold">{formatCurrency(totalActual)}</TableCell>
-              <TableCell className="text-right font-bold">{formatCurrency(totalComparison)}</TableCell>
-              <TableCell className="text-right font-bold">{formatDelta(totalDelta)}</TableCell>
-              <TableCell className="text-right">
-                <Badge 
-                  style={{ 
-                    backgroundColor: `${getVarianceHexColor(totalDeltaPercent, 'OpEx')}30`,
-                    color: getVarianceHexColor(totalDeltaPercent, 'OpEx'),
-                    borderColor: getVarianceHexColor(totalDeltaPercent, 'OpEx')
-                  }}
-                  className="border font-bold"
-                >
-                  {formatPercent(totalDeltaPercent)}
-                </Badge>
-              </TableCell>
+              {visibleColumns.type && (
+                <TableCell></TableCell>
+              )}
+              {visibleColumns.actual && (
+                <TableCell className="text-right font-bold">{formatCurrency(totalActual)}</TableCell>
+              )}
+              {visibleColumns.comparison && (
+                <TableCell className="text-right font-bold">{formatCurrency(totalComparison)}</TableCell>
+              )}
+              {visibleColumns.delta && (
+                <TableCell className="text-right font-bold">{formatDelta(totalDelta)}</TableCell>
+              )}
+              {visibleColumns.deltaPercent && (
+                <TableCell className="text-right">
+                  <Badge 
+                    style={{ 
+                      backgroundColor: `${getVarianceHexColor(totalDeltaPercent, 'OpEx')}30`,
+                      color: getVarianceHexColor(totalDeltaPercent, 'OpEx'),
+                      borderColor: getVarianceHexColor(totalDeltaPercent, 'OpEx')
+                    }}
+                    className="border font-bold"
+                  >
+                    {formatPercent(totalDeltaPercent)}
+                  </Badge>
+                </TableCell>
+              )}
             </TableRow>
           </TableBody>
         </Table>
@@ -563,23 +688,29 @@ export function OpexDrilldownTable({
 
               {/* BU Totals */}
               <div className="text-sm space-y-1 mb-3 pb-3 border-b">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Actual:</span>
-                  <span className="font-medium">{formatCurrency(buTotals.actual)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Comparison:</span>
-                  <span className="font-medium">{formatCurrency(buTotals.comparison)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Variance:</span>
-                  <span 
-                    className="font-medium"
-                    style={{ color: getVarianceHexColor(buDeltaPercent, 'OpEx') }}
-                  >
-                    {formatDelta(buTotals.delta)}
-                  </span>
-                </div>
+                {visibleColumns.actual && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Actual:</span>
+                    <span className="font-medium">{formatCurrency(buTotals.actual)}</span>
+                  </div>
+                )}
+                {visibleColumns.comparison && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Comparison:</span>
+                    <span className="font-medium">{formatCurrency(buTotals.comparison)}</span>
+                  </div>
+                )}
+                {visibleColumns.delta && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Variance:</span>
+                    <span 
+                      className="font-medium"
+                      style={{ color: getVarianceHexColor(buDeltaPercent, 'OpEx') }}
+                    >
+                      {formatDelta(buTotals.delta)}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Category Details */}
@@ -592,39 +723,49 @@ export function OpexDrilldownTable({
                           <div className="font-medium text-sm mb-1">
                             {formatCategoryName(category.subCategory)}
                           </div>
-                          <Badge 
-                            variant={category.allocationType === 'direct' ? 'default' : 'secondary'}
-                            className="text-xs capitalize"
-                          >
-                            {category.allocationType}
-                          </Badge>
+                          {visibleColumns.type && (
+                            <Badge 
+                              variant={category.allocationType === 'direct' ? 'default' : 'secondary'}
+                              className="text-xs capitalize"
+                            >
+                              {category.allocationType}
+                            </Badge>
+                          )}
                         </div>
-                        <Badge 
-                          style={{ 
-                            backgroundColor: `${getVarianceHexColor(category.deltaPercent, 'OpEx')}20`,
-                            color: getVarianceHexColor(category.deltaPercent, 'OpEx'),
-                            borderColor: getVarianceHexColor(category.deltaPercent, 'OpEx')
-                          }}
-                          className="border text-xs"
-                        >
-                          {formatPercent(category.deltaPercent)}
-                        </Badge>
+                        {visibleColumns.deltaPercent && (
+                          <Badge 
+                            style={{ 
+                              backgroundColor: `${getVarianceHexColor(category.deltaPercent, 'OpEx')}20`,
+                              color: getVarianceHexColor(category.deltaPercent, 'OpEx'),
+                              borderColor: getVarianceHexColor(category.deltaPercent, 'OpEx')
+                            }}
+                            className="border text-xs"
+                          >
+                            {formatPercent(category.deltaPercent)}
+                          </Badge>
+                        )}
                       </div>
                       <div className="text-xs space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Actual:</span>
-                          <span>{formatCurrency(category.actual)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Comparison:</span>
-                          <span>{formatCurrency(category.comparison)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Variance:</span>
-                          <span style={{ color: getVarianceHexColor(category.deltaPercent, 'OpEx') }}>
-                            {formatDelta(category.delta)}
-                          </span>
-                        </div>
+                        {visibleColumns.actual && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Actual:</span>
+                            <span>{formatCurrency(category.actual)}</span>
+                          </div>
+                        )}
+                        {visibleColumns.comparison && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Comparison:</span>
+                            <span>{formatCurrency(category.comparison)}</span>
+                          </div>
+                        )}
+                        {visibleColumns.delta && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Variance:</span>
+                            <span style={{ color: getVarianceHexColor(category.deltaPercent, 'OpEx') }}>
+                              {formatDelta(category.delta)}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -650,23 +791,29 @@ export function OpexDrilldownTable({
             </Badge>
           </div>
           <div className="text-sm space-y-1">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Actual:</span>
-              <span className="font-bold">{formatCurrency(totalActual)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Comparison:</span>
-              <span className="font-bold">{formatCurrency(totalComparison)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Variance:</span>
-              <span 
-                className="font-bold"
-                style={{ color: getVarianceHexColor(totalDeltaPercent, 'OpEx') }}
-              >
-                {formatDelta(totalDelta)}
-              </span>
-            </div>
+            {visibleColumns.actual && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Actual:</span>
+                <span className="font-bold">{formatCurrency(totalActual)}</span>
+              </div>
+            )}
+            {visibleColumns.comparison && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Comparison:</span>
+                <span className="font-bold">{formatCurrency(totalComparison)}</span>
+              </div>
+            )}
+            {visibleColumns.delta && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Variance:</span>
+                <span 
+                  className="font-bold"
+                  style={{ color: getVarianceHexColor(totalDeltaPercent, 'OpEx') }}
+                >
+                  {formatDelta(totalDelta)}
+                </span>
+              </div>
+            )}
           </div>
         </Card>
       </div>

@@ -55,6 +55,7 @@ export interface EBITDAData {
   totalDeltaPercent: number;  // Total Δ%
   totalMargin: number;  // Total EBITDA% Act
   comparisonMargin: number;  // Total EBITDA% Cmp
+  deltaPP: number;  // Δpp (percentage point difference in margins)
 }
 
 export interface DrilldownData {
@@ -757,6 +758,7 @@ export function getEBITDABreakdown(
   
   const totalMargin = totalRevenue !== 0 ? (totalActual / totalRevenue) * 100 : 0;
   const comparisonMargin = comparisonRevenue !== 0 ? (totalComparison / comparisonRevenue) * 100 : 0;
+  const deltaPP = totalMargin - comparisonMargin;
   
   return {
     rows,
@@ -765,6 +767,7 @@ export function getEBITDABreakdown(
     totalDelta,
     totalDeltaPercent,
     totalMargin,
-    comparisonMargin
+    comparisonMargin,
+    deltaPP
   };
 }

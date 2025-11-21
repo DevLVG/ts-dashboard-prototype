@@ -600,10 +600,13 @@ export function getEBITDABreakdown(
   // Get COGS by BU
   const cogsData = getCogsBreakdown(startDate, endDate, scenario, comparison, bu);
   
+  // Get OPEX breakdown - use the standard function for consistency
+  const opexData = getOpexBreakdown(startDate, endDate, scenario, comparison, bu);
+  
   // Get comparison date range (shift back for PY)
   const { start: compStart, end: compEnd } = getComparisonDates(startDate, endDate, comparison);
   
-  // Get OPEX by BU (need to aggregate from the raw data)
+  // Aggregate OPEX by BU from the raw data (since getOpexBreakdown groups by category)
   const scenarioData = mockData.opex.filter(o => 
     o.date >= startDate &&
     o.date <= endDate &&
@@ -618,7 +621,6 @@ export function getEBITDABreakdown(
     (bu === 'All Company' || !bu || o.bu === bu)
   );
   
-  // Aggregate OPEX by BU
   const opexByBU = new Map<string, { actual: number; comparison: number }>();
   
   scenarioData.forEach(opex => {
@@ -722,15 +724,15 @@ export function getEBITDABreakdown(
     };
   });
   
-  // Calculate totals
+  // Calculate totals - use the OPEX breakdown total for accuracy
   const totalRevenue = revenueData.totalActual;
   const totalCOGS = cogsData.totalActual;
-  const totalOPEX = Array.from(opexByBU.values()).reduce((sum, o) => sum + o.actual, 0);
+  const totalOPEX = opexData.totalActual; // Use the breakdown function's total
   const totalEBITDA = totalRevenue - totalCOGS - totalOPEX;
   
   const comparisonRevenue = revenueData.totalComparison;
   const comparisonCOGS = cogsData.totalComparison;
-  const comparisonOPEX = Array.from(opexByBU.values()).reduce((sum, o) => sum + o.comparison, 0);
+  const comparisonOPEX = opexData.totalComparison; // Use the breakdown function's total
   const comparisonEBITDA = comparisonRevenue - comparisonCOGS - comparisonOPEX;
   
   const totalMargin = totalRevenue !== 0 ? (totalEBITDA / totalRevenue) * 100 : 0;

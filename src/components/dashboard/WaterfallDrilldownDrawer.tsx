@@ -106,7 +106,13 @@ export function WaterfallDrilldownDrawer({
   }
 
   // Get data for each type
-  const buCode = bu === "All Company" ? undefined : bu;
+  // Map display names to BU codes
+  const buCode = !bu || bu === "All Company" ? undefined : 
+    bu === "Equestrian" ? "BU1_Equestrian" :
+    bu === "Events" ? "BU2_Events" :
+    bu === "Retail" ? "BU3_Retail" :
+    bu === "Advisory" ? "BU4_Advisory" : 
+    bu; // If already a BU code, use it as-is
   
   let revenueData, cogsData, gmData, opexData, ebitdaData;
   

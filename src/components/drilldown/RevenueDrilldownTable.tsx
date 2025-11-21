@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { getVarianceTextColor } from "@/lib/varianceColors";
 import { DrilldownRow, formatCurrency, formatDelta, formatPercent, formatServiceName } from "@/lib/drilldownData";
 import { exportRevenueDrilldownToCSV, downloadCSV } from "@/lib/csvExport";
+import { SummaryStatistics } from "./SummaryStatistics";
 
 interface RevenueDrilldownTableProps {
   rows: DrilldownRow[];
@@ -144,6 +145,10 @@ export function RevenueDrilldownTable({
           Export CSV
         </Button>
       </div>
+
+      {/* Summary Statistics */}
+      <SummaryStatistics rows={rows} metricLabel={title} />
+
       {/* Desktop Table */}
       <div className="hidden md:block border rounded-lg">
         <Table>

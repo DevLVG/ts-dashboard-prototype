@@ -32,6 +32,29 @@ export interface OpexRow {
   subcategories: OpexSubcategory[];
 }
 
+export interface EBITDARow {
+  bu: string;
+  buDisplay: string;
+  revenue: number;
+  ebitda: number;
+  ebitdaMargin: number;
+  comparisonRevenue: number;
+  comparisonEBITDA: number;
+  comparisonMargin: number;
+  deltaPP: number;
+}
+
+export interface EBITDAData {
+  rows: EBITDARow[];
+  totalRevenue: number;
+  totalEBITDA: number;
+  totalMargin: number;
+  comparisonRevenue: number;
+  comparisonEBITDA: number;
+  comparisonMargin: number;
+  deltaPP: number;
+}
+
 export interface DrilldownData {
   rows: DrilldownRow[];
   totalActual: number;
@@ -509,6 +532,164 @@ export function getGMBreakdown(
     totalDeltaPercent,
     actualPercent,
     comparisonPercent,
+    deltaPP
+  };
+}
+
+/**
+ * Get EBITDA breakdown by BU
+ * EBITDA = Revenue - COGS - OPEX per BU
+ */
+export function getEBITDABreakdown(
+  startDate: string,
+  endDate: string,
+  scenario: string,
+  comparison: string,
+  bu?: string
+): EBITDAData {
+  // Get revenue by BU
+  const revenueData = getRevenueBreakdown(startDate, endDate, scenario, comparison, bu);
+  
+  // Get COGS by BU
+  const cogsData = getCogsBreakdown(startDate, endDate, scenario, comparison, bu);
+  
+  // Get OPEX by BU (need to aggregate from the raw data)
+  const filtered = mockData.opex.filter(o => 
+    o.date >= startDate &&
+    o.date <= endDate &&
+    (bu === 'All Company' || !bu || o.bu === bu)
+  );
+  
+  const scenarioData = filtered.filter(o => o.scenario === scenario);
+  const comparisonData = filtered.filter(o => o.scenario === comparison);
+  
+  // Aggregate OPEX by BU
+  const opexByBU = new Map<string, { actual: number; comparison: number }>();
+  
+  scenarioData.forEach(opex => {
+    const existing = opexByBU.get(opex.bu);
+    if (existing) {
+      existing.actual += opex.amount;
+    } else {
+      opexByBU.set(opex.bu, { actual: opex.amount, comparison: 0 });
+    }
+  });
+  
+  comparisonData.forEach(opex => {
+    const existing = opexByBU.get(opex.bu);
+    if (existing) {
+      existing.comparison += opex.amount;
+    } else {
+      opexByBU.set(opex.bu, { actual: 0, comparison: opex.amount });
+    }
+  });
+  
+  // Aggregate revenue and COGS by BU
+  const buMap = new Map<string, { 
+    revenue: number; 
+    cogs: number; 
+    opex: number;
+    comparisonRevenue: number;
+    comparisonCogs: number;
+    comparisonOpex: number;
+  }>();
+  
+  revenueData.rows.forEach(row => {
+    const existing = buMap.get(row.bu);
+    if (existing) {
+      existing.revenue += row.actual;
+      existing.comparisonRevenue += row.comparison;
+    } else {
+      buMap.set(row.bu, {
+        revenue: row.actual,
+        cogs: 0,
+        opex: 0,
+        comparisonRevenue: row.comparison,
+        comparisonCogs: 0,
+        comparisonOpex: 0
+      });
+    }
+  });
+  
+  cogsData.rows.forEach(row => {
+    const existing = buMap.get(row.bu);
+    if (existing) {
+      existing.cogs += row.actual;
+      existing.comparisonCogs += row.comparison;
+    } else {
+      buMap.set(row.bu, {
+        revenue: 0,
+        cogs: row.actual,
+        opex: 0,
+        comparisonRevenue: 0,
+        comparisonCogs: row.comparison,
+        comparisonOpex: 0
+      });
+    }
+  });
+  
+  opexByBU.forEach((amounts, buKey) => {
+    const existing = buMap.get(buKey);
+    if (existing) {
+      existing.opex = amounts.actual;
+      existing.comparisonOpex = amounts.comparison;
+    } else {
+      buMap.set(buKey, {
+        revenue: 0,
+        cogs: 0,
+        opex: amounts.actual,
+        comparisonRevenue: 0,
+        comparisonCogs: 0,
+        comparisonOpex: amounts.comparison
+      });
+    }
+  });
+  
+  // Build EBITDA rows
+  const rows: EBITDARow[] = Array.from(buMap.entries()).map(([buKey, data]) => {
+    const ebitda = data.revenue - data.cogs - data.opex;
+    const comparisonEBITDA = data.comparisonRevenue - data.comparisonCogs - data.comparisonOpex;
+    
+    const ebitdaMargin = data.revenue !== 0 ? (ebitda / data.revenue) * 100 : 0;
+    const comparisonMargin = data.comparisonRevenue !== 0 ? (comparisonEBITDA / data.comparisonRevenue) * 100 : 0;
+    const deltaPP = ebitdaMargin - comparisonMargin;
+    
+    return {
+      bu: buKey,
+      buDisplay: formatBUName(buKey),
+      revenue: data.revenue,
+      ebitda,
+      ebitdaMargin,
+      comparisonRevenue: data.comparisonRevenue,
+      comparisonEBITDA,
+      comparisonMargin,
+      deltaPP
+    };
+  });
+  
+  // Calculate totals
+  const totalRevenue = revenueData.totalActual;
+  const totalCOGS = cogsData.totalActual;
+  const totalOPEX = Array.from(opexByBU.values()).reduce((sum, o) => sum + o.actual, 0);
+  const totalEBITDA = totalRevenue - totalCOGS - totalOPEX;
+  
+  const comparisonRevenue = revenueData.totalComparison;
+  const comparisonCOGS = cogsData.totalComparison;
+  const comparisonOPEX = Array.from(opexByBU.values()).reduce((sum, o) => sum + o.comparison, 0);
+  const comparisonEBITDA = comparisonRevenue - comparisonCOGS - comparisonOPEX;
+  
+  const totalMargin = totalRevenue !== 0 ? (totalEBITDA / totalRevenue) * 100 : 0;
+  const comparisonMargin = comparisonRevenue !== 0 ? (comparisonEBITDA / comparisonRevenue) * 100 : 0;
+  const deltaPP = totalMargin - comparisonMargin;
+  
+  return {
+    rows,
+    totalRevenue,
+    totalEBITDA,
+    totalMargin,
+    comparisonRevenue,
+    comparisonEBITDA,
+    comparisonMargin,
     deltaPP
   };
 }

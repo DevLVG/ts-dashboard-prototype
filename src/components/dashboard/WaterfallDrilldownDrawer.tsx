@@ -4,15 +4,16 @@ import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { RevenueDrilldownTable } from "@/components/drilldown/RevenueDrilldownTable";
 import { OpexDrilldownTable } from "@/components/drilldown/OpexDrilldownTable";
+import { EBITDADrilldownTable } from "@/components/drilldown/EBITDADrilldownTable";
 import { SummaryPanel } from "@/components/drilldown/SummaryPanel";
 import { ConcentrationPanel } from "@/components/drilldown/ConcentrationPanel";
-import { getRevenueBreakdown, getCogsBreakdown, getOpexBreakdown, getGMBreakdown } from "@/lib/drilldownData";
+import { getRevenueBreakdown, getCogsBreakdown, getOpexBreakdown, getGMBreakdown, getEBITDABreakdown } from "@/lib/drilldownData";
 import { calculateConcentration } from "@/lib/concentration";
 
 interface WaterfallDrilldownDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  drilldownType: 'revenue' | 'cogs' | 'gm' | 'opex' | 'ebitda' | 'net_income' | null;
+  drilldownType: 'revenue' | 'cogs' | 'gm' | 'opex' | 'ebitda' | 'netIncome' | 'da' | 'interest' | 'taxes' | 'ebt' | null;
   period: { start: string; end: string; label: string };
   scenario: string;
   comparison: string; // "Budget_Base" | "Budget_Worst" | "Budget_Best" | "Actual" (for PY)
@@ -43,55 +44,6 @@ export function WaterfallDrilldownDrawer({
   
   if (!drilldownType) return null;
 
-  // Get the appropriate data based on drilldown type
-  const getData = () => {
-    const buCode = bu === "All Company" ? undefined : bu;
-    
-    switch (drilldownType) {
-      case 'revenue':
-        return getRevenueBreakdown(period.start, period.end, scenario, comparison, buCode);
-      case 'cogs': {
-        const revenueData = getRevenueBreakdown(period.start, period.end, scenario, comparison, buCode);
-        return getCogsBreakdown(period.start, period.end, scenario, comparison, buCode, {
-          actual: revenueData.totalActual,
-          comparison: revenueData.totalComparison
-        });
-      }
-      case 'gm':
-        return getGMBreakdown(period.start, period.end, scenario, comparison, buCode);
-      case 'opex': {
-        const revenueData = getRevenueBreakdown(period.start, period.end, scenario, comparison, buCode);
-        return getOpexBreakdown(period.start, period.end, scenario, comparison, buCode, {
-          actual: revenueData.totalActual,
-          comparison: revenueData.totalComparison
-        });
-      }
-      case 'ebitda': {
-        const revenueData = getRevenueBreakdown(period.start, period.end, scenario, comparison, buCode);
-        const gmData = getGMBreakdown(period.start, period.end, scenario, comparison, buCode);
-        const opexData = getOpexBreakdown(period.start, period.end, scenario, comparison, buCode);
-        const totalActual = gmData.totalActual - opexData.totalActual;
-        const totalComparison = gmData.totalComparison - opexData.totalComparison;
-        const actualPercent = revenueData.totalActual !== 0 ? (totalActual / revenueData.totalActual) * 100 : 0;
-        const comparisonPercent = revenueData.totalComparison !== 0 ? (totalComparison / revenueData.totalComparison) * 100 : 0;
-        return {
-          rows: [],
-          totalActual,
-          totalComparison,
-          totalDelta: totalActual - totalComparison,
-          totalDeltaPercent: totalComparison !== 0 ? ((totalActual - totalComparison) / Math.abs(totalComparison)) * 100 : 0,
-          actualPercent,
-          comparisonPercent,
-          deltaPP: actualPercent - comparisonPercent
-        };
-      }
-      default:
-        return { rows: [], totalActual: 0, totalComparison: 0, totalDelta: 0, totalDeltaPercent: 0 };
-    }
-  };
-
-  const data = getData();
-
   // Get title based on drilldown type
   const getTitle = () => {
     switch (drilldownType) {
@@ -105,8 +57,16 @@ export function WaterfallDrilldownDrawer({
         return 'Operating Expenses Breakdown';
       case 'ebitda':
         return 'EBITDA Breakdown';
-      case 'net_income':
+      case 'netIncome':
         return 'Net Income Breakdown';
+      case 'da':
+        return 'Depreciation & Amortization';
+      case 'interest':
+        return 'Interest';
+      case 'taxes':
+        return 'Taxes';
+      case 'ebt':
+        return 'EBT';
       default:
         return 'Breakdown';
     }
@@ -120,6 +80,55 @@ export function WaterfallDrilldownDrawer({
     
     return `${period.label} • ${bu || "All Company"} • ${comparisonLabel}`;
   };
+
+  // Check if this is a zero-amount metric (D&A, Interest, Taxes, EBT)
+  if (['da', 'interest', 'taxes', 'ebt'].includes(drilldownType || '')) {
+    return (
+      <Drawer open={isOpen} onOpenChange={onClose}>
+        <DrawerContent className="h-[90vh]">
+          <DrawerHeader className="border-b">
+            <div className="flex items-center justify-between">
+              <div>
+                <DrawerTitle className="text-xl">{getTitle()}</DrawerTitle>
+                <p className="text-sm text-muted-foreground mt-1">{getSubtitle()}</p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={onClose}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </DrawerHeader>
+          <div className="flex items-center justify-center h-full">
+            <p className="text-muted-foreground text-center">No data for this period</p>
+          </div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  // Get data for each type
+  const buCode = bu === "All Company" ? undefined : bu;
+  
+  let revenueData, cogsData, gmData, opexData, ebitdaData;
+  
+  if (drilldownType === 'revenue') {
+    revenueData = getRevenueBreakdown(period.start, period.end, scenario, comparison, buCode);
+  } else if (drilldownType === 'cogs') {
+    const revData = getRevenueBreakdown(period.start, period.end, scenario, comparison, buCode);
+    cogsData = getCogsBreakdown(period.start, period.end, scenario, comparison, buCode, {
+      actual: revData.totalActual,
+      comparison: revData.totalComparison
+    });
+  } else if (drilldownType === 'gm') {
+    gmData = getGMBreakdown(period.start, period.end, scenario, comparison, buCode);
+  } else if (drilldownType === 'opex') {
+    const revData = getRevenueBreakdown(period.start, period.end, scenario, comparison, buCode);
+    opexData = getOpexBreakdown(period.start, period.end, scenario, comparison, buCode, {
+      actual: revData.totalActual,
+      comparison: revData.totalComparison
+    });
+  } else if (drilldownType === 'ebitda' || drilldownType === 'netIncome') {
+    ebitdaData = getEBITDABreakdown(period.start, period.end, scenario, comparison, buCode);
+  }
 
   return (
     <Drawer open={isOpen} onOpenChange={onClose}>
@@ -136,104 +145,94 @@ export function WaterfallDrilldownDrawer({
           </div>
         </DrawerHeader>
         
-        <div className="overflow-y-auto p-6">
-          {drilldownType === 'revenue' && (
+        <div className="overflow-y-auto p-6 space-y-6">
+          {drilldownType === 'revenue' && revenueData && (
             <>
               <RevenueDrilldownTable 
-                rows={data.rows as any}
-                totalActual={data.totalActual}
-                totalComparison={data.totalComparison}
-                totalDelta={data.totalDelta}
-                totalDeltaPercent={data.totalDeltaPercent}
+                rows={revenueData.rows as any}
+                totalActual={revenueData.totalActual}
+                totalComparison={revenueData.totalComparison}
+                totalDelta={revenueData.totalDelta}
+                totalDeltaPercent={revenueData.totalDeltaPercent}
               />
-              <ConcentrationPanel metrics={calculateConcentration(data.rows as any, data.totalActual)} />
+              <ConcentrationPanel metrics={calculateConcentration(revenueData.rows as any, revenueData.totalActual)} />
             </>
           )}
           
-          {drilldownType === 'cogs' && (
+          {drilldownType === 'cogs' && cogsData && (
             <>
-              {data.actualPercent !== undefined && data.comparisonPercent !== undefined && data.deltaPP !== undefined && (
+              {cogsData.actualPercent !== undefined && cogsData.comparisonPercent !== undefined && cogsData.deltaPP !== undefined && (
                 <SummaryPanel
                   label="COGS % of Revenue"
-                  actualPercent={data.actualPercent}
-                  comparisonPercent={data.comparisonPercent}
-                  deltaPP={data.deltaPP}
+                  actualPercent={cogsData.actualPercent}
+                  comparisonPercent={cogsData.comparisonPercent}
+                  deltaPP={cogsData.deltaPP}
                   colorLogic="lower-is-better"
                 />
               )}
               <RevenueDrilldownTable 
-                rows={data.rows as any}
-                totalActual={data.totalActual}
-                totalComparison={data.totalComparison}
-                totalDelta={data.totalDelta}
-                totalDeltaPercent={data.totalDeltaPercent}
+                rows={cogsData.rows as any}
+                totalActual={cogsData.totalActual}
+                totalComparison={cogsData.totalComparison}
+                totalDelta={cogsData.totalDelta}
+                totalDeltaPercent={cogsData.totalDeltaPercent}
               />
             </>
           )}
           
-          {drilldownType === 'gm' && (
+          {drilldownType === 'gm' && gmData && (
             <>
-              {data.actualPercent !== undefined && data.comparisonPercent !== undefined && data.deltaPP !== undefined && (
+              {gmData.actualPercent !== undefined && gmData.comparisonPercent !== undefined && gmData.deltaPP !== undefined && (
                 <SummaryPanel
                   label="Gross Margin %"
-                  actualPercent={data.actualPercent}
-                  comparisonPercent={data.comparisonPercent}
-                  deltaPP={data.deltaPP}
+                  actualPercent={gmData.actualPercent}
+                  comparisonPercent={gmData.comparisonPercent}
+                  deltaPP={gmData.deltaPP}
                   colorLogic="higher-is-better"
                 />
               )}
               <RevenueDrilldownTable 
-                rows={data.rows as any}
-                totalActual={data.totalActual}
-                totalComparison={data.totalComparison}
-                totalDelta={data.totalDelta}
-                totalDeltaPercent={data.totalDeltaPercent}
+                rows={gmData.rows as any}
+                totalActual={gmData.totalActual}
+                totalComparison={gmData.totalComparison}
+                totalDelta={gmData.totalDelta}
+                totalDeltaPercent={gmData.totalDeltaPercent}
               />
             </>
           )}
           
-          {drilldownType === 'opex' && (
+          {drilldownType === 'opex' && opexData && (
             <>
-              {data.actualPercent !== undefined && data.comparisonPercent !== undefined && data.deltaPP !== undefined && (
+              {opexData.actualPercent !== undefined && opexData.comparisonPercent !== undefined && opexData.deltaPP !== undefined && (
                 <SummaryPanel
                   label="OpEx % of Revenue"
-                  actualPercent={data.actualPercent}
-                  comparisonPercent={data.comparisonPercent}
-                  deltaPP={data.deltaPP}
+                  actualPercent={opexData.actualPercent}
+                  comparisonPercent={opexData.comparisonPercent}
+                  deltaPP={opexData.deltaPP}
                   colorLogic="lower-is-better"
                 />
               )}
               <OpexDrilldownTable 
-                rows={data.rows as any}
-                totalActual={data.totalActual}
-                totalComparison={data.totalComparison}
-                totalDelta={data.totalDelta}
-                totalDeltaPercent={data.totalDeltaPercent}
+                rows={opexData.rows as any}
+                totalActual={opexData.totalActual}
+                totalComparison={opexData.totalComparison}
+                totalDelta={opexData.totalDelta}
+                totalDeltaPercent={opexData.totalDeltaPercent}
               />
             </>
           )}
           
-          {drilldownType === 'ebitda' && (
+          {(drilldownType === 'ebitda' || drilldownType === 'netIncome') && ebitdaData && (
             <>
-              {data.actualPercent !== undefined && data.comparisonPercent !== undefined && data.deltaPP !== undefined && (
-                <SummaryPanel
-                  label="EBITDA %"
-                  actualPercent={data.actualPercent}
-                  comparisonPercent={data.comparisonPercent}
-                  deltaPP={data.deltaPP}
-                  colorLogic="higher-is-better"
-                />
-              )}
-              <div className="text-center text-muted-foreground py-8">
-                Detailed breakdown coming soon
-              </div>
+              <SummaryPanel
+                label={drilldownType === 'ebitda' ? 'EBITDA Margin' : 'Net Income Margin'}
+                actualPercent={ebitdaData.totalMargin}
+                comparisonPercent={ebitdaData.comparisonMargin}
+                deltaPP={ebitdaData.deltaPP}
+                colorLogic="higher-is-better"
+              />
+              <EBITDADrilldownTable data={ebitdaData} />
             </>
-          )}
-          
-          {drilldownType === 'net_income' && (
-            <div className="text-center text-muted-foreground py-8">
-              Drill-down coming soon
-            </div>
           )}
         </div>
       </DrawerContent>

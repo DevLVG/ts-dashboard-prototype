@@ -1,5 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine, LabelList } from "recharts";
 import { useState } from "react";
 import { getMonthlyPLData, calculateGM, calculateEBITDA } from "@/data/financialData";
@@ -13,9 +14,11 @@ interface PerformanceWaterfallProps {
 }
 
 export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selectedBU }: PerformanceWaterfallProps) => {
+  const { toast } = useToast();
+  
   // Drill-down state
   const [drilldownOpen, setDrilldownOpen] = useState(false);
-  const [drilldownType, setDrilldownType] = useState<'revenue' | 'cogs' | 'gm' | 'opex' | 'ebitda' | 'net_income' | null>(null);
+  const [drilldownType, setDrilldownType] = useState<'revenue' | 'cogs' | 'gm' | 'opex' | 'ebitda' | 'netIncome' | 'da' | 'interest' | 'taxes' | 'ebt' | null>(null);
 
   // Get data using the new financial data system
   const buCode = selectedBU === "All Company" ? undefined : 
@@ -169,17 +172,30 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
 
   // Handle bar click for drill-down
   const handleBarClick = (data: any) => {
-    const typeMap: Record<string, 'revenue' | 'cogs' | 'gm' | 'opex' | 'ebitda' | 'net_income'> = {
+    const typeMap: Record<string, 'revenue' | 'cogs' | 'gm' | 'opex' | 'ebitda' | 'netIncome' | 'da' | 'interest' | 'taxes' | 'ebt'> = {
       'Revenues': 'revenue',
       'COGS': 'cogs',
       'GM': 'gm',
       'OpEx': 'opex',
       'EBITDA': 'ebitda',
-      'Net Income': 'net_income'
+      'D&A': 'da',
+      'Interest': 'interest',
+      'EBT': 'ebt',
+      'Taxes': 'taxes',
+      'Net Income': 'netIncome'
     };
     
     const type = typeMap[data.label];
     if (type) {
+      // Check if the amount is zero for certain types
+      if (data.value === 0 && ['da', 'interest', 'taxes', 'ebt'].includes(type)) {
+        toast({
+          title: "No data available",
+          description: "No data for this period",
+        });
+        return;
+      }
+      
       setDrilldownType(type);
       setDrilldownOpen(true);
     }

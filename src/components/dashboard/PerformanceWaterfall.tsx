@@ -503,7 +503,7 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
         period={getPeriodDates()}
         scenario="Actual"
         comparison={selectedScenario === "PY" ? "Actual" : selectedScenario}
-        bu={buCode}
+        bu={selectedBU}
       />
     </Card>
   );

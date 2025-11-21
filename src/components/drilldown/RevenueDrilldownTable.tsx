@@ -1,10 +1,12 @@
 import { useState, useMemo, Fragment, useEffect, useRef } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getVarianceTextColor } from "@/lib/varianceColors";
 import { DrilldownRow, formatCurrency, formatDelta, formatPercent, formatServiceName } from "@/lib/drilldownData";
+import { exportRevenueDrilldownToCSV, downloadCSV } from "@/lib/csvExport";
 
 interface RevenueDrilldownTableProps {
   rows: DrilldownRow[];
@@ -12,6 +14,7 @@ interface RevenueDrilldownTableProps {
   totalComparison: number;
   totalDelta: number;
   totalDeltaPercent: number;
+  title?: string;
 }
 
 export function RevenueDrilldownTable({ 
@@ -19,11 +22,25 @@ export function RevenueDrilldownTable({
   totalActual, 
   totalComparison, 
   totalDelta, 
-  totalDeltaPercent 
+  totalDeltaPercent,
+  title = 'Revenue'
 }: RevenueDrilldownTableProps) {
   const [expandedBUs, setExpandedBUs] = useState<Set<string>>(new Set());
   const [selectedBUIndex, setSelectedBUIndex] = useState<number>(0);
   const tableRef = useRef<HTMLDivElement>(null);
+
+  const handleExportCSV = () => {
+    const csvContent = exportRevenueDrilldownToCSV(
+      rows,
+      totalActual,
+      totalComparison,
+      totalDelta,
+      totalDeltaPercent,
+      title
+    );
+    const timestamp = new Date().toISOString().split('T')[0];
+    downloadCSV(csvContent, `${title.toLowerCase()}_drilldown_${timestamp}.csv`);
+  };
 
   // Group data by BU
   const groupedData = useMemo(() => {
@@ -110,11 +127,22 @@ export function RevenueDrilldownTable({
 
   return (
     <div className="space-y-4" ref={tableRef} tabIndex={0}>
-      <div className="text-xs text-muted-foreground mb-2">
-        <kbd className="px-2 py-1 bg-muted rounded">↑↓</kbd> Navigate • 
-        <kbd className="px-2 py-1 bg-muted rounded ml-1">→</kbd> Expand • 
-        <kbd className="px-2 py-1 bg-muted rounded ml-1">←</kbd> Collapse • 
-        <kbd className="px-2 py-1 bg-muted rounded ml-1">ESC</kbd> Close
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-muted-foreground">
+          <kbd className="px-2 py-1 bg-muted rounded">↑↓</kbd> Navigate • 
+          <kbd className="px-2 py-1 bg-muted rounded ml-1">→</kbd> Expand • 
+          <kbd className="px-2 py-1 bg-muted rounded ml-1">←</kbd> Collapse • 
+          <kbd className="px-2 py-1 bg-muted rounded ml-1">ESC</kbd> Close
+        </div>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={handleExportCSV}
+          className="gap-2"
+        >
+          <Download className="h-4 w-4" />
+          Export CSV
+        </Button>
       </div>
       {/* Desktop Table */}
       <div className="hidden md:block border rounded-lg">

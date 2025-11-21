@@ -145,6 +145,7 @@ export function WaterfallDrilldownDrawer({
                 totalComparison={data.totalComparison}
                 totalDelta={data.totalDelta}
                 totalDeltaPercent={data.totalDeltaPercent}
+                title="Revenue"
               />
               <ConcentrationPanel metrics={calculateConcentration(data.rows, data.totalActual)} />
             </>
@@ -167,6 +168,7 @@ export function WaterfallDrilldownDrawer({
                 totalComparison={data.totalComparison}
                 totalDelta={data.totalDelta}
                 totalDeltaPercent={data.totalDeltaPercent}
+                title="COGS"
               />
             </>
           )}
@@ -188,6 +190,7 @@ export function WaterfallDrilldownDrawer({
                 totalComparison={data.totalComparison}
                 totalDelta={data.totalDelta}
                 totalDeltaPercent={data.totalDeltaPercent}
+                title="Gross Margin"
               />
             </>
           )}
@@ -209,6 +212,7 @@ export function WaterfallDrilldownDrawer({
                 totalComparison={data.totalComparison}
                 totalDelta={data.totalDelta}
                 totalDeltaPercent={data.totalDeltaPercent}
+                title="Operating Expenses"
               />
             </>
           )}

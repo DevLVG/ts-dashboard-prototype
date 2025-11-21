@@ -203,7 +203,8 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
               dataKey="variance" 
               position="right"
               formatter={(value: number) => `${value.toFixed(1)}%`}
-              style={{ fill: '#ffffff', fontWeight: 600, fontSize: 12 }}
+              fill="#ffffff"
+              style={{ fontWeight: 600, fontSize: 12 }}
             />
           </Bar>
         </BarChart>

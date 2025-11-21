@@ -24,6 +24,9 @@ export interface DrilldownData {
   totalComparison: number;
   totalDelta: number;
   totalDeltaPercent: number;
+  actualPercent?: number;
+  comparisonPercent?: number;
+  deltaPP?: number;
 }
 
 /**
@@ -169,7 +172,8 @@ export function getCogsBreakdown(
   endDate: string,
   scenario: string,
   comparison: string,
-  bu?: string
+  bu?: string,
+  totalRevenue?: { actual: number; comparison: number }
 ): DrilldownData {
   // Filter COGS by date range
   const filtered = mockData.cogs.filter(c => 
@@ -246,12 +250,27 @@ export function getCogsBreakdown(
     ? (totalDelta / Math.abs(totalComparison)) * 100 
     : 0;
   
+  // Calculate percentages if revenue totals provided
+  let actualPercent, comparisonPercent, deltaPP;
+  if (totalRevenue) {
+    actualPercent = totalRevenue.actual !== 0 
+      ? (totalActual / totalRevenue.actual) * 100 
+      : 0;
+    comparisonPercent = totalRevenue.comparison !== 0 
+      ? (totalComparison / totalRevenue.comparison) * 100 
+      : 0;
+    deltaPP = actualPercent - comparisonPercent;
+  }
+  
   return {
     rows,
     totalActual,
     totalComparison,
     totalDelta,
-    totalDeltaPercent
+    totalDeltaPercent,
+    actualPercent,
+    comparisonPercent,
+    deltaPP
   };
 }
 
@@ -263,8 +282,9 @@ export function getOpexBreakdown(
   endDate: string,
   scenario: string,
   comparison: string,
-  bu?: string
-): { rows: OpexRow[]; totalActual: number; totalComparison: number; totalDelta: number; totalDeltaPercent: number } {
+  bu?: string,
+  totalRevenue?: { actual: number; comparison: number }
+): { rows: OpexRow[]; totalActual: number; totalComparison: number; totalDelta: number; totalDeltaPercent: number; actualPercent?: number; comparisonPercent?: number; deltaPP?: number } {
   // Filter OPEX by date range
   const filtered = mockData.opex.filter(o => 
     o.date >= startDate &&
@@ -342,12 +362,27 @@ export function getOpexBreakdown(
     ? (totalDelta / Math.abs(totalComparison)) * 100 
     : 0;
   
+  // Calculate percentages if revenue totals provided
+  let actualPercent, comparisonPercent, deltaPP;
+  if (totalRevenue) {
+    actualPercent = totalRevenue.actual !== 0 
+      ? (totalActual / totalRevenue.actual) * 100 
+      : 0;
+    comparisonPercent = totalRevenue.comparison !== 0 
+      ? (totalComparison / totalRevenue.comparison) * 100 
+      : 0;
+    deltaPP = actualPercent - comparisonPercent;
+  }
+  
   return {
     rows,
     totalActual,
     totalComparison,
     totalDelta,
-    totalDeltaPercent
+    totalDeltaPercent,
+    actualPercent,
+    comparisonPercent,
+    deltaPP
   };
 }
 
@@ -362,7 +397,10 @@ export function getGMBreakdown(
   bu?: string
 ): DrilldownData {
   const revenueData = getRevenueBreakdown(startDate, endDate, scenario, comparison, bu);
-  const cogsData = getCogsBreakdown(startDate, endDate, scenario, comparison, bu);
+  const cogsData = getCogsBreakdown(startDate, endDate, scenario, comparison, bu, {
+    actual: revenueData.totalActual,
+    comparison: revenueData.totalComparison
+  });
   
   // Create a map for easy lookup
   const cogsMap = new Map<string, DrilldownRow>();
@@ -401,11 +439,23 @@ export function getGMBreakdown(
     ? (totalDelta / Math.abs(totalComparison)) * 100 
     : 0;
   
+  // Calculate GM percentages
+  const actualPercent = revenueData.totalActual !== 0 
+    ? (totalActual / revenueData.totalActual) * 100 
+    : 0;
+  const comparisonPercent = revenueData.totalComparison !== 0 
+    ? (totalComparison / revenueData.totalComparison) * 100 
+    : 0;
+  const deltaPP = actualPercent - comparisonPercent;
+  
   return {
     rows,
     totalActual,
     totalComparison,
     totalDelta,
-    totalDeltaPercent
+    totalDeltaPercent,
+    actualPercent,
+    comparisonPercent,
+    deltaPP
   };
 }

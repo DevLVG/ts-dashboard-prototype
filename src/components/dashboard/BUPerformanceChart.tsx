@@ -204,7 +204,12 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
               position="right"
               formatter={(value: number) => `${value.toFixed(1)}%`}
               fill="#ffffff"
-              style={{ fontWeight: 600, fontSize: 12 }}
+              style={{ 
+                fontWeight: 600, 
+                fontSize: 12,
+                textShadow: '0 0 3px rgba(0,0,0,0.8), 0 0 6px rgba(0,0,0,0.5)',
+                paintOrder: 'stroke fill'
+              }}
             />
           </Bar>
         </BarChart>

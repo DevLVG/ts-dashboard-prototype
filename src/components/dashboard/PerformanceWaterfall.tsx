@@ -253,10 +253,10 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
       metricLabel = "EBITDA";
     }
     
-    // Get base color and apply transparency (matching /overview style)
+    // Get base color and apply KPI card transparency (10-15%)
     const baseColor = getVarianceHexColor(variance, metricLabel);
     
-    // Convert hex to rgba with opacity
+    // Convert hex to rgba with KPI card opacity (matching overview cards)
     const hexToRgba = (hex: string, opacity: number) => {
       const r = parseInt(hex.slice(1, 3), 16);
       const g = parseInt(hex.slice(3, 5), 16);
@@ -264,7 +264,39 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
       return `rgba(${r}, ${g}, ${b}, ${opacity})`;
     };
     
-    return hexToRgba(baseColor, 0.85);
+    // Use 15% opacity for warning (yellow), 10% for success/destructive (matching KPI cards)
+    const opacity = baseColor === "#ffc107" ? 0.15 : 0.10;
+    return hexToRgba(baseColor, opacity);
+  };
+
+  const getBarStroke = (value: number, comparisonValue: number, type: string, label: string) => {
+    const variance = comparisonValue !== 0 
+      ? ((value - comparisonValue) / Math.abs(comparisonValue)) * 100 
+      : 0;
+    
+    // Determine metric label for color logic
+    let metricLabel = "Revenue";
+    if (label.includes("OpEx") || type === "decrease") {
+      metricLabel = "OpEx";
+    } else if (label.includes("GM") || label.includes("Gross")) {
+      metricLabel = "GM";
+    } else if (label.includes("EBITDA")) {
+      metricLabel = "EBITDA";
+    }
+    
+    // Get base color for border (30-40% opacity like KPI cards)
+    const baseColor = getVarianceHexColor(variance, metricLabel);
+    
+    const hexToRgba = (hex: string, opacity: number) => {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    };
+    
+    // Border opacity: 40% for warning, 30% for others (matching KPI cards)
+    const strokeOpacity = baseColor === "#ffc107" ? 0.40 : 0.30;
+    return hexToRgba(baseColor, strokeOpacity);
   };
 
   const renderCustomLabel = (props: any) => {
@@ -478,8 +510,7 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
           <Bar 
             dataKey={(entry) => entry.end - entry.start} 
             stackId="a"
-            stroke="transparent"
-            strokeWidth={0}
+            strokeWidth={2}
             radius={[8, 8, 8, 8]}
             onClick={handleBarClick}
             cursor="pointer"
@@ -488,6 +519,7 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
               <Cell 
                 key={`cell-${index}`} 
                 fill={getBarColor(entry.value, entry.comparisonValue, entry.type, entry.label)}
+                stroke={getBarStroke(entry.value, entry.comparisonValue, entry.type, entry.label)}
               />
             ))}
             <LabelList content={renderCustomLabel} />

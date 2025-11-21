@@ -178,10 +178,6 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
           />
           <Legend 
             content={({ payload }) => {
-              // Get the color from the first BU's variance for the Actual legend
-              const firstBUVariance = chartData.length > 0 ? chartData[0].variance : 0;
-              const actualColor = getBarFill(firstBUVariance);
-              
               return (
                 <ul className="flex items-center justify-center gap-6 mt-4">
                   <li className="flex items-center gap-2">
@@ -195,8 +191,8 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
                     <div 
                       className="w-4 h-4 rounded border-2" 
                       style={{ 
-                        backgroundColor: actualColor,
-                        borderColor: getBarStroke(firstBUVariance)
+                        backgroundColor: 'rgba(0, 0, 0, 0.15)',
+                        borderColor: 'rgba(0, 0, 0, 0.5)'
                       }}
                     />
                     <span className="text-sm text-muted-foreground">Actual</span>

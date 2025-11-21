@@ -108,6 +108,32 @@ export const formatPercent = (value: number): string => {
 };
 
 /**
+ * Shift date back by specified number of years
+ */
+function shiftDateBack(date: string, years: number): string {
+  const d = new Date(date);
+  d.setFullYear(d.getFullYear() - years);
+  return d.toISOString().split('T')[0];
+}
+
+/**
+ * Get comparison date range (shift back for PY)
+ */
+function getComparisonDates(
+  startDate: string,
+  endDate: string,
+  comparison: string
+): { start: string; end: string } {
+  if (comparison === 'Actual') {  // PY comparison
+    return {
+      start: shiftDateBack(startDate, 1),
+      end: shiftDateBack(endDate, 1)
+    };
+  }
+  return { start: startDate, end: endDate };
+}
+
+/**
  * Get Revenue breakdown by BU and Service
  */
 export function getRevenueBreakdown(
@@ -117,16 +143,23 @@ export function getRevenueBreakdown(
   comparison: string,
   bu?: string
 ): DrilldownData {
+  // Get comparison date range (shift back for PY)
+  const { start: compStart, end: compEnd } = getComparisonDates(startDate, endDate, comparison);
+  
   // Filter revenues by date range
-  const filtered = mockData.revenues.filter(r => 
+  const scenarioData = mockData.revenues.filter(r => 
     r.date >= startDate &&
     r.date <= endDate &&
+    r.scenario === scenario &&
     (bu === 'All Company' || !bu || r.bu === bu)
   );
   
-  // Group by BU and Service
-  const scenarioData = filtered.filter(r => r.scenario === scenario);
-  const comparisonData = filtered.filter(r => r.scenario === comparison);
+  const comparisonData = mockData.revenues.filter(r =>
+    r.date >= compStart &&
+    r.date <= compEnd &&
+    r.scenario === comparison &&
+    (bu === 'All Company' || !bu || r.bu === bu)
+  );
   
   const rowMap = new Map<string, DrilldownRow>();
   
@@ -212,16 +245,23 @@ export function getCogsBreakdown(
   bu?: string,
   totalRevenue?: { actual: number; comparison: number }
 ): DrilldownData {
+  // Get comparison date range (shift back for PY)
+  const { start: compStart, end: compEnd } = getComparisonDates(startDate, endDate, comparison);
+  
   // Filter COGS by date range
-  const filtered = mockData.cogs.filter(c => 
+  const scenarioData = mockData.cogs.filter(c => 
     c.date >= startDate &&
     c.date <= endDate &&
+    c.scenario === scenario &&
     (bu === 'All Company' || !bu || c.bu === bu)
   );
   
-  // Group by BU and Category
-  const scenarioData = filtered.filter(c => c.scenario === scenario);
-  const comparisonData = filtered.filter(c => c.scenario === comparison);
+  const comparisonData = mockData.cogs.filter(c =>
+    c.date >= compStart &&
+    c.date <= compEnd &&
+    c.scenario === comparison &&
+    (bu === 'All Company' || !bu || c.bu === bu)
+  );
   
   const rowMap = new Map<string, DrilldownRow>();
   
@@ -322,16 +362,23 @@ export function getOpexBreakdown(
   bu?: string,
   totalRevenue?: { actual: number; comparison: number }
 ): { rows: OpexRow[]; totalActual: number; totalComparison: number; totalDelta: number; totalDeltaPercent: number; actualPercent?: number; comparisonPercent?: number; deltaPP?: number } {
+  // Get comparison date range (shift back for PY)
+  const { start: compStart, end: compEnd } = getComparisonDates(startDate, endDate, comparison);
+  
   // Filter OPEX by date range
-  const filtered = mockData.opex.filter(o => 
+  const scenarioData = mockData.opex.filter(o => 
     o.date >= startDate &&
     o.date <= endDate &&
+    o.scenario === scenario &&
     (bu === 'All Company' || !bu || o.bu === bu)
   );
   
-  // Group by Category and Subcategory
-  const scenarioData = filtered.filter(o => o.scenario === scenario);
-  const comparisonData = filtered.filter(o => o.scenario === comparison);
+  const comparisonData = mockData.opex.filter(o =>
+    o.date >= compStart &&
+    o.date <= compEnd &&
+    o.scenario === comparison &&
+    (bu === 'All Company' || !bu || o.bu === bu)
+  );
   
   // First, aggregate subcategories
   const subcategoryMap = new Map<string, Map<string, { actual: number; comparison: number }>>();
@@ -553,15 +600,23 @@ export function getEBITDABreakdown(
   // Get COGS by BU
   const cogsData = getCogsBreakdown(startDate, endDate, scenario, comparison, bu);
   
+  // Get comparison date range (shift back for PY)
+  const { start: compStart, end: compEnd } = getComparisonDates(startDate, endDate, comparison);
+  
   // Get OPEX by BU (need to aggregate from the raw data)
-  const filtered = mockData.opex.filter(o => 
+  const scenarioData = mockData.opex.filter(o => 
     o.date >= startDate &&
     o.date <= endDate &&
+    o.scenario === scenario &&
     (bu === 'All Company' || !bu || o.bu === bu)
   );
   
-  const scenarioData = filtered.filter(o => o.scenario === scenario);
-  const comparisonData = filtered.filter(o => o.scenario === comparison);
+  const comparisonData = mockData.opex.filter(o =>
+    o.date >= compStart &&
+    o.date <= compEnd &&
+    o.scenario === comparison &&
+    (bu === 'All Company' || !bu || o.bu === bu)
+  );
   
   // Aggregate OPEX by BU
   const opexByBU = new Map<string, { actual: number; comparison: number }>();

@@ -346,7 +346,7 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
     if (hasSpaceInside) {
       // Place inside the bar
       valueY = y + height / 2 + 5; // Center vertically
-      textColor = "hsl(0, 0%, 15%)";
+      textColor = "#ffffff";
     } else {
       // Place outside the bar
       const isPositiveBar = height > 0;
@@ -423,7 +423,7 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
         }
       }
       
-      textColor = "hsl(var(--foreground))";
+      textColor = "#ffffff";
     }
     
     return (

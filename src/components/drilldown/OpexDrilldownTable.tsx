@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { getVarianceHexColor } from "@/lib/varianceColors";
 import { OpexRow } from "@/lib/drilldownData";
 import { exportOpexDrilldownToCSV, downloadCSV } from "@/lib/csvExport";
+import { SummaryStatistics } from "./SummaryStatistics";
 
 interface OpexDrilldownTableProps {
   rows: OpexRow[];
@@ -172,6 +173,10 @@ export function OpexDrilldownTable({
           Export CSV
         </Button>
       </div>
+
+      {/* Summary Statistics */}
+      <SummaryStatistics rows={rows} metricLabel={title} />
+
       {/* Desktop Table */}
       <div className="hidden md:block rounded-md border">
         <Table>

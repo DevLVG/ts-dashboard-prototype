@@ -1,4 +1,4 @@
-import { useState, useMemo, Fragment } from "react";
+import { useState, useMemo, Fragment, useEffect, useRef } from "react";
 import {
   Table,
   TableBody,
@@ -55,6 +55,8 @@ export function OpexDrilldownTable({
   totalDeltaPercent,
 }: OpexDrilldownTableProps) {
   const [expandedBUs, setExpandedBUs] = useState<Set<string>>(new Set());
+  const [selectedBUIndex, setSelectedBUIndex] = useState<number>(0);
+  const tableRef = useRef<HTMLDivElement>(null);
 
   // Group data by BU, then by Category
   const groupedData = useMemo(() => {
@@ -88,8 +90,59 @@ export function OpexDrilldownTable({
     };
   };
 
+  const buKeys = Object.keys(groupedData);
+
+  // Keyboard shortcuts: Arrow keys to navigate and expand/collapse BUs
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (buKeys.length === 0) return;
+
+      switch (event.key) {
+        case 'ArrowDown':
+          event.preventDefault();
+          setSelectedBUIndex(prev => Math.min(prev + 1, buKeys.length - 1));
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          setSelectedBUIndex(prev => Math.max(prev - 1, 0));
+          break;
+        case 'ArrowRight':
+        case 'Enter':
+          event.preventDefault();
+          const buToExpand = buKeys[selectedBUIndex];
+          if (buToExpand && !expandedBUs.has(buToExpand)) {
+            toggleBU(buToExpand);
+          }
+          break;
+        case 'ArrowLeft':
+          event.preventDefault();
+          const buToCollapse = buKeys[selectedBUIndex];
+          if (buToCollapse && expandedBUs.has(buToCollapse)) {
+            toggleBU(buToCollapse);
+          }
+          break;
+      }
+    };
+
+    if (tableRef.current) {
+      tableRef.current.addEventListener('keydown', handleKeyDown);
+    }
+
+    return () => {
+      if (tableRef.current) {
+        tableRef.current.removeEventListener('keydown', handleKeyDown);
+      }
+    };
+  }, [selectedBUIndex, buKeys, expandedBUs]);
+
   return (
-    <>
+    <div ref={tableRef} tabIndex={0}>
+      <div className="text-xs text-muted-foreground mb-2">
+        <kbd className="px-2 py-1 bg-muted rounded">↑↓</kbd> Navigate • 
+        <kbd className="px-2 py-1 bg-muted rounded ml-1">→</kbd> Expand • 
+        <kbd className="px-2 py-1 bg-muted rounded ml-1">←</kbd> Collapse • 
+        <kbd className="px-2 py-1 bg-muted rounded ml-1">ESC</kbd> Close
+      </div>
       {/* Desktop Table */}
       <div className="hidden md:block rounded-md border">
         <Table>
@@ -104,18 +157,22 @@ export function OpexDrilldownTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {Object.entries(groupedData).map(([bu, categories]) => {
+            {Object.entries(groupedData).map(([bu, categories], index) => {
               const buTotals = getBUTotals(categories);
               const buDeltaPercent = buTotals.comparison !== 0 
                 ? (buTotals.delta / Math.abs(buTotals.comparison)) * 100 
                 : 0;
               const isExpanded = expandedBUs.has(bu);
+              const isSelected = index === selectedBUIndex;
 
               return (
                 <Fragment key={bu}>
                   {/* BU Row - Collapsible */}
                   <TableRow 
-                    className="font-semibold cursor-pointer hover:bg-muted/50 transition-colors"
+                    className={cn(
+                      "font-semibold cursor-pointer hover:bg-muted/50 transition-colors",
+                      isSelected && "ring-2 ring-primary"
+                    )}
                     onClick={() => toggleBU(bu)}
                   >
                     <TableCell className="font-semibold">
@@ -345,6 +402,6 @@ export function OpexDrilldownTable({
           </div>
         </Card>
       </div>
-    </>
+    </div>
   );
 }

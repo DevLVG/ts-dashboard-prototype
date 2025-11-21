@@ -60,6 +60,32 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
     }
   };
 
+  // Get bar fill color with transparency (matching waterfall style)
+  const getBarFill = (variance: number) => {
+    const baseColor = getVarianceHexColor(variance, getMetricLabel());
+    const hexToRgba = (hex: string, opacity: number) => {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    };
+    const opacity = baseColor === "#ffc107" ? 0.15 : 0.10;
+    return hexToRgba(baseColor, opacity);
+  };
+
+  // Get bar stroke color (matching waterfall style)
+  const getBarStroke = (variance: number) => {
+    const baseColor = getVarianceHexColor(variance, getMetricLabel());
+    const hexToRgba = (hex: string, opacity: number) => {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    };
+    const strokeOpacity = baseColor === "#ffc107" ? 0.40 : 0.30;
+    return hexToRgba(baseColor, strokeOpacity);
+  };
+
   return (
     <Card className="dashboard-card group">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
@@ -162,13 +188,14 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
             dataKey="actual" 
             name="Actual" 
             radius={[0, 6, 6, 0]}
-            opacity={0.95}
+            strokeWidth={2}
             className="cursor-pointer"
           >
             {chartData.map((entry, index) => (
               <Cell 
                 key={`cell-${index}`} 
-                fill={getVarianceHexColor(entry.variance, getMetricLabel())}
+                fill={getBarFill(entry.variance)}
+                stroke={getBarStroke(entry.variance)}
                 className="transition-all hover:brightness-110"
               />
             ))}
@@ -176,7 +203,7 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
               dataKey="variance" 
               position="right"
               formatter={(value: number) => `${value.toFixed(1)}%`}
-              className="chart-bar-label"
+              style={{ fill: '#ffffff', fontWeight: 600, fontSize: 12 }}
             />
           </Bar>
         </BarChart>

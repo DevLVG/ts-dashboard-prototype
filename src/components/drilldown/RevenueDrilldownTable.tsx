@@ -1,11 +1,9 @@
 import { useState, useMemo, Fragment, useEffect, useRef } from "react";
-import { ChevronDown, ChevronRight, Download, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw, Eye } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { getVarianceTextColor } from "@/lib/varianceColors";
 import { DrilldownRow, formatCurrency, formatDelta, formatPercent, formatServiceName } from "@/lib/drilldownData";
@@ -38,31 +36,6 @@ export function RevenueDrilldownTable({
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const tableRef = useRef<HTMLDivElement>(null);
-  
-  // Column visibility state with localStorage persistence
-  const [visibleColumns, setVisibleColumns] = useState(() => {
-    const saved = localStorage.getItem('revenue-column-visibility');
-    return saved ? JSON.parse(saved) : {
-      actual: true,
-      comparison: true,
-      delta: true,
-      deltaPercent: true
-    };
-  });
-
-  useEffect(() => {
-    localStorage.setItem('revenue-column-visibility', JSON.stringify(visibleColumns));
-  }, [visibleColumns]);
-
-  const toggleColumn = (column: keyof typeof visibleColumns) => {
-    const newVisibility = { ...visibleColumns, [column]: !visibleColumns[column] };
-    const hasAtLeastOneVisible = Object.values(newVisibility).some(v => v);
-    if (hasAtLeastOneVisible) {
-      setVisibleColumns(newVisibility);
-    }
-  };
-
-  const visibleCount = Object.values(visibleColumns).filter(Boolean).length;
 
   const handleExportCSV = (filtered: boolean = false) => {
     const exportRows = filtered ? Object.values(groupedData).flat() : rows;
@@ -105,12 +78,6 @@ export function RevenueDrilldownTable({
     setSearchTerm("");
     setSortColumn(null);
     setSortDirection(null);
-    setVisibleColumns({
-      actual: true,
-      comparison: true,
-      delta: true,
-      deltaPercent: true
-    });
   };
 
   const hasActiveFilters = searchTerm !== "" || sortColumn !== null;
@@ -297,49 +264,6 @@ export function RevenueDrilldownTable({
           <kbd className="px-2 py-1 bg-muted rounded ml-1">ESC</kbd> Close
         </div>
         <div className="flex gap-2">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-2">
-                <Eye className="h-4 w-4" />
-                Columns ({visibleCount}/4)
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-56">
-              <div className="space-y-3">
-                <h4 className="font-semibold text-sm">Toggle Columns</h4>
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox 
-                      checked={visibleColumns.actual}
-                      onCheckedChange={() => toggleColumn('actual')}
-                    />
-                    <span className="text-sm">Actual</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox 
-                      checked={visibleColumns.comparison}
-                      onCheckedChange={() => toggleColumn('comparison')}
-                    />
-                    <span className="text-sm">Comparison</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox 
-                      checked={visibleColumns.delta}
-                      onCheckedChange={() => toggleColumn('delta')}
-                    />
-                    <span className="text-sm">Delta (Δ)</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox 
-                      checked={visibleColumns.deltaPercent}
-                      onCheckedChange={() => toggleColumn('deltaPercent')}
-                    />
-                    <span className="text-sm">Delta % (Δ%)</span>
-                  </label>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
           {hasActiveFilters && (
             <Button 
               variant="default" 
@@ -427,50 +351,42 @@ export function RevenueDrilldownTable({
                   {getSortIcon('bu')}
                 </div>
               </TableHead>
-              {visibleColumns.actual && (
-                <TableHead 
-                  className="text-right cursor-pointer hover:bg-muted/50"
-                  onClick={() => handleSort('actual')}
-                >
-                  <div className="flex items-center justify-end">
-                    Actual
-                    {getSortIcon('actual')}
-                  </div>
-                </TableHead>
-              )}
-              {visibleColumns.comparison && (
-                <TableHead 
-                  className="text-right cursor-pointer hover:bg-muted/50"
-                  onClick={() => handleSort('comparison')}
-                >
-                  <div className="flex items-center justify-end">
-                    Comparison
-                    {getSortIcon('comparison')}
-                  </div>
-                </TableHead>
-              )}
-              {visibleColumns.delta && (
-                <TableHead 
-                  className="text-right cursor-pointer hover:bg-muted/50"
-                  onClick={() => handleSort('delta')}
-                >
-                  <div className="flex items-center justify-end">
-                    Δ
-                    {getSortIcon('delta')}
-                  </div>
-                </TableHead>
-              )}
-              {visibleColumns.deltaPercent && (
-                <TableHead 
-                  className="text-right w-[100px] cursor-pointer hover:bg-muted/50"
-                  onClick={() => handleSort('deltaPercent')}
-                >
-                  <div className="flex items-center justify-end">
-                    Δ%
-                    {getSortIcon('deltaPercent')}
-                  </div>
-                </TableHead>
-              )}
+              <TableHead 
+                className="text-right cursor-pointer hover:bg-muted/50"
+                onClick={() => handleSort('actual')}
+              >
+                <div className="flex items-center justify-end">
+                  Actual
+                  {getSortIcon('actual')}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-right cursor-pointer hover:bg-muted/50"
+                onClick={() => handleSort('comparison')}
+              >
+                <div className="flex items-center justify-end">
+                  Comparison
+                  {getSortIcon('comparison')}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-right cursor-pointer hover:bg-muted/50"
+                onClick={() => handleSort('delta')}
+              >
+                <div className="flex items-center justify-end">
+                  Δ
+                  {getSortIcon('delta')}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-right w-[100px] cursor-pointer hover:bg-muted/50"
+                onClick={() => handleSort('deltaPercent')}
+              >
+                <div className="flex items-center justify-end">
+                  Δ%
+                  {getSortIcon('deltaPercent')}
+                </div>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -500,37 +416,29 @@ export function RevenueDrilldownTable({
                       )}
                       {services[0]?.buDisplay || bu}
                     </TableCell>
-                    {visibleColumns.actual && (
-                      <TableCell className="text-right">
-                        {formatCurrency(totals.actual)}
-                      </TableCell>
-                    )}
-                    {visibleColumns.comparison && (
-                      <TableCell className="text-right">
-                        {formatCurrency(totals.comparison)}
-                      </TableCell>
-                    )}
-                    {visibleColumns.delta && (
-                      <TableCell className="text-right">
-                        <span className={cn(getVarianceTextColor(buDeltaPercent, "Revenue"))}>
-                          {formatDelta(totals.delta)}
-                        </span>
-                      </TableCell>
-                    )}
-                    {visibleColumns.deltaPercent && (
-                      <TableCell className="text-right">
-                        <Badge 
-                          variant={
-                            buDeltaPercent >= 0 ? "default" : 
-                            buDeltaPercent >= -5 ? "secondary" : 
-                            "destructive"
-                          }
-                          className="font-semibold"
-                        >
-                          {formatPercent(buDeltaPercent)}
-                        </Badge>
-                      </TableCell>
-                    )}
+                    <TableCell className="text-right">
+                      {formatCurrency(totals.actual)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {formatCurrency(totals.comparison)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <span className={cn(getVarianceTextColor(buDeltaPercent, "Revenue"))}>
+                        {formatDelta(totals.delta)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Badge 
+                        variant={
+                          buDeltaPercent >= 0 ? "default" : 
+                          buDeltaPercent >= -5 ? "secondary" : 
+                          "destructive"
+                        }
+                        className="font-semibold"
+                      >
+                        {formatPercent(buDeltaPercent)}
+                      </Badge>
+                    </TableCell>
                   </TableRow>
                   
                   {/* Service Rows - Collapsible */}
@@ -539,33 +447,25 @@ export function RevenueDrilldownTable({
                       <TableCell className="pl-10">
                         {formatServiceName(service.subCategory)}
                       </TableCell>
-                      {visibleColumns.actual && (
-                        <TableCell className="text-right">
-                          {formatCurrency(service.actual)}
-                        </TableCell>
-                      )}
-                      {visibleColumns.comparison && (
-                        <TableCell className="text-right">
-                          {formatCurrency(service.comparison)}
-                        </TableCell>
-                      )}
-                      {visibleColumns.delta && (
-                        <TableCell className="text-right">
-                          <span className={cn(getVarianceTextColor(service.deltaPercent, "Revenue"))}>
-                            {formatDelta(service.delta)}
-                          </span>
-                        </TableCell>
-                      )}
-                      {visibleColumns.deltaPercent && (
-                        <TableCell className="text-right">
-                          <span className={cn(
-                            "inline-flex items-center gap-1 font-medium",
-                            getVarianceTextColor(service.deltaPercent, "Revenue")
-                          )}>
-                            {formatPercent(service.deltaPercent)}
-                          </span>
-                        </TableCell>
-                      )}
+                      <TableCell className="text-right">
+                        {formatCurrency(service.actual)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatCurrency(service.comparison)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className={cn(getVarianceTextColor(service.deltaPercent, "Revenue"))}>
+                          {formatDelta(service.delta)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className={cn(
+                          "inline-flex items-center gap-1 font-medium",
+                          getVarianceTextColor(service.deltaPercent, "Revenue")
+                        )}>
+                          {formatPercent(service.deltaPercent)}
+                        </span>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </Fragment>
@@ -575,33 +475,25 @@ export function RevenueDrilldownTable({
             {/* Total Row */}
             <TableRow className="font-bold border-t-2 bg-muted/30">
               <TableCell>TOTAL REVENUE</TableCell>
-              {visibleColumns.actual && (
-                <TableCell className="text-right">{formatCurrency(totalActual)}</TableCell>
-              )}
-              {visibleColumns.comparison && (
-                <TableCell className="text-right">{formatCurrency(totalComparison)}</TableCell>
-              )}
-              {visibleColumns.delta && (
-                <TableCell className="text-right">
-                  <span className={cn(getVarianceTextColor(totalDeltaPercent, "Revenue"))}>
-                    {formatDelta(totalDelta)}
-                  </span>
-                </TableCell>
-              )}
-              {visibleColumns.deltaPercent && (
-                <TableCell className="text-right">
-                  <Badge 
-                    variant={
-                      totalDeltaPercent >= 0 ? "default" : 
-                      totalDeltaPercent >= -5 ? "secondary" : 
-                      "destructive"
-                    }
-                    className="font-bold"
-                  >
-                    {formatPercent(totalDeltaPercent)}
-                  </Badge>
-                </TableCell>
-              )}
+              <TableCell className="text-right">{formatCurrency(totalActual)}</TableCell>
+              <TableCell className="text-right">{formatCurrency(totalComparison)}</TableCell>
+              <TableCell className="text-right">
+                <span className={cn(getVarianceTextColor(totalDeltaPercent, "Revenue"))}>
+                  {formatDelta(totalDelta)}
+                </span>
+              </TableCell>
+              <TableCell className="text-right">
+                <Badge 
+                  variant={
+                    totalDeltaPercent >= 0 ? "default" : 
+                    totalDeltaPercent >= -5 ? "secondary" : 
+                    "destructive"
+                  }
+                  className="font-bold"
+                >
+                  {formatPercent(totalDeltaPercent)}
+                </Badge>
+              </TableCell>
             </TableRow>
           </TableBody>
         </Table>
@@ -643,18 +535,14 @@ export function RevenueDrilldownTable({
                   </Badge>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-sm">
-                  {visibleColumns.actual && (
-                    <div>
-                      <span className="text-muted-foreground">Actual:</span>
-                      <div className="font-medium">{formatCurrency(totals.actual)}</div>
-                    </div>
-                  )}
-                  {visibleColumns.comparison && (
-                    <div>
-                      <span className="text-muted-foreground">Comparison:</span>
-                      <div className="font-medium">{formatCurrency(totals.comparison)}</div>
-                    </div>
-                  )}
+                  <div>
+                    <span className="text-muted-foreground">Actual:</span>
+                    <div className="font-medium">{formatCurrency(totals.actual)}</div>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Comparison:</span>
+                    <div className="font-medium">{formatCurrency(totals.comparison)}</div>
+                  </div>
                 </div>
               </div>
 
@@ -667,40 +555,32 @@ export function RevenueDrilldownTable({
                         <span className="font-medium text-sm">
                           {formatServiceName(service.subCategory)}
                         </span>
-                        {visibleColumns.deltaPercent && (
-                          <span className={cn(
-                            "text-sm font-medium",
-                            getVarianceTextColor(service.deltaPercent, "Revenue")
-                          )}>
-                            {formatPercent(service.deltaPercent)}
-                          </span>
-                        )}
+                        <span className={cn(
+                          "text-sm font-medium",
+                          getVarianceTextColor(service.deltaPercent, "Revenue")
+                        )}>
+                          {formatPercent(service.deltaPercent)}
+                        </span>
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-sm">
-                        {visibleColumns.actual && (
-                          <div>
-                            <span className="text-muted-foreground">Actual:</span>
-                            <div>{formatCurrency(service.actual)}</div>
-                          </div>
-                        )}
-                        {visibleColumns.comparison && (
-                          <div>
-                            <span className="text-muted-foreground">Comparison:</span>
-                            <div>{formatCurrency(service.comparison)}</div>
-                          </div>
-                        )}
-                      </div>
-                      {visibleColumns.delta && (
-                        <div className="mt-1 text-sm">
-                          <span className="text-muted-foreground">Variance:</span>
-                          <span className={cn(
-                            "ml-2 font-medium",
-                            getVarianceTextColor(service.deltaPercent, "Revenue")
-                          )}>
-                            {formatDelta(service.delta)}
-                          </span>
+                        <div>
+                          <span className="text-muted-foreground">Actual:</span>
+                          <div>{formatCurrency(service.actual)}</div>
                         </div>
-                      )}
+                        <div>
+                          <span className="text-muted-foreground">Comparison:</span>
+                          <div>{formatCurrency(service.comparison)}</div>
+                        </div>
+                      </div>
+                      <div className="mt-1 text-sm">
+                        <span className="text-muted-foreground">Variance:</span>
+                        <span className={cn(
+                          "ml-2 font-medium",
+                          getVarianceTextColor(service.deltaPercent, "Revenue")
+                        )}>
+                          {formatDelta(service.delta)}
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -725,30 +605,24 @@ export function RevenueDrilldownTable({
             </Badge>
           </div>
           <div className="grid grid-cols-2 gap-2 text-sm">
-            {visibleColumns.actual && (
-              <div>
-                <span className="text-muted-foreground">Actual:</span>
-                <div className="font-bold">{formatCurrency(totalActual)}</div>
-              </div>
-            )}
-            {visibleColumns.comparison && (
-              <div>
-                <span className="text-muted-foreground">Comparison:</span>
-                <div className="font-bold">{formatCurrency(totalComparison)}</div>
-              </div>
-            )}
-          </div>
-          {visibleColumns.delta && (
-            <div className="mt-1 text-sm">
-              <span className="text-muted-foreground">Variance:</span>
-              <span className={cn(
-                "ml-2 font-bold",
-                getVarianceTextColor(totalDeltaPercent, "Revenue")
-              )}>
-                {formatDelta(totalDelta)}
-              </span>
+            <div>
+              <span className="text-muted-foreground">Actual:</span>
+              <div className="font-bold">{formatCurrency(totalActual)}</div>
             </div>
-          )}
+            <div>
+              <span className="text-muted-foreground">Comparison:</span>
+              <div className="font-bold">{formatCurrency(totalComparison)}</div>
+            </div>
+          </div>
+          <div className="mt-1 text-sm">
+            <span className="text-muted-foreground">Variance:</span>
+            <span className={cn(
+              "ml-2 font-bold",
+              getVarianceTextColor(totalDeltaPercent, "Revenue")
+            )}>
+              {formatDelta(totalDelta)}
+            </span>
+          </div>
         </div>
       </div>
     </div>

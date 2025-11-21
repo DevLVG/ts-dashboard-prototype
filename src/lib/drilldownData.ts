@@ -402,20 +402,18 @@ export function getGMBreakdown(
     comparison: revenueData.totalComparison
   });
   
-  // Create a map for easy lookup
-  const cogsMap = new Map<string, DrilldownRow>();
-  cogsData.rows.forEach(row => {
-    const key = `${row.bu}-${row.subCategory}`;
-    cogsMap.set(key, row);
-  });
-  
-  // Calculate GM = Revenue - COGS for each service
+  // Calculate GM = Revenue - COGS (can't match by service since COGS uses categories)
+  // Use revenue rows, but calculate GM at total level per row
   const rows: DrilldownRow[] = revenueData.rows.map(revRow => {
-    const key = `${revRow.bu}-${revRow.subCategory}`;
-    const cogRow = cogsMap.get(key);
+    // For GM%, we show revenue services but can't directly subtract COGS categories
+    // So we calculate proportional GM based on total GM%
+    const totalGMActual = revenueData.totalActual - cogsData.totalActual;
+    const totalGMComparison = revenueData.totalComparison - cogsData.totalComparison;
+    const gmPercentActual = revenueData.totalActual !== 0 ? totalGMActual / revenueData.totalActual : 0;
+    const gmPercentComparison = revenueData.totalComparison !== 0 ? totalGMComparison / revenueData.totalComparison : 0;
     
-    const actual = revRow.actual - (cogRow?.actual || 0);
-    const comparison = revRow.comparison - (cogRow?.comparison || 0);
+    const actual = revRow.actual * gmPercentActual;
+    const comparison = revRow.comparison * gmPercentComparison;
     const delta = actual - comparison;
     const deltaPercent = comparison !== 0 
       ? (delta / Math.abs(comparison)) * 100 
@@ -432,14 +430,15 @@ export function getGMBreakdown(
     };
   });
   
-  const totalActual = rows.reduce((sum, r) => sum + r.actual, 0);
-  const totalComparison = rows.reduce((sum, r) => sum + r.comparison, 0);
+  // Calculate totals directly from revenue and COGS totals
+  const totalActual = revenueData.totalActual - cogsData.totalActual;
+  const totalComparison = revenueData.totalComparison - cogsData.totalComparison;
   const totalDelta = totalActual - totalComparison;
   const totalDeltaPercent = totalComparison !== 0 
     ? (totalDelta / Math.abs(totalComparison)) * 100 
     : 0;
   
-  // Calculate GM percentages
+  // Calculate GM percentages using revenue as denominator
   const actualPercent = revenueData.totalActual !== 0 
     ? (totalActual / revenueData.totalActual) * 100 
     : 0;

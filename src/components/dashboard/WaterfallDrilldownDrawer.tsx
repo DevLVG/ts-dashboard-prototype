@@ -81,8 +81,8 @@ export function WaterfallDrilldownDrawer({
     return `${period.label} • ${bu || "All Company"} • ${comparisonLabel}`;
   };
 
-  // Check if this is a zero-amount metric (D&A, Interest, Taxes, EBT)
-  if (['da', 'interest', 'taxes', 'ebt'].includes(drilldownType || '')) {
+  // Check if this is a zero-amount metric (D&A, Interest, Taxes)
+  if (['da', 'interest', 'taxes'].includes(drilldownType || '')) {
     return (
       <Drawer open={isOpen} onOpenChange={onClose}>
         <DrawerContent className="h-[90vh]">
@@ -126,7 +126,7 @@ export function WaterfallDrilldownDrawer({
       actual: revData.totalActual,
       comparison: revData.totalComparison
     });
-  } else if (drilldownType === 'ebitda' || drilldownType === 'netIncome') {
+  } else if (drilldownType === 'ebitda' || drilldownType === 'netIncome' || drilldownType === 'ebt') {
     ebitdaData = getEBITDABreakdown(period.start, period.end, scenario, comparison, buCode);
   }
 
@@ -222,10 +222,10 @@ export function WaterfallDrilldownDrawer({
             </>
           )}
           
-          {(drilldownType === 'ebitda' || drilldownType === 'netIncome') && ebitdaData && (
+          {(drilldownType === 'ebitda' || drilldownType === 'netIncome' || drilldownType === 'ebt') && ebitdaData && (
             <>
               <SummaryPanel
-                label={drilldownType === 'ebitda' ? 'EBITDA Margin' : 'Net Income Margin'}
+                label={drilldownType === 'ebitda' ? 'EBITDA Margin' : drilldownType === 'ebt' ? 'EBT Margin' : 'Net Income Margin'}
                 actualPercent={ebitdaData.totalMargin}
                 comparisonPercent={ebitdaData.comparisonMargin}
                 deltaPP={ebitdaData.deltaPP}

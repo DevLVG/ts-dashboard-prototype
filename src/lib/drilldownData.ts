@@ -2,12 +2,20 @@
  * Data fetching and aggregation functions for waterfall drill-down
  */
 
-import mockData from '@/data/trio_mock_data_v5.json';
+import mockData from '@/data/trio_mock_data_v6.json';
 
 export interface DrilldownRow {
   bu: string;
   buDisplay: string;
   subCategory: string;
+  actual: number;
+  comparison: number;
+  delta: number;
+  deltaPercent: number;
+}
+
+export interface OpexSubcategory {
+  subcategory: string;
   actual: number;
   comparison: number;
   delta: number;
@@ -21,6 +29,7 @@ export interface OpexRow {
   delta: number;
   deltaPercent: number;
   allocationType?: 'direct' | 'indirect';
+  subcategories: OpexSubcategory[];
 }
 
 export interface DrilldownData {
@@ -280,7 +289,7 @@ export function getCogsBreakdown(
 }
 
 /**
- * Get OPEX breakdown by Category (flat list, no BU grouping)
+ * Get OPEX breakdown by Category with Subcategories
  */
 export function getOpexBreakdown(
   startDate: string,
@@ -297,61 +306,105 @@ export function getOpexBreakdown(
     (bu === 'All Company' || !bu || o.bu === bu)
   );
   
-  // Group by Category only (aggregate across all BUs)
+  // Group by Category and Subcategory
   const scenarioData = filtered.filter(o => o.scenario === scenario);
   const comparisonData = filtered.filter(o => o.scenario === comparison);
   
-  const rowMap = new Map<string, OpexRow>();
+  // First, aggregate subcategories
+  const subcategoryMap = new Map<string, Map<string, { actual: number; comparison: number }>>();
   
-  // Aggregate actual values
+  // Aggregate actual values by category + subcategory
   scenarioData.forEach(opex => {
-    const key = opex.category;
-    const existing = rowMap.get(key);
+    if (!subcategoryMap.has(opex.category)) {
+      subcategoryMap.set(opex.category, new Map());
+    }
+    const catMap = subcategoryMap.get(opex.category)!;
+    const existing = catMap.get(opex.subcategory);
     
     if (existing) {
       existing.actual += opex.amount;
     } else {
-      rowMap.set(key, {
-        category: opex.category,
-        actual: opex.amount,
-        comparison: 0,
-        delta: 0,
-        deltaPercent: 0,
-        allocationType: opex.allocation_type as 'direct' | 'indirect'
-      });
+      catMap.set(opex.subcategory, { actual: opex.amount, comparison: 0 });
     }
   });
   
-  // Aggregate comparison values
+  // Aggregate comparison values by category + subcategory
   comparisonData.forEach(opex => {
-    const key = opex.category;
-    const existing = rowMap.get(key);
+    if (!subcategoryMap.has(opex.category)) {
+      subcategoryMap.set(opex.category, new Map());
+    }
+    const catMap = subcategoryMap.get(opex.category)!;
+    const existing = catMap.get(opex.subcategory);
     
     if (existing) {
       existing.comparison += opex.amount;
     } else {
-      rowMap.set(key, {
-        category: opex.category,
-        actual: 0,
-        comparison: opex.amount,
-        delta: 0,
-        deltaPercent: 0,
+      catMap.set(opex.subcategory, { actual: 0, comparison: opex.amount });
+    }
+  });
+  
+  // Build OpexRow array with subcategories
+  const categoryMap = new Map<string, { actual: number; comparison: number; allocationType: 'direct' | 'indirect' }>();
+  
+  // Aggregate category totals and track allocation type
+  scenarioData.forEach(opex => {
+    const existing = categoryMap.get(opex.category);
+    if (existing) {
+      existing.actual += opex.amount;
+    } else {
+      categoryMap.set(opex.category, {
+        actual: opex.amount,
+        comparison: 0,
         allocationType: opex.allocation_type as 'direct' | 'indirect'
       });
     }
   });
   
-  // Calculate deltas and convert to array
-  const rows: OpexRow[] = Array.from(rowMap.values()).map(row => {
-    const delta = row.actual - row.comparison;
-    const deltaPercent = row.comparison !== 0 
-      ? (delta / Math.abs(row.comparison)) * 100 
+  comparisonData.forEach(opex => {
+    const existing = categoryMap.get(opex.category);
+    if (existing) {
+      existing.comparison += opex.amount;
+    } else {
+      categoryMap.set(opex.category, {
+        actual: 0,
+        comparison: opex.amount,
+        allocationType: opex.allocation_type as 'direct' | 'indirect'
+      });
+    }
+  });
+  
+  // Build rows with subcategories
+  const rows: OpexRow[] = Array.from(categoryMap.entries()).map(([category, totals]) => {
+    const delta = totals.actual - totals.comparison;
+    const deltaPercent = totals.comparison !== 0 
+      ? (delta / Math.abs(totals.comparison)) * 100 
       : 0;
     
+    // Get subcategories for this category
+    const subcatMap = subcategoryMap.get(category) || new Map();
+    const subcategories: OpexSubcategory[] = Array.from(subcatMap.entries()).map(([subcategory, amounts]) => {
+      const subDelta = amounts.actual - amounts.comparison;
+      const subDeltaPercent = amounts.comparison !== 0 
+        ? (subDelta / Math.abs(amounts.comparison)) * 100 
+        : 0;
+      
+      return {
+        subcategory,
+        actual: amounts.actual,
+        comparison: amounts.comparison,
+        delta: subDelta,
+        deltaPercent: subDeltaPercent
+      };
+    });
+    
     return {
-      ...row,
+      category,
+      actual: totals.actual,
+      comparison: totals.comparison,
       delta,
-      deltaPercent
+      deltaPercent,
+      allocationType: totals.allocationType,
+      subcategories
     };
   });
   

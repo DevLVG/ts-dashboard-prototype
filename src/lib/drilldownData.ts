@@ -2,7 +2,7 @@
  * Data fetching and aggregation functions for waterfall drill-down
  */
 
-import mockData from '@/data/trio_mock_data_v4.json';
+import mockData from '@/data/trio_mock_data_v5.json';
 
 export interface DrilldownRow {
   bu: string;
@@ -165,7 +165,7 @@ export function getRevenueBreakdown(
 }
 
 /**
- * Get COGS breakdown by BU and Service
+ * Get COGS breakdown by BU and Category
  */
 export function getCogsBreakdown(
   startDate: string,
@@ -182,7 +182,7 @@ export function getCogsBreakdown(
     (bu === 'All Company' || !bu || c.bu === bu)
   );
   
-  // Group by BU and Service
+  // Group by BU and Category
   const scenarioData = filtered.filter(c => c.scenario === scenario);
   const comparisonData = filtered.filter(c => c.scenario === comparison);
   
@@ -190,7 +190,7 @@ export function getCogsBreakdown(
   
   // Aggregate actual values
   scenarioData.forEach(cog => {
-    const key = `${cog.bu}-${cog.service}`;
+    const key = `${cog.bu}-${cog.category}`;
     const existing = rowMap.get(key);
     
     if (existing) {
@@ -199,7 +199,7 @@ export function getCogsBreakdown(
       rowMap.set(key, {
         bu: cog.bu,
         buDisplay: formatBUName(cog.bu),
-        subCategory: cog.service,
+        subCategory: cog.category,
         actual: cog.amount,
         comparison: 0,
         delta: 0,
@@ -210,7 +210,7 @@ export function getCogsBreakdown(
   
   // Aggregate comparison values
   comparisonData.forEach(cog => {
-    const key = `${cog.bu}-${cog.service}`;
+    const key = `${cog.bu}-${cog.category}`;
     const existing = rowMap.get(key);
     
     if (existing) {
@@ -219,7 +219,7 @@ export function getCogsBreakdown(
       rowMap.set(key, {
         bu: cog.bu,
         buDisplay: formatBUName(cog.bu),
-        subCategory: cog.service,
+        subCategory: cog.category,
         actual: 0,
         comparison: cog.amount,
         delta: 0,

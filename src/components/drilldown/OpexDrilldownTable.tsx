@@ -1,5 +1,5 @@
 import { useState, useMemo, Fragment, useEffect, useRef } from "react";
-import { Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Download, ArrowUpDown, ArrowUp, ArrowDown, Search, X } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { getVarianceHexColor } from "@/lib/varianceColors";
@@ -38,13 +39,13 @@ const formatCurrency = (value: number): string => {
   }).format(value);
 };
 
+const formatPercent = (value: number): string => {
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+};
+
 const formatDelta = (value: number): string => {
   const formatted = formatCurrency(Math.abs(value));
   return value >= 0 ? `+${formatted}` : `-${formatted}`;
-};
-
-const formatPercent = (value: number): string => {
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
 };
 
 const formatBUName = (bu: string): string => {
@@ -67,6 +68,7 @@ export function OpexDrilldownTable({
   const [selectedBUIndex, setSelectedBUIndex] = useState<number>(0);
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+  const [searchTerm, setSearchTerm] = useState<string>('');
   const tableRef = useRef<HTMLDivElement>(null);
 
   const handleExportCSV = () => {
@@ -107,17 +109,35 @@ export function OpexDrilldownTable({
     return <ArrowDown className="h-3 w-3 ml-1" />;
   };
 
-  // Group data by BU, then by Category
+  // Group data by BU, then by Category with search filtering
   const groupedData = useMemo(() => {
+    let filteredRows = rows;
+    
+    // Apply search filter
+    if (searchTerm.trim()) {
+      const searchLower = searchTerm.toLowerCase();
+      filteredRows = rows.filter(row => {
+        const buName = (row.buDisplay || row.bu).toLowerCase();
+        const categoryName = row.subCategory.replace(/_/g, ' ').toLowerCase();
+        return buName.includes(searchLower) || categoryName.includes(searchLower);
+      });
+    }
+    
     const grouped: Record<string, OpexRow[]> = {};
-    rows.forEach(row => {
+    filteredRows.forEach(row => {
       if (!grouped[row.bu]) {
         grouped[row.bu] = [];
       }
       grouped[row.bu].push(row);
     });
+    
+    // Auto-expand if search is active
+    if (searchTerm.trim() && expandedBUs.size === 0) {
+      setExpandedBUs(new Set(Object.keys(grouped)));
+    }
+    
     return grouped;
-  }, [rows]);
+  }, [rows, searchTerm]);
 
   // Sort grouped data
   const sortedBUEntries = useMemo(() => {
@@ -196,6 +216,17 @@ export function OpexDrilldownTable({
   };
 
   const buKeys = Object.keys(groupedData);
+  
+  // Calculate filtered totals for display
+  const filteredTotals = useMemo(() => {
+    const allFilteredCategories = Object.values(groupedData).flat();
+    const actual = allFilteredCategories.reduce((sum, c) => sum + c.actual, 0);
+    const comparison = allFilteredCategories.reduce((sum, c) => sum + c.comparison, 0);
+    const delta = actual - comparison;
+    const deltaPercent = comparison !== 0 ? (delta / Math.abs(comparison)) * 100 : 0;
+    
+    return { actual, comparison, delta, deltaPercent, count: allFilteredCategories.length };
+  }, [groupedData]);
 
   // Keyboard shortcuts: Arrow keys to navigate and expand/collapse BUs
   useEffect(() => {
@@ -242,7 +273,7 @@ export function OpexDrilldownTable({
 
   return (
     <div ref={tableRef} tabIndex={0}>
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between gap-3 mb-2">
         <div className="text-xs text-muted-foreground">
           <kbd className="px-2 py-1 bg-muted rounded">↑↓</kbd> Navigate • 
           <kbd className="px-2 py-1 bg-muted rounded ml-1">→</kbd> Expand • 
@@ -259,6 +290,41 @@ export function OpexDrilldownTable({
           Export CSV
         </Button>
       </div>
+
+      {/* Search Bar */}
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          type="text"
+          placeholder="Search BUs or categories..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="pl-10 pr-10"
+        />
+        {searchTerm && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
+            onClick={() => setSearchTerm('')}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+
+      {/* Search Results Info */}
+      {searchTerm && (
+        <div className="text-sm text-muted-foreground mb-4">
+          Found {filteredTotals.count} {filteredTotals.count === 1 ? 'item' : 'items'} matching "{searchTerm}"
+          {filteredTotals.count > 0 && (
+            <span className="ml-2">
+              • Total: {formatCurrency(filteredTotals.actual)} 
+              ({formatPercent(filteredTotals.deltaPercent)})
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Summary Statistics */}
       <SummaryStatistics rows={rows} metricLabel={title} />

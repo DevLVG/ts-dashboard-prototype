@@ -35,7 +35,6 @@ export function EBITDADrilldownTable({ data }: EBITDADrilldownTableProps) {
           <TableHeader>
             <TableRow className="bg-muted/50">
               <TableHead className="font-semibold">Business Unit</TableHead>
-              <TableHead className="text-right font-semibold">Revenue</TableHead>
               <TableHead className="text-right font-semibold">EBITDA</TableHead>
               <TableHead className="text-right font-semibold">EBITDA%</TableHead>
               <TableHead className="text-right font-semibold">Comparison%</TableHead>
@@ -46,9 +45,6 @@ export function EBITDADrilldownTable({ data }: EBITDADrilldownTableProps) {
             {data.rows.map((row) => (
               <TableRow key={row.bu} className="hover:bg-muted/30 transition-colors">
                 <TableCell className="font-medium">{row.buDisplay}</TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatCurrency(row.revenue)}
-                </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {formatCurrency(row.ebitda)}
                 </TableCell>
@@ -72,9 +68,6 @@ export function EBITDADrilldownTable({ data }: EBITDADrilldownTableProps) {
             {/* Total Row */}
             <TableRow className="border-t-2 border-border bg-muted/50 font-semibold hover:bg-muted/50">
               <TableCell>Total</TableCell>
-              <TableCell className="text-right tabular-nums">
-                {formatCurrency(data.totalRevenue)}
-              </TableCell>
               <TableCell className="text-right tabular-nums">
                 {formatCurrency(data.totalEBITDA)}
               </TableCell>

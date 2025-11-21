@@ -126,6 +126,8 @@ export function RevenueDrilldownTable({
               <TableHead className="text-right">Comparison</TableHead>
               <TableHead className="text-right">Δ</TableHead>
               <TableHead className="text-right w-[100px]">Δ%</TableHead>
+              <TableHead className="text-right">Rev% Act</TableHead>
+              <TableHead className="text-right">Rev% Cmp</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -178,6 +180,12 @@ export function RevenueDrilldownTable({
                         {formatPercent(buDeltaPercent)}
                       </Badge>
                     </TableCell>
+                    <TableCell className="text-right tabular-nums font-medium">
+                      {((totals.actual / totalActual) * 100).toFixed(1)}%
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {((totals.comparison / totalComparison) * 100).toFixed(1)}%
+                    </TableCell>
                   </TableRow>
                   
                   {/* Service Rows - Collapsible */}
@@ -204,6 +212,12 @@ export function RevenueDrilldownTable({
                         )}>
                           {formatPercent(service.deltaPercent)}
                         </span>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-sm">
+                        {service.actualPercent?.toFixed(1)}%
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                        {service.comparisonPercent?.toFixed(1)}%
                       </TableCell>
                     </TableRow>
                   ))}
@@ -232,6 +246,12 @@ export function RevenueDrilldownTable({
                 >
                   {formatPercent(totalDeltaPercent)}
                 </Badge>
+              </TableCell>
+              <TableCell className="text-right tabular-nums font-bold">
+                100.0%
+              </TableCell>
+              <TableCell className="text-right tabular-nums font-bold text-muted-foreground">
+                100.0%
               </TableCell>
             </TableRow>
           </TableBody>

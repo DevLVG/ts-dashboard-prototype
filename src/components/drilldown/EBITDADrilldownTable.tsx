@@ -35,10 +35,12 @@ export function EBITDADrilldownTable({ data }: EBITDADrilldownTableProps) {
           <TableHeader>
             <TableRow className="bg-muted/50">
               <TableHead className="font-semibold">Business Unit</TableHead>
-              <TableHead className="text-right font-semibold">EBITDA</TableHead>
-              <TableHead className="text-right font-semibold">EBITDA%</TableHead>
-              <TableHead className="text-right font-semibold">Comparison%</TableHead>
-              <TableHead className="text-right font-semibold">Δpp</TableHead>
+              <TableHead className="text-right font-semibold">Actual</TableHead>
+              <TableHead className="text-right font-semibold">Comparison</TableHead>
+              <TableHead className="text-right font-semibold">Δ</TableHead>
+              <TableHead className="text-right font-semibold">Δ%</TableHead>
+              <TableHead className="text-right font-semibold">EBITDA% Act</TableHead>
+              <TableHead className="text-right font-semibold">EBITDA% Cmp</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -46,21 +48,29 @@ export function EBITDADrilldownTable({ data }: EBITDADrilldownTableProps) {
               <TableRow key={row.bu} className="hover:bg-muted/30 transition-colors">
                 <TableCell className="font-medium">{row.buDisplay}</TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {formatCurrency(row.ebitda)}
+                  {formatCurrency(row.actual)}
                 </TableCell>
-                <TableCell className="text-right tabular-nums font-medium">
-                  {row.ebitdaMargin.toFixed(1)}%
+                <TableCell className="text-right tabular-nums">
+                  {formatCurrency(row.comparison)}
                 </TableCell>
-                <TableCell className="text-right tabular-nums text-muted-foreground">
-                  {row.comparisonMargin.toFixed(1)}%
+                <TableCell className="text-right">
+                  <span className={getDeltaColor(row.delta)}>
+                    {formatCurrency(row.delta)}
+                  </span>
                 </TableCell>
                 <TableCell className="text-right">
                   <Badge 
-                    variant={getDeltaVariant(row.deltaPP)}
+                    variant={getDeltaVariant(row.deltaPercent)}
                     className="tabular-nums"
                   >
-                    {formatPercent(row.deltaPP)}
+                    {formatPercent(row.deltaPercent)}
                   </Badge>
+                </TableCell>
+                <TableCell className="text-right tabular-nums font-medium">
+                  {row.actualMargin.toFixed(1)}%
+                </TableCell>
+                <TableCell className="text-right tabular-nums text-muted-foreground">
+                  {row.comparisonMargin.toFixed(1)}%
                 </TableCell>
               </TableRow>
             ))}
@@ -69,21 +79,29 @@ export function EBITDADrilldownTable({ data }: EBITDADrilldownTableProps) {
             <TableRow className="border-t-2 border-border bg-muted/50 font-semibold hover:bg-muted/50">
               <TableCell>Total</TableCell>
               <TableCell className="text-right tabular-nums">
-                {formatCurrency(data.totalEBITDA)}
+                {formatCurrency(data.totalActual)}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                {formatCurrency(data.totalComparison)}
+              </TableCell>
+              <TableCell className="text-right">
+                <span className={getDeltaColor(data.totalDelta)}>
+                  {formatCurrency(data.totalDelta)}
+                </span>
+              </TableCell>
+              <TableCell className="text-right">
+                <Badge 
+                  variant={getDeltaVariant(data.totalDeltaPercent)}
+                  className="tabular-nums font-semibold"
+                >
+                  {formatPercent(data.totalDeltaPercent)}
+                </Badge>
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 {data.totalMargin.toFixed(1)}%
               </TableCell>
               <TableCell className="text-right tabular-nums text-muted-foreground">
                 {data.comparisonMargin.toFixed(1)}%
-              </TableCell>
-              <TableCell className="text-right">
-                <Badge 
-                  variant={getDeltaVariant(data.deltaPP)}
-                  className="tabular-nums font-semibold"
-                >
-                  {formatPercent(data.deltaPP)}
-                </Badge>
               </TableCell>
             </TableRow>
           </TableBody>

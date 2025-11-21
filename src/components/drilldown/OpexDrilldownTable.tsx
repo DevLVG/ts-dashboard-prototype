@@ -1,4 +1,5 @@
 import { useState, useMemo, Fragment, useEffect, useRef } from "react";
+import { Download } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -8,10 +9,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { getVarianceHexColor } from "@/lib/varianceColors";
 import { OpexRow } from "@/lib/drilldownData";
+import { exportOpexDrilldownToCSV, downloadCSV } from "@/lib/csvExport";
 
 interface OpexDrilldownTableProps {
   rows: OpexRow[];
@@ -19,6 +22,7 @@ interface OpexDrilldownTableProps {
   totalComparison: number;
   totalDelta: number;
   totalDeltaPercent: number;
+  title?: string;
 }
 
 const formatCurrency = (value: number): string => {
@@ -53,10 +57,24 @@ export function OpexDrilldownTable({
   totalComparison,
   totalDelta,
   totalDeltaPercent,
+  title = 'Operating Expenses'
 }: OpexDrilldownTableProps) {
   const [expandedBUs, setExpandedBUs] = useState<Set<string>>(new Set());
   const [selectedBUIndex, setSelectedBUIndex] = useState<number>(0);
   const tableRef = useRef<HTMLDivElement>(null);
+
+  const handleExportCSV = () => {
+    const csvContent = exportOpexDrilldownToCSV(
+      rows,
+      totalActual,
+      totalComparison,
+      totalDelta,
+      totalDeltaPercent,
+      title
+    );
+    const timestamp = new Date().toISOString().split('T')[0];
+    downloadCSV(csvContent, `${title.toLowerCase().replace(/\s+/g, '_')}_drilldown_${timestamp}.csv`);
+  };
 
   // Group data by BU, then by Category
   const groupedData = useMemo(() => {
@@ -137,11 +155,22 @@ export function OpexDrilldownTable({
 
   return (
     <div ref={tableRef} tabIndex={0}>
-      <div className="text-xs text-muted-foreground mb-2">
-        <kbd className="px-2 py-1 bg-muted rounded">↑↓</kbd> Navigate • 
-        <kbd className="px-2 py-1 bg-muted rounded ml-1">→</kbd> Expand • 
-        <kbd className="px-2 py-1 bg-muted rounded ml-1">←</kbd> Collapse • 
-        <kbd className="px-2 py-1 bg-muted rounded ml-1">ESC</kbd> Close
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs text-muted-foreground">
+          <kbd className="px-2 py-1 bg-muted rounded">↑↓</kbd> Navigate • 
+          <kbd className="px-2 py-1 bg-muted rounded ml-1">→</kbd> Expand • 
+          <kbd className="px-2 py-1 bg-muted rounded ml-1">←</kbd> Collapse • 
+          <kbd className="px-2 py-1 bg-muted rounded ml-1">ESC</kbd> Close
+        </div>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={handleExportCSV}
+          className="gap-2"
+        >
+          <Download className="h-4 w-4" />
+          Export CSV
+        </Button>
       </div>
       {/* Desktop Table */}
       <div className="hidden md:block rounded-md border">

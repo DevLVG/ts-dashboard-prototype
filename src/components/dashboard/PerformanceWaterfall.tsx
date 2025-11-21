@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useState } from "react";
 import { getMonthlyPLData, calculateGM, calculateEBITDA } from "@/data/financialData";
 import { getVarianceHexColor } from "@/lib/varianceColors";
+import { WaterfallDrilldownDrawer } from "./WaterfallDrilldownDrawer";
 
 interface PerformanceWaterfallProps {
   selectedMonth: string;
@@ -12,6 +13,10 @@ interface PerformanceWaterfallProps {
 }
 
 export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selectedBU }: PerformanceWaterfallProps) => {
+  // Drill-down state
+  const [drilldownOpen, setDrilldownOpen] = useState(false);
+  const [drilldownType, setDrilldownType] = useState<'revenue' | 'cogs' | 'gm' | 'opex' | 'ebitda' | 'net_income' | null>(null);
+
   // Get data using the new financial data system
   const buCode = selectedBU === "All Company" ? undefined : 
     selectedBU === "Equestrian" ? "BU1_Equestrian" :
@@ -161,6 +166,57 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
   };
 
   const waterfallData = calculateWaterfallData();
+
+  // Handle bar click for drill-down
+  const handleBarClick = (data: any) => {
+    const typeMap: Record<string, 'revenue' | 'cogs' | 'gm' | 'opex' | 'ebitda' | 'net_income'> = {
+      'Revenues': 'revenue',
+      'COGS': 'cogs',
+      'GM': 'gm',
+      'OpEx': 'opex',
+      'EBITDA': 'ebitda',
+      'Net Income': 'net_income'
+    };
+    
+    const type = typeMap[data.label];
+    if (type) {
+      setDrilldownType(type);
+      setDrilldownOpen(true);
+    }
+  };
+
+  // Get period dates for drill-down
+  const getPeriodDates = (): { start: string; end: string; label: string } => {
+    const today = "2025-11-30";
+    
+    if (selectedMonth === "MTD") {
+      return { start: "2025-11-01", end: today, label: "November MTD" };
+    }
+    if (selectedMonth === "QTD") {
+      return { start: "2025-09-01", end: today, label: "Q4 QTD" };
+    }
+    if (selectedMonth === "YTD") {
+      return { start: "2024-12-01", end: today, label: "YTD 2025" };
+    }
+    
+    // Specific month mapping
+    const monthMap: Record<string, { start: string; end: string; label: string }> = {
+      "December": { start: "2024-12-01", end: "2024-12-31", label: "December 2024" },
+      "January": { start: "2025-01-01", end: "2025-01-31", label: "January 2025" },
+      "February": { start: "2025-02-01", end: "2025-02-28", label: "February 2025" },
+      "March": { start: "2025-03-01", end: "2025-03-31", label: "March 2025" },
+      "April": { start: "2025-04-01", end: "2025-04-30", label: "April 2025" },
+      "May": { start: "2025-05-01", end: "2025-05-31", label: "May 2025" },
+      "June": { start: "2025-06-01", end: "2025-06-30", label: "June 2025" },
+      "July": { start: "2025-07-01", end: "2025-07-31", label: "July 2025" },
+      "August": { start: "2025-08-01", end: "2025-08-31", label: "August 2025" },
+      "September": { start: "2025-09-01", end: "2025-09-30", label: "September 2025" },
+      "October": { start: "2025-10-01", end: "2025-10-31", label: "October 2025" },
+      "November": { start: "2025-11-01", end: "2025-11-30", label: "November 2025" },
+    };
+    
+    return monthMap[selectedMonth] || { start: "2025-11-01", end: "2025-11-30", label: "November 2025" };
+  };
 
   const formatCurrency = (value: number) => {
     return Math.round(value).toLocaleString('en-US');
@@ -409,6 +465,8 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
             stroke="transparent"
             strokeWidth={0}
             radius={[8, 8, 8, 8]}
+            onClick={handleBarClick}
+            cursor="pointer"
           >
             {waterfallData.map((entry, index) => (
               <Cell 
@@ -420,6 +478,17 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
           </Bar>
         </BarChart>
       </ResponsiveContainer>
+
+      {/* Drill-down Drawer */}
+      <WaterfallDrilldownDrawer
+        isOpen={drilldownOpen}
+        onClose={() => setDrilldownOpen(false)}
+        drilldownType={drilldownType}
+        period={getPeriodDates()}
+        scenario="Actual"
+        comparison={selectedScenario === "PY" ? "Actual" : selectedScenario}
+        bu={buCode}
+      />
     </Card>
   );
 };

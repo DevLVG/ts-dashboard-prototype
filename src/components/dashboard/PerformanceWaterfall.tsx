@@ -435,6 +435,7 @@ export const PerformanceWaterfall = ({ selectedMonth, selectedScenario, selected
           textAnchor="middle" 
           fontSize={12}
           fontWeight={600}
+          style={{ pointerEvents: 'none' }}
         >
           {displayValue}
         </text>

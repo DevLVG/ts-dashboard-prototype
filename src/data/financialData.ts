@@ -1,5 +1,5 @@
-// Financial data system using trio_mock_data_v5.json
-import mockData from './trio_mock_data_v5.json';
+// Financial data system using trio_mock_data_v6.json
+import mockData from './trio_mock_data_v6.json';
 
 // Type definitions matching the JSON structure
 export interface RevenueRecord {
@@ -24,7 +24,9 @@ export interface OpexRecord {
   scenario: 'Actual' | 'Budget_Base' | 'Budget_Worst' | 'Budget_Best';
   bu: string;
   category: string;
+  subcategory: string;
   amount: number;
+  allocation_type: string;
 }
 
 export interface CashRecord {

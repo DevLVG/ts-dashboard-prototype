@@ -12,6 +12,8 @@ export interface DrilldownRow {
   comparison: number;
   delta: number;
   deltaPercent: number;
+  actualPercent?: number;  // % of total (e.g., Rev% for revenue rows)
+  comparisonPercent?: number;  // % of total comparison
 }
 
 export interface OpexSubcategory {
@@ -30,29 +32,29 @@ export interface OpexRow {
   deltaPercent: number;
   allocationType?: 'direct' | 'indirect';
   subcategories: OpexSubcategory[];
+  actualPercent?: number;  // OPEX% as % of revenue
+  comparisonPercent?: number;  // Comparison OPEX% as % of revenue
 }
 
 export interface EBITDARow {
   bu: string;
   buDisplay: string;
-  revenue: number;
-  ebitda: number;
-  ebitdaMargin: number;
-  comparisonRevenue: number;
-  comparisonEBITDA: number;
-  comparisonMargin: number;
-  deltaPP: number;
+  actual: number;  // EBITDA amount
+  comparison: number;  // Comparison EBITDA amount
+  delta: number;  // Δ in SAR
+  deltaPercent: number;  // Δ%
+  actualMargin: number;  // EBITDA% Act
+  comparisonMargin: number;  // EBITDA% Cmp
 }
 
 export interface EBITDAData {
   rows: EBITDARow[];
-  totalRevenue: number;
-  totalEBITDA: number;
-  totalMargin: number;
-  comparisonRevenue: number;
-  comparisonEBITDA: number;
-  comparisonMargin: number;
-  deltaPP: number;
+  totalActual: number;  // Total EBITDA
+  totalComparison: number;  // Total comparison EBITDA
+  totalDelta: number;  // Total Δ in SAR
+  totalDeltaPercent: number;  // Total Δ%
+  totalMargin: number;  // Total EBITDA% Act
+  comparisonMargin: number;  // Total EBITDA% Cmp
 }
 
 export interface DrilldownData {
@@ -203,23 +205,28 @@ export function getRevenueBreakdown(
     }
   });
   
-  // Calculate deltas and convert to array
+  // Calculate totals first for percentage calculations
+  const totalActual = Array.from(rowMap.values()).reduce((sum, r) => sum + r.actual, 0);
+  const totalComparison = Array.from(rowMap.values()).reduce((sum, r) => sum + r.comparison, 0);
+  
+  // Calculate deltas and convert to array with percentages
   const rows: DrilldownRow[] = Array.from(rowMap.values()).map(row => {
     const delta = row.actual - row.comparison;
     const deltaPercent = row.comparison !== 0 
       ? (delta / Math.abs(row.comparison)) * 100 
       : 0;
+    const actualPercent = totalActual !== 0 ? (row.actual / totalActual) * 100 : 0;
+    const comparisonPercent = totalComparison !== 0 ? (row.comparison / totalComparison) * 100 : 0;
     
     return {
       ...row,
       delta,
-      deltaPercent
+      deltaPercent,
+      actualPercent,
+      comparisonPercent
     };
   });
   
-  // Calculate totals
-  const totalActual = rows.reduce((sum, r) => sum + r.actual, 0);
-  const totalComparison = rows.reduce((sum, r) => sum + r.comparison, 0);
   const totalDelta = totalActual - totalComparison;
   const totalDeltaPercent = totalComparison !== 0 
     ? (totalDelta / Math.abs(totalComparison)) * 100 
@@ -450,6 +457,14 @@ export function getOpexBreakdown(
       ? (delta / Math.abs(totals.comparison)) * 100 
       : 0;
     
+    // Calculate OPEX% if revenue provided
+    const actualPercent = totalRevenue && totalRevenue.actual !== 0 
+      ? (totals.actual / totalRevenue.actual) * 100 
+      : undefined;
+    const comparisonPercent = totalRevenue && totalRevenue.comparison !== 0 
+      ? (totals.comparison / totalRevenue.comparison) * 100 
+      : undefined;
+    
     // Get subcategories for this category
     const subcatMap = subcategoryMap.get(category) || new Map();
     const subcategories: OpexSubcategory[] = Array.from(subcatMap.entries()).map(([subcategory, amounts]) => {
@@ -474,7 +489,9 @@ export function getOpexBreakdown(
       delta,
       deltaPercent,
       allocationType: totals.allocationType,
-      subcategories
+      subcategories,
+      actualPercent,
+      comparisonPercent
     };
   });
   
@@ -704,23 +721,23 @@ export function getEBITDABreakdown(
   
   // Build EBITDA rows
   const rows: EBITDARow[] = Array.from(buMap.entries()).map(([buKey, data]) => {
-    const ebitda = data.revenue - data.cogs - data.opex;
-    const comparisonEBITDA = data.comparisonRevenue - data.comparisonCogs - data.comparisonOpex;
+    const actual = data.revenue - data.cogs - data.opex;
+    const comparison = data.comparisonRevenue - data.comparisonCogs - data.comparisonOpex;
+    const delta = actual - comparison;
+    const deltaPercent = comparison !== 0 ? (delta / Math.abs(comparison)) * 100 : 0;
     
-    const ebitdaMargin = data.revenue !== 0 ? (ebitda / data.revenue) * 100 : 0;
-    const comparisonMargin = data.comparisonRevenue !== 0 ? (comparisonEBITDA / data.comparisonRevenue) * 100 : 0;
-    const deltaPP = ebitdaMargin - comparisonMargin;
+    const actualMargin = data.revenue !== 0 ? (actual / data.revenue) * 100 : 0;
+    const comparisonMargin = data.comparisonRevenue !== 0 ? (comparison / data.comparisonRevenue) * 100 : 0;
     
     return {
       bu: buKey,
       buDisplay: formatBUName(buKey),
-      revenue: data.revenue,
-      ebitda,
-      ebitdaMargin,
-      comparisonRevenue: data.comparisonRevenue,
-      comparisonEBITDA,
-      comparisonMargin,
-      deltaPP
+      actual,
+      comparison,
+      delta,
+      deltaPercent,
+      actualMargin,
+      comparisonMargin
     };
   });
   
@@ -728,25 +745,26 @@ export function getEBITDABreakdown(
   const totalRevenue = revenueData.totalActual;
   const totalCOGS = cogsData.totalActual;
   const totalOPEX = opexData.totalActual; // Use the breakdown function's total
-  const totalEBITDA = totalRevenue - totalCOGS - totalOPEX;
+  const totalActual = totalRevenue - totalCOGS - totalOPEX;
   
   const comparisonRevenue = revenueData.totalComparison;
   const comparisonCOGS = cogsData.totalComparison;
   const comparisonOPEX = opexData.totalComparison; // Use the breakdown function's total
-  const comparisonEBITDA = comparisonRevenue - comparisonCOGS - comparisonOPEX;
+  const totalComparison = comparisonRevenue - comparisonCOGS - comparisonOPEX;
   
-  const totalMargin = totalRevenue !== 0 ? (totalEBITDA / totalRevenue) * 100 : 0;
-  const comparisonMargin = comparisonRevenue !== 0 ? (comparisonEBITDA / comparisonRevenue) * 100 : 0;
-  const deltaPP = totalMargin - comparisonMargin;
+  const totalDelta = totalActual - totalComparison;
+  const totalDeltaPercent = totalComparison !== 0 ? (totalDelta / Math.abs(totalComparison)) * 100 : 0;
+  
+  const totalMargin = totalRevenue !== 0 ? (totalActual / totalRevenue) * 100 : 0;
+  const comparisonMargin = comparisonRevenue !== 0 ? (totalComparison / comparisonRevenue) * 100 : 0;
   
   return {
     rows,
-    totalRevenue,
-    totalEBITDA,
+    totalActual,
+    totalComparison,
+    totalDelta,
+    totalDeltaPercent,
     totalMargin,
-    comparisonRevenue,
-    comparisonEBITDA,
-    comparisonMargin,
-    deltaPP
+    comparisonMargin
   };
 }

@@ -88,10 +88,12 @@ export function OpexDrilldownTable({
             <TableRow>
               <TableHead className="w-[35%]">Category</TableHead>
               <TableHead className="w-[12%]">Type</TableHead>
-              <TableHead className="text-right w-[15%]">Actual</TableHead>
-              <TableHead className="text-right w-[15%]">Comparison</TableHead>
-              <TableHead className="text-right w-[12%]">Δ</TableHead>
-              <TableHead className="text-right w-[11%]">Δ%</TableHead>
+              <TableHead className="text-right w-[13%]">Actual</TableHead>
+              <TableHead className="text-right w-[13%]">Comparison</TableHead>
+              <TableHead className="text-right w-[10%]">Δ</TableHead>
+              <TableHead className="text-right w-[9%]">Δ%</TableHead>
+              <TableHead className="text-right w-[9%]">OPEX% Act</TableHead>
+              <TableHead className="text-right w-[9%]">OPEX% Cmp</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -132,32 +134,40 @@ export function OpexDrilldownTable({
                       {formatPercent(row.deltaPercent)}
                     </Badge>
                   </TableCell>
+                  <TableCell className="text-right tabular-nums font-medium">
+                    {row.actualPercent !== undefined ? `${row.actualPercent.toFixed(1)}%` : '-'}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {row.comparisonPercent !== undefined ? `${row.comparisonPercent.toFixed(1)}%` : '-'}
+                  </TableCell>
                 </TableRow>
                 
                 {/* Subcategory Rows */}
                 {expandedCategories.has(row.category) && row.subcategories.map((sub, subIndex) => (
-                  <TableRow key={`${row.category}-${sub.subcategory}-${subIndex}`} className="bg-muted/20">
-                    <TableCell className="pl-12 text-sm text-muted-foreground">
-                      {formatCategoryName(sub.subcategory)}
-                    </TableCell>
-                    <TableCell></TableCell>
-                    <TableCell className="text-right text-sm">{formatCurrency(sub.actual)}</TableCell>
-                    <TableCell className="text-right text-sm">{formatCurrency(sub.comparison)}</TableCell>
-                    <TableCell className="text-right text-sm">{formatDelta(sub.delta)}</TableCell>
-                    <TableCell className="text-right text-sm">
-                      <Badge 
-                        variant="outline"
-                        style={{ 
-                          backgroundColor: `${getVarianceHexColor(sub.deltaPercent, 'OpEx')}10`,
-                          color: getVarianceHexColor(sub.deltaPercent, 'OpEx'),
-                          borderColor: getVarianceHexColor(sub.deltaPercent, 'OpEx')
-                        }}
-                        className="text-xs"
-                      >
-                        {formatPercent(sub.deltaPercent)}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
+                <TableRow key={`${row.category}-${sub.subcategory}-${subIndex}`} className="bg-muted/20">
+                  <TableCell className="pl-12 text-sm text-muted-foreground">
+                    {formatCategoryName(sub.subcategory)}
+                  </TableCell>
+                  <TableCell></TableCell>
+                  <TableCell className="text-right text-sm">{formatCurrency(sub.actual)}</TableCell>
+                  <TableCell className="text-right text-sm">{formatCurrency(sub.comparison)}</TableCell>
+                  <TableCell className="text-right text-sm">{formatDelta(sub.delta)}</TableCell>
+                  <TableCell className="text-right text-sm">
+                    <Badge 
+                      variant="outline"
+                      style={{ 
+                        backgroundColor: `${getVarianceHexColor(sub.deltaPercent, 'OpEx')}10`,
+                        color: getVarianceHexColor(sub.deltaPercent, 'OpEx'),
+                        borderColor: getVarianceHexColor(sub.deltaPercent, 'OpEx')
+                      }}
+                      className="text-xs"
+                    >
+                      {formatPercent(sub.deltaPercent)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell></TableCell>
+                  <TableCell></TableCell>
+                </TableRow>
                 ))}
               </Fragment>
             ))}
@@ -180,6 +190,12 @@ export function OpexDrilldownTable({
                 >
                   {formatPercent(totalDeltaPercent)}
                 </Badge>
+              </TableCell>
+              <TableCell className="text-right tabular-nums font-bold">
+                -
+              </TableCell>
+              <TableCell className="text-right tabular-nums font-bold text-muted-foreground">
+                -
               </TableCell>
             </TableRow>
           </TableBody>

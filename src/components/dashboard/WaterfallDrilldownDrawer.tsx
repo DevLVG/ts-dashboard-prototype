@@ -3,7 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { RevenueDrilldownTable } from "@/components/drilldown/RevenueDrilldownTable";
 import { SummaryPanel } from "@/components/drilldown/SummaryPanel";
+import { ConcentrationPanel } from "@/components/drilldown/ConcentrationPanel";
 import { getRevenueBreakdown, getCogsBreakdown, getOpexBreakdown, getGMBreakdown } from "@/lib/drilldownData";
+import { calculateConcentration } from "@/lib/concentration";
 
 interface WaterfallDrilldownDrawerProps {
   isOpen: boolean;
@@ -122,13 +124,16 @@ export function WaterfallDrilldownDrawer({
         
         <div className="overflow-y-auto p-6">
           {drilldownType === 'revenue' && (
-            <RevenueDrilldownTable 
-              rows={data.rows}
-              totalActual={data.totalActual}
-              totalComparison={data.totalComparison}
-              totalDelta={data.totalDelta}
-              totalDeltaPercent={data.totalDeltaPercent}
-            />
+            <>
+              <RevenueDrilldownTable 
+                rows={data.rows}
+                totalActual={data.totalActual}
+                totalComparison={data.totalComparison}
+                totalDelta={data.totalDelta}
+                totalDeltaPercent={data.totalDeltaPercent}
+              />
+              <ConcentrationPanel metrics={calculateConcentration(data.rows, data.totalActual)} />
+            </>
           )}
           
           {drilldownType === 'cogs' && (

@@ -1,5 +1,5 @@
-// Financial data system using trio_mock_data_v4.json
-import mockData from './trio_mock_data_v4.json';
+// Financial data system using trio_mock_data_v5.json
+import mockData from './trio_mock_data_v5.json';
 
 // Type definitions matching the JSON structure
 export interface RevenueRecord {

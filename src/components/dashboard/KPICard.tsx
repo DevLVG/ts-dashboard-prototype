@@ -60,8 +60,8 @@ export const KPICard = ({
                 </span>
               ) : (
                 <>
-                  {/* Arrow direction: Only OpEx uses inverted logic (up = bad) */}
-                  {metric.label === "OpEx"
+                  {/* Arrow direction: OpEx and Receivables use inverted logic (up = bad) */}
+                  {metric.label === "OpEx" || metric.label.includes("Receivables")
                     ? metric.variancePercent > 0 
                       ? <TrendingUp className="h-5 w-5 md:h-4 md:w-4" /> 
                       : <TrendingDown className="h-5 w-5 md:h-4 md:w-4" />

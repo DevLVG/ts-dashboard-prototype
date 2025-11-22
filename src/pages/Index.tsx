@@ -405,11 +405,59 @@ const Index = () => {
   };
 
   const renderCashSection = () => {
+    const cashKPIData = getCashKPIData();
+    
     return (
       <div className="space-y-6">
+        {/* Filter Controls - Only Scenario and BU */}
+        <div className="flex gap-4">
+          <Select 
+            value={selectedScenario} 
+            onValueChange={(value) => setSelectedScenario(value as typeof selectedScenario)}
+          >
+            <SelectTrigger className="w-56 bg-background font-medium">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {scenarioOptions.map(option => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={selectedBU} onValueChange={setSelectedBU}>
+            <SelectTrigger className="w-56 bg-background font-medium">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {businessUnits.map((bu) => (
+                <SelectItem key={bu.value} value={bu.value}>
+                  {bu.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* KPI Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {cashKPIData.map((metric) => (
+            <KPICard
+              key={metric.label}
+              metric={metric}
+              periodLabel=""
+              scenario={selectedScenario === 'PY' ? 'py' : 'base'}
+            />
+          ))}
+        </div>
+
+        {/* Chart Section */}
         <Card className="p-6">
-          <h2 className="text-2xl font-semibold mb-4">Recommendation</h2>
-          <p className="text-muted-foreground">This page is under construction.</p>
+          <CashTrendChart 
+            scenario={selectedScenario} 
+            selectedBU={selectedBU} 
+          />
         </Card>
       </div>
     );
@@ -592,12 +640,87 @@ const Index = () => {
   };
 
   const renderRatios = () => {
+    // KPI data for ratios
+    const ratiosKPIData = [
+      {
+        label: "Gross Margin %",
+        actual: 48.2,
+        budget: 50.0,
+        variance: -1.8,
+        variancePercent: -1.8,
+        format: "percent" as const,
+      },
+      {
+        label: "EBITDA %",
+        actual: 14.1,
+        budget: 17.6,
+        variance: -3.5,
+        variancePercent: -3.5,
+        format: "percent" as const,
+      },
+      {
+        label: "OpEx % of Revenue",
+        actual: 34.1,
+        budget: 32.0,
+        variance: 2.1,
+        variancePercent: 2.1,
+        format: "percent" as const,
+      },
+    ];
+
     return (
-      <div className="space-y-6">
-        <Card className="p-6">
-          <h2 className="text-2xl font-semibold mb-4">Action</h2>
-          <p className="text-muted-foreground">This page is under construction.</p>
-        </Card>
+      <div className="space-y-6 animate-fade-in">
+        {renderFilters()}
+        
+        {/* KPI Cards at top */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {ratiosKPIData.map((metric, index) => {
+            const isOpEx = metric.label.includes("OpEx");
+            const varianceColor = isOpEx 
+              ? (metric.variance > 1 ? "text-destructive" : metric.variance > 0 ? "text-warning" : "text-success")
+              : (metric.variance < -1 ? "text-destructive" : metric.variance < 0 ? "text-warning" : "text-success");
+            
+            const bgColor = isOpEx
+              ? (metric.variance > 1 ? "bg-destructive/15 border-destructive/40" : "bg-muted/50")
+              : (metric.variance < -1 ? "bg-destructive/15 border-destructive/40" : "bg-muted/50");
+
+            return (
+              <Card 
+                key={index}
+                className={`p-6 shadow-sm border-2 animate-fade-in hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer ${bgColor}`}
+                onClick={() => setCurrentPage("performance")}
+              >
+                <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide mb-2">
+                  {metric.label}
+                </p>
+                <p className="text-4xl font-heading mb-2">
+                  {metric.actual.toFixed(1)}%
+                </p>
+                <p className={`text-base font-semibold mb-1 ${varianceColor}`}>
+                  {metric.variance > 0 ? "+" : ""}{metric.variance.toFixed(1)}pp vs Budget
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Budget: {metric.budget.toFixed(1)}%
+                </p>
+              </Card>
+            );
+          })}
+        </div>
+
+        {/* Middle Section: BU Comparison and Cost Structure */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <BUMarginComparison 
+            data={buMarginComparisonData}
+            onClick={(buName) => {
+              setCurrentPage("performance");
+              // Could add BU filter logic here
+            }}
+          />
+          <CostStructureChart data={costStructureData} />
+        </div>
+
+        {/* Bottom Section: Trend Chart */}
+        <FinancialRatiosChart data={financialRatiosData} />
       </div>
     );
   };

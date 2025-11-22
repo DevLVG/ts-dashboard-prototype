@@ -60,7 +60,7 @@ export const getCashBalance = (
   return records[0]?.close || 0;
 };
 
-// Calculate monthly burn rate
+// Calculate monthly burn rate (annualized from month-to-date)
 export const getMonthlyBurn = (
   startDate: string,
   endDate: string,
@@ -76,9 +76,13 @@ export const getMonthlyBurn = (
   
   const totalOutflows = cashData.reduce((sum, r) => sum + r.out, 0);
   const totalInflows = cashData.reduce((sum, r) => sum + r.in, 0);
-  const months = cashData.length;
+  const netBurn = totalOutflows - totalInflows;
   
-  return months > 0 ? (totalOutflows - totalInflows) / months : 0;
+  // Calculate days in the period
+  const days = cashData.length;
+  
+  // Annualize to monthly rate (30 days)
+  return days > 0 ? (netBurn / days) * 30 : 0;
 };
 
 // Calculate outstanding payables

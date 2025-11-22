@@ -54,15 +54,34 @@ export const getCashBalance = (
   // For cash balance, we want the closing balance at the start of the month
   const monthStartDate = getMonthStart(date);
   
-  // Filter records by scenario and date
-  // Note: cash table has one record per date per scenario (company-wide)
-  const records = cashRecords.filter(r => 
+  if (!bu || bu === 'All Company') {
+    // Enterprise-level: use close field (bank account balance)
+    const record = cashRecords.find(r => 
+      r.scenario === scenario && 
+      r.date === monthStartDate
+    );
+    
+    return record?.close || 0;
+  }
+  
+  // BU-specific: calculate cumulative cash position from historical flows
+  const buRecords = cashRecords.filter(r => 
     r.scenario === scenario && 
-    r.date === monthStartDate
+    r.bu === bu &&
+    r.date <= date
   );
   
-  if (records.length === 0) return 0;
-  return records[0]?.close || 0;
+  if (buRecords.length === 0) return 0;
+  
+  // Starting equity (Dec 2023 baseline)
+  const startingCash = 3500000;
+  
+  // Sum all historical flows for this BU
+  const cumulativeFlow = buRecords.reduce((sum, r) => 
+    sum + (r.in - r.out), 0
+  );
+  
+  return startingCash + cumulativeFlow;
 };
 
 // Calculate monthly cash flow (net change in cash balance)

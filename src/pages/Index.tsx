@@ -370,7 +370,7 @@ const Index = () => {
         format: "currency" as const
       },
       {
-        label: `Payables (${payablesActual.avgAgingMonths.toFixed(1)} mo)`,
+        label: `Payables ${payablesActual.avgAgingMonths.toFixed(1)} mo`,
         actual: payablesActual.amount,
         budget: payablesComparison.amount,
         variance: payablesActual.amount - payablesComparison.amount,
@@ -378,7 +378,7 @@ const Index = () => {
         format: "currency" as const
       },
       {
-        label: `Receivables (${receivablesActual.avgAgingMonths.toFixed(1)} mo)`,
+        label: `Receivables ${receivablesActual.avgAgingMonths.toFixed(1)} mo`,
         actual: receivablesActual.amount,
         budget: receivablesComparison.amount,
         variance: receivablesActual.amount - receivablesComparison.amount,

@@ -4,7 +4,7 @@ export const cashRecords = mockDataV9.cash;
 export const capexRecords = mockDataV9.capex;
 export const equityRecords = mockDataV9.equity;
 
-const CURRENT_DATE = "2025-11-20";
+const CURRENT_DATE = new Date().toISOString().split('T')[0];
 
 // Mapping BU names to codes
 export const buMap: Record<string, string> = {

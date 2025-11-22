@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, TrendingUp, Wallet, BarChart3, FileText } from "lucide-react";
+import { LayoutDashboard, TrendingUp, Lightbulb, CheckSquare, FileText } from "lucide-react";
 import { PageType } from "@/types/dashboard";
 import { NavLink } from "@/components/NavLink";
 import tsLogo from "@/assets/ts-logo.png";
@@ -22,12 +22,12 @@ export const DashboardNav = ({
   }, {
     id: "cash" as PageType,
     label: "Recommendation",
-    icon: Wallet,
+    icon: Lightbulb,
     path: "/cash"
   }, {
     id: "ratios" as PageType,
     label: "Actions",
-    icon: BarChart3,
+    icon: CheckSquare,
     path: "/ratios"
   }, {
     id: "statements" as PageType,

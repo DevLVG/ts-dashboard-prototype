@@ -335,10 +335,10 @@ const Index = () => {
     
     // 2. Burn Rate (current month)
     const monthStart = getMonthStart(CURRENT_DATE);
-    const burnActual = getMonthlyBurn(monthStart, CURRENT_DATE, 'Actual');
+    const burnActual = getMonthlyBurn(monthStart, CURRENT_DATE, 'Actual', buCode);
     const burnComparison = selectedScenario === 'PY'
-      ? getMonthlyBurn(getPYDate(monthStart), getPYDate(CURRENT_DATE), 'Actual')
-      : getMonthlyBurn(monthStart, CURRENT_DATE, budgetScenario);
+      ? getMonthlyBurn(getPYDate(monthStart), getPYDate(CURRENT_DATE), 'Actual', buCode)
+      : getMonthlyBurn(monthStart, CURRENT_DATE, budgetScenario, buCode);
     
     // 3. Payables
     const payablesActual = getPayables('Actual', CURRENT_DATE, buCode);

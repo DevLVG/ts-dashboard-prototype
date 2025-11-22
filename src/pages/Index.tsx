@@ -525,7 +525,7 @@ const Index = () => {
       <div className="flex justify-center pt-4">
         <Tabs value={currentView} onValueChange={(v) => setCurrentView(v as 'economics' | 'cash')}>
           <TabsListPill className="shadow-lg">
-            <TabsTriggerPill value="economics">Economics</TabsTriggerPill>
+            <TabsTriggerPill value="economics">Performance</TabsTriggerPill>
             <TabsTriggerPill value="cash">Cash</TabsTriggerPill>
           </TabsListPill>
         </Tabs>

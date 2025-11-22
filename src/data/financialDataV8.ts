@@ -79,18 +79,16 @@ export const getMonthlyBurn = (
   
   if (records.length === 0) return 0;
   
-  const monthRecord = records[0]; // Should be November 2025
-  if (!monthRecord) return 0;
+  // Sum all inflows and outflows across the period
+  const totalInflows = records.reduce((sum, r) => sum + r.in, 0);
+  const totalOutflows = records.reduce((sum, r) => sum + r.out, 0);
+  const netFlow = totalInflows - totalOutflows;
   
   // Calculate days in period
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  const daysInPeriod = Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-  
-  // Net cash flow for period (positive = generates cash, negative = burns cash)
-  const netFlow = monthRecord.in - monthRecord.out;
+  const daysInPeriod = records.length; // Each record represents one day
   
   // Annualize to monthly rate (multiply by 30/days)
+  // Positive netFlow = generates cash, Negative netFlow = burns cash
   return (netFlow / daysInPeriod) * 30;
 };
 

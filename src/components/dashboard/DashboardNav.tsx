@@ -26,12 +26,12 @@ export const DashboardNav = ({
     path: "/cash"
   }, {
     id: "ratios" as PageType,
-    label: "Actions",
+    label: "Action",
     icon: CheckSquare,
     path: "/ratios"
   }, {
     id: "statements" as PageType,
-    label: "Communications",
+    label: "Communication",
     icon: FileText,
     path: "/statements"
   }];

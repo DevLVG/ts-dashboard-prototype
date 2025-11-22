@@ -226,22 +226,29 @@ export const getMonthlyCashBalances = (
   
   return months.map(month => {
     const monthDate = getMonthDate(month);
-    const yearMonth = monthDate.slice(0, 7); // "2025-01"
     
-    const actualRecord = cashRecords.find(r =>
-      r.scenario === 'Actual' &&
-      r.date.startsWith(yearMonth)
-    );
+    // Get last day of month for TO DATE calculation
+    const lastDay = new Date(monthDate);
+    lastDay.setMonth(lastDay.getMonth() + 1);
+    lastDay.setDate(0);
+    const monthEnd = lastDay.toISOString().split('T')[0];
     
-    const budgetRecord = cashRecords.find(r =>
-      r.scenario === scenario &&
-      r.date.startsWith(yearMonth)
-    );
+    // Actual balance (always 2025)
+    const actualBalance = getCashBalance('Actual', monthEnd, bu);
+    
+    // Comparison: PY = Actual 2024, otherwise use budget scenario
+    let comparisonBalance: number;
+    if (scenario === 'PY') {
+      const pyDate = getPYDate(monthEnd);
+      comparisonBalance = getCashBalance('Actual', pyDate, bu);
+    } else {
+      comparisonBalance = getCashBalance(scenario, monthEnd, bu);
+    }
     
     return {
       month,
-      actual: actualRecord?.close || 0,
-      budget: budgetRecord?.close || 0
+      actual: actualBalance,
+      budget: comparisonBalance
     };
   });
 };

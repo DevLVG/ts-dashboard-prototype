@@ -45,15 +45,20 @@ export const getMonthStart = (date: string = CURRENT_DATE): string => {
   return date.slice(0, 8) + "01"; // "2025-11-20" → "2025-11-01"
 };
 
-// Get current cash balance
+// Get current cash balance (uses month start date for closing balance)
 export const getCashBalance = (
   scenario: string,
   date: string = CURRENT_DATE,
   bu?: string
 ): number => {
+  // For cash balance, we want the closing balance at the start of the month
+  const monthStartDate = getMonthStart(date);
+  
+  // Filter records by scenario and date
+  // Note: cash table has one record per date per scenario (company-wide)
   const records = cashRecords.filter(r => 
     r.scenario === scenario && 
-    r.date === date
+    r.date === monthStartDate
   );
   
   if (records.length === 0) return 0;
@@ -78,10 +83,11 @@ export const getMonthlyBurn = (
   const totalInflows = cashData.reduce((sum, r) => sum + r.in, 0);
   const netBurn = totalOutflows - totalInflows;
   
-  // Calculate days in the period
+  // Calculate days in the period (number of records = number of days)
   const days = cashData.length;
   
   // Annualize to monthly rate (30 days)
+  // Formula: (total out - total in) / days * 30
   return days > 0 ? (netBurn / days) * 30 : 0;
 };
 

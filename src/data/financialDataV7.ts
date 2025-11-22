@@ -77,18 +77,36 @@ export const getMonthlyBurn = (
     r.date <= endDate
   );
   
-  if (cashData.length === 0) return 0;
+  console.log('=== MONTHLY BURN CALCULATION ===');
+  console.log('Scenario:', scenario);
+  console.log('Date Range:', startDate, 'to', endDate);
+  console.log('Records Found:', cashData.length);
+  
+  if (cashData.length === 0) {
+    console.log('No records found!');
+    return 0;
+  }
   
   const totalOutflows = cashData.reduce((sum, r) => sum + r.out, 0);
   const totalInflows = cashData.reduce((sum, r) => sum + r.in, 0);
   const netBurn = totalOutflows - totalInflows;
   
+  console.log('Total Inflows:', totalInflows.toLocaleString());
+  console.log('Total Outflows:', totalOutflows.toLocaleString());
+  console.log('Net Burn:', netBurn.toLocaleString());
+  
   // Calculate days in the period (number of records = number of days)
   const days = cashData.length;
+  const monthlyBurn = (netBurn / days) * 30;
+  
+  console.log('Days:', days);
+  console.log('Formula: (' + netBurn.toLocaleString() + ' / ' + days + ') * 30');
+  console.log('Monthly Burn Result:', monthlyBurn.toLocaleString());
+  console.log('================================');
   
   // Annualize to monthly rate (30 days)
   // Formula: (total out - total in) / days * 30
-  return days > 0 ? (netBurn / days) * 30 : 0;
+  return monthlyBurn;
 };
 
 // Calculate outstanding payables

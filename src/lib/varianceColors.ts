@@ -1,13 +1,14 @@
 /**
  * Centralized variance coloring logic for financial metrics
  * 
- * Logic:
- * - Revenue, GM, EBITDA, Cash Balance:
+ * STANDARD LOGIC (Higher is better):
+ * - Revenue, GM, EBITDA, Cash Balance, Cash Flow, Payables, Receivables:
  *   a) Actual between 0% and -5% vs comparison = YELLOW
  *   b) Actual < -5% vs comparison = RED
  *   c) Actual >= 0% vs comparison = CYAN (good)
  * 
- * - OpEx, Burn, Payables, Receivables:
+ * INVERTED LOGIC (Lower is better):
+ * - OpEx only:
  *   a) Actual between 0% and +5% vs comparison = YELLOW
  *   b) Actual > +5% vs comparison = RED
  *   c) Actual < 0% vs comparison = CYAN (good)
@@ -21,27 +22,12 @@ const isOpEx = (metricLabel: string): boolean => {
          metricLabel.toLowerCase().includes("operating expense");
 };
 
-// Helper to identify Burn Rate metrics (where lower is better)
-const isBurnRate = (metricLabel: string): boolean => {
-  return metricLabel.toLowerCase().includes("burn");
-};
-
-// Helper to identify Cash metrics with inverted logic (where lower is better)
-const isCashMetric = (metricLabel: string): boolean => {
-  return metricLabel.includes("Burn") || 
-         metricLabel.includes("Payables") || 
-         metricLabel.includes("Receivables");
-};
-
 // Helper to identify if metric uses standard logic (higher is better)
 const usesStandardLogic = (metricLabel: string): boolean => {
-  // Cash Balance uses standard logic (higher is better)
-  if (metricLabel.includes("Cash Balance")) return true;
-  // If it's a cash metric, it uses inverted logic
-  if (isCashMetric(metricLabel)) return false;
-  // If it's OpEx, it uses inverted logic
+  // Only OpEx uses inverted logic (lower is better)
   if (isOpEx(metricLabel)) return false;
-  // Everything else uses standard logic
+  // Everything else uses standard logic (higher is better)
+  // This includes: Revenue, GM, EBITDA, Cash Balance, Cash Flow, Payables, Receivables
   return true;
 };
 
@@ -50,13 +36,13 @@ const usesStandardLogic = (metricLabel: string): boolean => {
  */
 export const getVarianceTextColor = (variancePercent: number, metricLabel: string): string => {
   if (usesStandardLogic(metricLabel)) {
-    // Revenue, GM, EBITDA, Cash Balance: higher is better
-    if (variancePercent >= 0) return "text-success"; // At or above budget = CYAN (good)
+    // STANDARD: Revenue, GM, EBITDA, Cash Balance, Cash Flow, Payables, Receivables (higher is better)
+    if (variancePercent >= 0) return "text-success"; // At or above comparison = CYAN (good)
     if (variancePercent >= -5) return "text-warning"; // 0% to -5% = YELLOW
     return "text-destructive"; // < -5% = RED (bad)
   } else {
-    // OpEx, Burn, Payables, Receivables: lower is better (inverted logic)
-    if (variancePercent < 0) return "text-success"; // Under budget = CYAN (good)
+    // INVERTED: OpEx only (lower is better)
+    if (variancePercent < 0) return "text-success"; // Under comparison = CYAN (good)
     if (variancePercent <= 5) return "text-warning"; // 0% to +5% = YELLOW
     return "text-destructive"; // > +5% = RED (bad)
   }
@@ -67,13 +53,13 @@ export const getVarianceTextColor = (variancePercent: number, metricLabel: strin
  */
 export const getVarianceBackgroundColor = (variancePercent: number, metricLabel: string): string => {
   if (usesStandardLogic(metricLabel)) {
-    // Revenue, GM, EBITDA, Cash Balance: higher is better
-    if (variancePercent >= 0) return "bg-success/10 border-success/30"; // At or above budget = CYAN (good)
+    // STANDARD: Revenue, GM, EBITDA, Cash Balance, Cash Flow, Payables, Receivables (higher is better)
+    if (variancePercent >= 0) return "bg-success/10 border-success/30"; // At or above comparison = CYAN (good)
     if (variancePercent >= -5) return "bg-warning/15 border-warning/40"; // 0% to -5% = YELLOW
     return "bg-destructive/10 border-destructive/30"; // < -5% = RED (bad)
   } else {
-    // OpEx, Burn, Payables, Receivables: lower is better (inverted logic)
-    if (variancePercent < 0) return "bg-success/10 border-success/30"; // Under budget = CYAN (good)
+    // INVERTED: OpEx only (lower is better)
+    if (variancePercent < 0) return "bg-success/10 border-success/30"; // Under comparison = CYAN (good)
     if (variancePercent <= 5) return "bg-warning/15 border-warning/40"; // 0% to +5% = YELLOW
     return "bg-destructive/10 border-destructive/30"; // > +5% = RED (bad)
   }
@@ -84,13 +70,13 @@ export const getVarianceBackgroundColor = (variancePercent: number, metricLabel:
  */
 export const getVarianceSolidColor = (variancePercent: number, metricLabel: string): string => {
   if (usesStandardLogic(metricLabel)) {
-    // Revenue, GM, EBITDA, Cash Balance: higher is better
-    if (variancePercent >= 0) return "bg-success"; // At or above budget = CYAN (good)
+    // STANDARD: Revenue, GM, EBITDA, Cash Balance, Cash Flow, Payables, Receivables (higher is better)
+    if (variancePercent >= 0) return "bg-success"; // At or above comparison = CYAN (good)
     if (variancePercent >= -5) return "bg-warning"; // 0% to -5% = YELLOW
     return "bg-destructive"; // < -5% = RED (bad)
   } else {
-    // OpEx, Burn, Payables, Receivables: lower is better (inverted logic)
-    if (variancePercent < 0) return "bg-success"; // Under budget = CYAN (good)
+    // INVERTED: OpEx only (lower is better)
+    if (variancePercent < 0) return "bg-success"; // Under comparison = CYAN (good)
     if (variancePercent <= 5) return "bg-warning"; // 0% to +5% = YELLOW
     return "bg-destructive"; // > +5% = RED (bad)
   }
@@ -101,13 +87,13 @@ export const getVarianceSolidColor = (variancePercent: number, metricLabel: stri
  */
 export const getVarianceHexColor = (variancePercent: number, metricLabel: string): string => {
   if (usesStandardLogic(metricLabel)) {
-    // Revenue, GM, EBITDA, Cash Balance: higher is better
-    if (variancePercent >= 0) return "#22d3ee"; // At or above budget = CYAN (good)
+    // STANDARD: Revenue, GM, EBITDA, Cash Balance, Cash Flow, Payables, Receivables (higher is better)
+    if (variancePercent >= 0) return "#22d3ee"; // At or above comparison = CYAN (good)
     if (variancePercent >= -5) return "#ffc107"; // 0% to -5% = YELLOW
     return "#dc3545"; // < -5% = RED (bad)
   } else {
-    // OpEx, Burn, Payables, Receivables: lower is better (inverted logic)
-    if (variancePercent < 0) return "#22d3ee"; // Under budget = CYAN (good)
+    // INVERTED: OpEx only (lower is better)
+    if (variancePercent < 0) return "#22d3ee"; // Under comparison = CYAN (good)
     if (variancePercent <= 5) return "#ffc107"; // 0% to +5% = YELLOW
     return "#dc3545"; // > +5% = RED (bad)
   }

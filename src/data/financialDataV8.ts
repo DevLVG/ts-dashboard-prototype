@@ -45,23 +45,39 @@ export const getMonthStart = (date: string = CURRENT_DATE): string => {
   return date.slice(0, 8) + "01"; // "2025-11-20" → "2025-11-01"
 };
 
-// Get current cash balance (uses month start date for closing balance)
+// Get current cash balance (to-date calculation)
 export const getCashBalance = (
   scenario: string,
   date: string = CURRENT_DATE,
   bu?: string
 ): number => {
-  // For cash balance, we want the closing balance at the start of the month
-  const monthStartDate = getMonthStart(date);
-  
   if (!bu || bu === 'All Company') {
-    // Enterprise-level: use close field (bank account balance)
-    const record = cashRecords.find(r => 
-      r.scenario === scenario && 
-      r.date === monthStartDate
-    );
+    // Enterprise-level: calculate actual cash position to date
+    let cash = 3500000; // Starting equity
     
-    return record?.close || 0;
+    // Add equity injections
+    cash += equityRecords
+      .filter(e => e.scenario === scenario && e.date <= date)
+      .reduce((sum, e) => sum + e.amount, 0);
+    
+    // Subtract capex (when cash paid)
+    cash -= capexRecords
+      .filter(c => c.scenario === scenario && c.cash_date <= date)
+      .reduce((sum, c) => sum + c.amount, 0);
+    
+    // Add revenues (when cash received)
+    cash += mockDataV9.revenues
+      .filter(r => r.scenario === scenario && r.cash_date <= date)
+      .reduce((sum, r) => sum + r.amount, 0);
+    
+    // Subtract expenses (when cash paid)
+    const expenses = [
+      ...mockDataV9.cogs.filter(x => x.scenario === scenario && x.cash_date <= date),
+      ...mockDataV9.opex.filter(x => x.scenario === scenario && x.cash_date <= date)
+    ];
+    cash -= expenses.reduce((sum, x) => sum + x.amount, 0);
+    
+    return cash;
   }
   
   // BU-specific: calculate cumulative cash position from historical flows

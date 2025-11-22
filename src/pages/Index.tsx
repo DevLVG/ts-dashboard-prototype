@@ -362,7 +362,7 @@ const Index = () => {
         format: "currency" as const
       },
       {
-        label: "Monthly Burn TO DATE",
+        label: "Monthly Burn MTD",
         actual: burnActual,
         budget: burnComparison,
         variance: burnActual - burnComparison,

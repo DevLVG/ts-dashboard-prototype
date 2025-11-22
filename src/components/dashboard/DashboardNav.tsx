@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Search, Wallet, BarChart3, FileText } from "lucide-react";
+import { LayoutDashboard, TrendingUp, Wallet, BarChart3, FileText } from "lucide-react";
 import { PageType } from "@/types/dashboard";
 import { NavLink } from "@/components/NavLink";
 import tsLogo from "@/assets/ts-logo.png";
@@ -17,7 +17,7 @@ export const DashboardNav = ({
   }, {
     id: "performance" as PageType,
     label: "Analysis",
-    icon: Search,
+    icon: TrendingUp,
     path: "/performance"
   }, {
     id: "cash" as PageType,

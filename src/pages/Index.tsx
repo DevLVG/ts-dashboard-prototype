@@ -36,6 +36,8 @@ import { BUMarginComparison } from "@/components/dashboard/BUMarginComparison";
 import { CostStructureChart } from "@/components/dashboard/CostStructureChart";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
+import { Tabs, TabsListPill, TabsTriggerPill, TabsContent } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 
 
 const Index = () => {
@@ -390,8 +392,8 @@ const Index = () => {
     const cashKPIData = getCashKPIData();
     
     return (
-      <div className="space-y-6 animate-fade-in">
-        {/* Filters: Only Scenario + BU */}
+      <div className="space-y-6">
+        {/* Filter Controls - Only Scenario and BU */}
         <div className="flex gap-4">
           <Select 
             value={selectedScenario} 
@@ -422,10 +424,7 @@ const Index = () => {
           </Select>
         </div>
 
-        {/* Section Title */}
-        <h2 className="text-3xl font-heading tracking-wide">CASH</h2>
-
-        {/* 4 KPI Cards */}
+        {/* KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {cashKPIData.map((metric) => (
             <KPICard
@@ -437,18 +436,63 @@ const Index = () => {
           ))}
         </div>
 
-        {/* Cash Trend Chart */}
-        <CashTrendChart 
-          scenario={selectedScenario} 
-          selectedBU={selectedBU} 
-        />
+        {/* Chart Section */}
+        <Card className="p-6">
+          <CashTrendChart 
+            scenario={selectedScenario} 
+            selectedBU={selectedBU} 
+          />
+        </Card>
       </div>
     );
   };
 
   const renderEconomicsContent = () => (
-    <>
-      {renderFilters()}
+    <div className="space-y-6">
+      {/* Filter Controls */}
+      <div className="flex gap-4">
+        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+          <SelectTrigger className="w-56 bg-background font-medium">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="max-h-[300px]">
+            {months.map((month) => (
+              <SelectItem key={month.value} value={month.value}>
+                {month.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select 
+          value={selectedScenario} 
+          onValueChange={(value) => setSelectedScenario(value as typeof selectedScenario)}
+        >
+          <SelectTrigger className="w-56 bg-background font-medium">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {scenarioOptions.map(option => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={selectedBU} onValueChange={setSelectedBU}>
+          <SelectTrigger className="w-56 bg-background font-medium">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {businessUnits.map((bu) => (
+              <SelectItem key={bu.value} value={bu.value}>
+                {bu.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {filteredKPIData.map((metric, index) => (
           <KPICard
@@ -466,41 +510,34 @@ const Index = () => {
           />
         ))}
       </div>
+
+      {/* Charts */}
       <RevenueTrendChart scenario={selectedScenario} selectedBU={selectedBU} />
       {selectedBU === "All Company" && (
         <BUPerformanceChart data={filteredBUPerformance} onClick={() => setCurrentPage("performance")} />
       )}
-    </>
+    </div>
   );
 
   const renderOverview = () => (
     <div className="space-y-6 animate-fade-in">
-      {/* Segmented Control */}
-      <div className="flex gap-2 mb-6">
-        <button
-          onClick={() => setCurrentView('economics')}
-          className={`px-6 py-2 rounded-lg font-semibold transition-all ${
-            currentView === 'economics'
-              ? 'bg-[hsl(var(--gold))] text-white'
-              : 'bg-transparent text-muted-foreground hover:bg-muted'
-          }`}
-        >
-          Economics
-        </button>
-        <button
-          onClick={() => setCurrentView('cash')}
-          className={`px-6 py-2 rounded-lg font-semibold transition-all ${
-            currentView === 'cash'
-              ? 'bg-[hsl(var(--gold))] text-white'
-              : 'bg-transparent text-muted-foreground hover:bg-muted'
-          }`}
-        >
-          Cash
-        </button>
-      </div>
+      {/* Page Title */}
+      <h1 className="text-3xl font-bold tracking-tight">CEO OVERVIEW</h1>
       
-      {/* Conditional Content */}
-      {currentView === 'economics' ? renderEconomicsContent() : renderCashSection()}
+      {/* Centered Pill Tab */}
+      <div className="flex justify-center">
+        <Tabs value={currentView} onValueChange={(v) => setCurrentView(v as 'economics' | 'cash')}>
+          <TabsListPill>
+            <TabsTriggerPill value="economics">Economics</TabsTriggerPill>
+            <TabsTriggerPill value="cash">Cash</TabsTriggerPill>
+          </TabsListPill>
+        </Tabs>
+      </div>
+
+      {/* Content with proper spacing */}
+      <div className="pt-5">
+        {currentView === 'economics' ? renderEconomicsContent() : renderCashSection()}
+      </div>
     </div>
   );
 

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Area, AreaChart, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Line } from "recharts";
-import { getMonthlyCashBalances, buMap } from "@/data/financialDataV7";
+import { getMonthlyCashBalances, buMap } from "@/data/financialDataV8";
 import type { TrendData } from "@/types/dashboard";
 
 interface CashTrendChartProps {

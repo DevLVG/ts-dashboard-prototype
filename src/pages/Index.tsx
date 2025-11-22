@@ -36,7 +36,7 @@ import { BUMarginComparison } from "@/components/dashboard/BUMarginComparison";
 import { CostStructureChart } from "@/components/dashboard/CostStructureChart";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
+
 
 const Index = () => {
   const location = useLocation();
@@ -60,7 +60,6 @@ const Index = () => {
   const [gmDrawerOpen, setGmDrawerOpen] = useState(false);
   const [selectedGMBreakdown, setSelectedGMBreakdown] = useState<any>(null);
   const [currentView, setCurrentView] = useState<'economics' | 'cash'>('economics');
-  const [cashPanelOpen, setCashPanelOpen] = useState(false);
 
   // Sync currentPage state with URL changes
   useEffect(() => {
@@ -447,38 +446,8 @@ const Index = () => {
     );
   };
 
-  const renderOverview = () => (
-    <div className="space-y-6 animate-fade-in">
-      {/* Segmented Control */}
-      <div className="flex gap-2 mb-6">
-        <button
-          onClick={() => {
-            setCurrentView('economics');
-            setCashPanelOpen(false);
-          }}
-          className={`px-6 py-2 rounded-lg font-semibold transition-all ${
-            currentView === 'economics'
-              ? 'bg-[hsl(var(--gold))] text-white'
-              : 'bg-transparent text-muted-foreground hover:bg-muted'
-          }`}
-        >
-          Economics
-        </button>
-        <button
-          onClick={() => {
-            setCurrentView('cash');
-            setCashPanelOpen(true);
-          }}
-          className={`px-6 py-2 rounded-lg font-semibold transition-all ${
-            currentView === 'cash'
-              ? 'bg-[hsl(var(--gold))] text-white'
-              : 'bg-transparent text-muted-foreground hover:bg-muted'
-          }`}
-        >
-          Cash
-        </button>
-      </div>
-      
+  const renderEconomicsContent = () => (
+    <>
       {renderFilters()}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {filteredKPIData.map((metric, index) => (
@@ -501,6 +470,37 @@ const Index = () => {
       {selectedBU === "All Company" && (
         <BUPerformanceChart data={filteredBUPerformance} onClick={() => setCurrentPage("performance")} />
       )}
+    </>
+  );
+
+  const renderOverview = () => (
+    <div className="space-y-6 animate-fade-in">
+      {/* Segmented Control */}
+      <div className="flex gap-2 mb-6">
+        <button
+          onClick={() => setCurrentView('economics')}
+          className={`px-6 py-2 rounded-lg font-semibold transition-all ${
+            currentView === 'economics'
+              ? 'bg-[hsl(var(--gold))] text-white'
+              : 'bg-transparent text-muted-foreground hover:bg-muted'
+          }`}
+        >
+          Economics
+        </button>
+        <button
+          onClick={() => setCurrentView('cash')}
+          className={`px-6 py-2 rounded-lg font-semibold transition-all ${
+            currentView === 'cash'
+              ? 'bg-[hsl(var(--gold))] text-white'
+              : 'bg-transparent text-muted-foreground hover:bg-muted'
+          }`}
+        >
+          Cash
+        </button>
+      </div>
+      
+      {/* Conditional Content */}
+      {currentView === 'economics' ? renderEconomicsContent() : renderCashSection()}
     </div>
   );
 
@@ -710,19 +710,6 @@ const Index = () => {
         onClose={() => setGmDrawerOpen(false)}
         breakdown={selectedGMBreakdown}
       />
-      <Drawer open={cashPanelOpen} onOpenChange={(open) => {
-        setCashPanelOpen(open);
-        if (!open) setCurrentView('economics');
-      }}>
-        <DrawerContent className="h-[90vh] w-full md:w-[60%] md:max-w-[800px] md:ml-auto">
-          <DrawerHeader className="border-b">
-            <DrawerTitle className="text-2xl font-heading tracking-wide">CASH MANAGEMENT</DrawerTitle>
-          </DrawerHeader>
-          <div className="overflow-y-auto p-6">
-            {renderCashSection()}
-          </div>
-        </DrawerContent>
-      </Drawer>
     </div>
   );
 };

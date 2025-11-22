@@ -6,6 +6,7 @@ export interface KPIMetric {
   variancePercent: number;
   format: "currency" | "percent" | "months" | "number";
   icon?: string;
+  isOppositeSigns?: boolean; // Flag for when actual and budget have opposite signs
 }
 
 export interface BUPerformance {

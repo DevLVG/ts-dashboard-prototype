@@ -375,7 +375,7 @@ const Index = () => {
         isOppositeSigns: hasOppositeSigns(cashActual, cashComparison),
       },
       {
-        label: "Monthly Burn MTD",
+        label: "Cash Flow MTD",
         actual: burnActual,
         budget: burnComparison,
         variance: burnActual - burnComparison,

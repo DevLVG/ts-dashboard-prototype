@@ -65,7 +65,7 @@ export const getCashBalance = (
   return records[0]?.close || 0;
 };
 
-// Calculate monthly burn rate (annualized from month-to-date)
+// Calculate monthly cash flow (net change in cash balance)
 export const getMonthlyBurn = (
   startDate: string,
   endDate: string,

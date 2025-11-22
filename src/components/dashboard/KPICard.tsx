@@ -45,10 +45,7 @@ export const KPICard = ({
           </p>
           {metric.label === "Runway" && metric.actual < 6 && <TrendingDown className="h-5 w-5 md:h-4 md:w-4 text-warning" />}
         </div>
-        {metric.label === "Cash Balance" ? <div className="flex items-center gap-2">
-            <span className="text-base md:text-sm text-muted-foreground">--</span>
-            <span className="text-sm md:text-xs text-muted-foreground">No budget comparison</span>
-          </div> : <>
+        {metric.budget !== 0 ? <>
             <div className={`flex items-center gap-1 ${getVarianceTextColor(metric.variancePercent, metric.label)}`}>
               {/* For OpEx: positive variance (over budget) = bad = arrow UP, negative variance (under budget) = good = arrow DOWN */}
               {metric.variancePercent === 999999 ? (
@@ -74,7 +71,10 @@ export const KPICard = ({
             <p className="text-sm md:text-xs text-muted-foreground">
               {comparisonLabel}: {formatValue(metric.budget, metric.format)}
             </p>
-          </>}
+          </> : <div className="flex items-center gap-2">
+            <span className="text-base md:text-sm text-muted-foreground">--</span>
+            <span className="text-sm md:text-xs text-muted-foreground">No budget comparison</span>
+          </div>}
       </div>
     </Card>;
 };

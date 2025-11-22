@@ -47,9 +47,8 @@ export const KPICard = ({
         </div>
         {metric.budget !== 0 ? <>
             <div className={`flex items-center gap-1 ${getVarianceTextColor(metric.variancePercent, metric.label)}`}>
-              {/* For OpEx: positive variance (over budget) = bad = arrow UP, negative variance (under budget) = good = arrow DOWN */}
-              {metric.variancePercent === 999999 ? (
-                // EBITDA crossed zero - show absolute variance instead of percentage
+              {/* Show absolute delta when signs are opposite, but still use percentage for color */}
+              {metric.isOppositeSigns ? (
                 <span className="text-base md:text-sm font-semibold">
                   {new Intl.NumberFormat("en-SA", {
                     style: "currency",
@@ -61,7 +60,15 @@ export const KPICard = ({
                 </span>
               ) : (
                 <>
-                  {metric.label === "OpEx" ? metric.variancePercent > 0 ? <TrendingUp className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : metric.variancePercent < 0 ? <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> : <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />}
+                  {/* Arrow direction based on metric type and variance */}
+                  {metric.label === "OpEx" || metric.label.includes("Burn") || metric.label.includes("Payables") || metric.label.includes("Receivables")
+                    ? metric.variancePercent > 0 
+                      ? <TrendingUp className="h-5 w-5 md:h-4 md:w-4" /> 
+                      : <TrendingDown className="h-5 w-5 md:h-4 md:w-4" />
+                    : metric.variancePercent < 0 
+                      ? <TrendingDown className="h-5 w-5 md:h-4 md:w-4" /> 
+                      : <TrendingUp className="h-5 w-5 md:h-4 md:w-4" />
+                  }
                   <span className="text-base md:text-sm font-semibold">
                     {Math.abs(metric.variancePercent).toFixed(1)}%
                   </span>

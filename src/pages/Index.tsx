@@ -195,6 +195,11 @@ const Index = () => {
       ? plData.previousYear.ebitda
       : plData.budget.ebitda;
 
+    // Helper to detect opposite signs
+    const hasOppositeSigns = (actual: number, comparison: number): boolean => {
+      return (actual >= 0 && comparison < 0) || (actual < 0 && comparison >= 0);
+    };
+
     return [
       {
         label: "Revenue",
@@ -203,6 +208,7 @@ const Index = () => {
         variance: plData.actual.revenue - revComparison,
         variancePercent: revComparison !== 0 ? ((plData.actual.revenue - revComparison) / Math.abs(revComparison)) * 100 : 0,
         format: "currency" as const,
+        isOppositeSigns: hasOppositeSigns(plData.actual.revenue, revComparison),
       },
       {
         label: "Gross Margin",
@@ -211,6 +217,7 @@ const Index = () => {
         variance: gmActual - gmComparison,
         variancePercent: gmComparison !== 0 ? ((gmActual - gmComparison) / Math.abs(gmComparison)) * 100 : 0,
         format: "currency" as const,
+        isOppositeSigns: hasOppositeSigns(gmActual, gmComparison),
       },
       {
         label: "OpEx",
@@ -219,18 +226,18 @@ const Index = () => {
         variance: Math.abs(plData.actual.opex) - Math.abs(opexComparison),
         variancePercent: opexComparison !== 0 ? ((Math.abs(plData.actual.opex) - Math.abs(opexComparison)) / Math.abs(opexComparison)) * 100 : 0,
         format: "currency" as const,
+        isOppositeSigns: hasOppositeSigns(Math.abs(plData.actual.opex), Math.abs(opexComparison)),
       },
       {
         label: "EBITDA",
         actual: ebitdaActual,
         budget: ebitdaComparison,
         variance: ebitdaActual - ebitdaComparison,
-        variancePercent: (ebitdaActual > 0 && ebitdaComparison < 0) || (ebitdaActual < 0 && ebitdaComparison > 0)
-          ? 999999
-          : ebitdaComparison !== 0 
-            ? ((ebitdaActual - ebitdaComparison) / Math.abs(ebitdaComparison)) * 100
-            : 0,
+        variancePercent: ebitdaComparison !== 0 
+          ? ((ebitdaActual - ebitdaComparison) / Math.abs(ebitdaComparison)) * 100
+          : 0,
         format: "currency" as const,
+        isOppositeSigns: hasOppositeSigns(ebitdaActual, ebitdaComparison),
       },
     ];
   };
@@ -352,6 +359,11 @@ const Index = () => {
       ? getReceivables('Actual', getPYDate(CURRENT_DATE), buCode)
       : getReceivables(budgetScenario, CURRENT_DATE, buCode);
     
+    // Helper to detect opposite signs
+    const hasOppositeSigns = (actual: number, comparison: number): boolean => {
+      return (actual >= 0 && comparison < 0) || (actual < 0 && comparison >= 0);
+    };
+
     return [
       {
         label: "Cash Balance TO DATE",
@@ -359,7 +371,8 @@ const Index = () => {
         budget: cashComparison,
         variance: cashActual - cashComparison,
         variancePercent: cashComparison !== 0 ? ((cashActual - cashComparison) / Math.abs(cashComparison)) * 100 : 0,
-        format: "currency" as const
+        format: "currency" as const,
+        isOppositeSigns: hasOppositeSigns(cashActual, cashComparison),
       },
       {
         label: "Monthly Burn MTD",
@@ -367,7 +380,8 @@ const Index = () => {
         budget: burnComparison,
         variance: burnActual - burnComparison,
         variancePercent: burnComparison !== 0 ? ((burnActual - burnComparison) / Math.abs(burnComparison)) * 100 : 0,
-        format: "currency" as const
+        format: "currency" as const,
+        isOppositeSigns: hasOppositeSigns(burnActual, burnComparison),
       },
       {
         label: "Payables TO DATE",
@@ -375,7 +389,8 @@ const Index = () => {
         budget: payablesComparison.amount,
         variance: payablesActual.amount - payablesComparison.amount,
         variancePercent: payablesComparison.amount !== 0 ? ((payablesActual.amount - payablesComparison.amount) / Math.abs(payablesComparison.amount)) * 100 : 0,
-        format: "currency" as const
+        format: "currency" as const,
+        isOppositeSigns: hasOppositeSigns(payablesActual.amount, payablesComparison.amount),
       },
       {
         label: "Receivables TO DATE",
@@ -383,7 +398,8 @@ const Index = () => {
         budget: receivablesComparison.amount,
         variance: receivablesActual.amount - receivablesComparison.amount,
         variancePercent: receivablesComparison.amount !== 0 ? ((receivablesActual.amount - receivablesComparison.amount) / Math.abs(receivablesComparison.amount)) * 100 : 0,
-        format: "currency" as const
+        format: "currency" as const,
+        isOppositeSigns: hasOppositeSigns(receivablesActual.amount, receivablesComparison.amount),
       }
     ];
   };

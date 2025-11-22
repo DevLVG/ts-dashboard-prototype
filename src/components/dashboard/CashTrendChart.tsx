@@ -132,15 +132,6 @@ export const CashTrendChart = ({ scenario, selectedBU }: CashTrendChartProps) =>
             tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 14 }}
           />
           <Tooltip content={<CustomTooltip />} cursor={{ fill: 'hsl(var(--gold) / 0.1)' }} />
-          <Legend
-            wrapperStyle={{ paddingTop: '20px' }}
-            iconType="line"
-            formatter={(value) => {
-              if (value === "actual") return "Actual";
-              if (value === "budget") return scenario === "PY" ? "PY" : "Budget";
-              return value;
-            }}
-          />
           
           {/* Base area (budget) */}
           <Area

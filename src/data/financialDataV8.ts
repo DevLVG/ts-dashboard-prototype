@@ -1,8 +1,8 @@
-import mockDataV8 from './trio_mock_data_v8.json';
+import mockDataV9 from './trio_mock_data_v9.json';
 
-export const cashRecords = mockDataV8.cash;
-export const capexRecords = mockDataV8.capex;
-export const equityRecords = mockDataV8.equity;
+export const cashRecords = mockDataV9.cash;
+export const capexRecords = mockDataV9.capex;
+export const equityRecords = mockDataV9.equity;
 
 const CURRENT_DATE = "2025-11-20";
 
@@ -69,22 +69,37 @@ export const getCashBalance = (
 export const getMonthlyBurn = (
   startDate: string,
   endDate: string,
-  scenario: string
+  scenario: string,
+  bu?: string
 ): number => {
   // Get the month start date (YYYY-MM-01)
   const monthStart = getMonthStart(startDate);
   
-  // Find the cash record for this month
-  const record = cashRecords.find(r =>
-    r.scenario === scenario &&
-    r.date === monthStart
-  );
+  // v9: Cash records now have bu field for flows (in/out)
+  // open/close are enterprise-level (same for all BUs)
   
-  if (!record) return 0;
-  
-  // Monthly burn = closing balance - opening balance
-  // Positive = cash increased, Negative = cash decreased
-  return record.close - record.open;
+  if (!bu || bu === 'All Company') {
+    // Sum cash flows across all BUs
+    const records = cashRecords.filter(r =>
+      r.scenario === scenario &&
+      r.date === monthStart
+    );
+    
+    if (records.length === 0) return 0;
+    
+    // Sum (in - out) for all BUs
+    return records.reduce((sum, r) => sum + (r.in - r.out), 0);
+  } else {
+    // Single BU cash flow
+    const record = cashRecords.find(r =>
+      r.scenario === scenario &&
+      r.date === monthStart &&
+      r.bu === bu
+    );
+    
+    if (!record) return 0;
+    return record.in - record.out;
+  }
 };
 
 // Calculate outstanding payables
@@ -96,14 +111,14 @@ export const getPayables = (
   // Filter COGS + OPEX + CapEx where:
   // - Transaction already happened (date <= currentDate)
   // - Not yet paid (cash_date > currentDate)
-  const cogsOutstanding = mockDataV8.cogs.filter(t => 
+  const cogsOutstanding = mockDataV9.cogs.filter(t => 
     t.scenario === scenario && 
     t.date <= currentDate &&
     t.cash_date > currentDate &&
     (bu ? t.bu === bu : true)
   );
   
-  const opexOutstanding = mockDataV8.opex.filter(t => 
+  const opexOutstanding = mockDataV9.opex.filter(t => 
     t.scenario === scenario && 
     t.date <= currentDate &&
     t.cash_date > currentDate &&
@@ -144,7 +159,7 @@ export const getReceivables = (
   // Filter revenues where:
   // - Transaction already happened (date <= currentDate)
   // - Not yet collected (cash_date > currentDate)
-  const outstanding = mockDataV8.revenues.filter(t =>
+  const outstanding = mockDataV9.revenues.filter(t =>
     t.scenario === scenario &&
     t.date <= currentDate &&
     t.cash_date > currentDate &&

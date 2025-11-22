@@ -71,25 +71,20 @@ export const getMonthlyBurn = (
   endDate: string,
   scenario: string
 ): number => {
-  const records = cashRecords.filter(r =>
+  // Get the month start date (YYYY-MM-01)
+  const monthStart = getMonthStart(startDate);
+  
+  // Find the cash record for this month
+  const record = cashRecords.find(r =>
     r.scenario === scenario &&
-    r.date >= startDate &&
-    r.date <= endDate
+    r.date === monthStart
   );
   
-  if (records.length === 0) return 0;
+  if (!record) return 0;
   
-  // Sum all inflows and outflows across the period
-  const totalInflows = records.reduce((sum, r) => sum + r.in, 0);
-  const totalOutflows = records.reduce((sum, r) => sum + r.out, 0);
-  const netFlow = totalInflows - totalOutflows;
-  
-  // Calculate days in period
-  const daysInPeriod = records.length; // Each record represents one day
-  
-  // Annualize to monthly rate (multiply by 30/days)
-  // Positive netFlow = generates cash, Negative netFlow = burns cash
-  return (netFlow / daysInPeriod) * 30;
+  // Monthly burn = closing balance - opening balance
+  // Positive = cash increased, Negative = cash decreased
+  return record.close - record.open;
 };
 
 // Calculate outstanding payables

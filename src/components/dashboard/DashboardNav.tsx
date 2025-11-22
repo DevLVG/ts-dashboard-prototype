@@ -21,17 +21,17 @@ export const DashboardNav = ({
     path: "/performance"
   }, {
     id: "cash" as PageType,
-    label: "Cash & Treasury",
+    label: "Recommendation",
     icon: Wallet,
     path: "/cash"
   }, {
     id: "ratios" as PageType,
-    label: "Key Ratios",
+    label: "Actions",
     icon: BarChart3,
     path: "/ratios"
   }, {
     id: "statements" as PageType,
-    label: "Statements",
+    label: "Communications",
     icon: FileText,
     path: "/statements"
   }];

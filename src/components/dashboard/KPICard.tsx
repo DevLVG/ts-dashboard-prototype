@@ -56,7 +56,7 @@ export const KPICard = ({
                     minimumFractionDigits: 0,
                     maximumFractionDigits: 0,
                     signDisplay: "always"
-                  }).format(metric.variance)} change
+                  }).format(metric.variance)}
                 </span>
               ) : (
                 <>

@@ -354,7 +354,7 @@ const Index = () => {
     
     return [
       {
-        label: "Cash Balance",
+        label: "Cash Balance TO DATE",
         actual: cashActual,
         budget: cashComparison,
         variance: cashActual - cashComparison,
@@ -362,7 +362,7 @@ const Index = () => {
         format: "currency" as const
       },
       {
-        label: "Monthly Burn",
+        label: "Monthly Burn TO DATE",
         actual: burnActual,
         budget: burnComparison,
         variance: burnActual - burnComparison,
@@ -370,7 +370,7 @@ const Index = () => {
         format: "currency" as const
       },
       {
-        label: "Payables",
+        label: "Payables TO DATE",
         actual: payablesActual.amount,
         budget: payablesComparison.amount,
         variance: payablesActual.amount - payablesComparison.amount,
@@ -378,7 +378,7 @@ const Index = () => {
         format: "currency" as const
       },
       {
-        label: "Receivables",
+        label: "Receivables TO DATE",
         actual: receivablesActual.amount,
         budget: receivablesComparison.amount,
         variance: receivablesActual.amount - receivablesComparison.amount,

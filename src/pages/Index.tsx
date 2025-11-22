@@ -520,14 +520,11 @@ const Index = () => {
   );
 
   const renderOverview = () => (
-    <div className="space-y-6 animate-fade-in">
-      {/* Page Title */}
-      <h1 className="text-3xl font-bold tracking-tight">CEO OVERVIEW</h1>
-      
-      {/* Centered Pill Tab */}
-      <div className="flex justify-center">
+    <div className="space-y-8 animate-fade-in">
+      {/* Centered Pill Tab - Professional Design */}
+      <div className="flex justify-center pt-4">
         <Tabs value={currentView} onValueChange={(v) => setCurrentView(v as 'economics' | 'cash')}>
-          <TabsListPill>
+          <TabsListPill className="shadow-lg">
             <TabsTriggerPill value="economics">Economics</TabsTriggerPill>
             <TabsTriggerPill value="cash">Cash</TabsTriggerPill>
           </TabsListPill>
@@ -535,7 +532,7 @@ const Index = () => {
       </div>
 
       {/* Content with proper spacing */}
-      <div className="pt-5">
+      <div className="pt-2">
         {currentView === 'economics' ? renderEconomicsContent() : renderCashSection()}
       </div>
     </div>

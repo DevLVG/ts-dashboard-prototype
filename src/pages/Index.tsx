@@ -10,10 +10,11 @@ import { CashFlowWaterfall } from "@/components/dashboard/CashFlowWaterfall";
 import { FinancialRatiosChart } from "@/components/dashboard/FinancialRatiosChart";
 import { OpExDrawer } from "@/components/dashboard/OpExDrawer";
 import { GrossMarginDrawer } from "@/components/dashboard/GrossMarginDrawer";
+import { CashTrendChart as CashTrendChartOld } from "@/components/dashboard/CashTrendChartOld";
 import { CashTrendChart } from "@/components/dashboard/CashTrendChart";
 import { RunwayScenarios } from "@/components/dashboard/RunwayScenarios";
 import { Statements } from "@/pages/Statements";
-import { PageType } from "@/types/dashboard";
+import { PageType, type KPIMetric } from "@/types/dashboard";
 import { trendData, buPerformance, cashFlowData, financialRatiosData, buMarginComparisonData, costStructureData } from "@/data/mockData";
 import { 
   getPLDataForPeriod, 
@@ -22,10 +23,20 @@ import {
   businessUnits as buCodes,
   businessUnitLabels 
 } from "@/data/financialData";
+import {
+  getCashBalance,
+  getMonthlyBurn,
+  getPayables,
+  getReceivables,
+  getPYDate,
+  getMonthStart,
+  buMap
+} from "@/data/financialDataV7";
 import { BUMarginComparison } from "@/components/dashboard/BUMarginComparison";
 import { CostStructureChart } from "@/components/dashboard/CostStructureChart";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 
 const Index = () => {
   const location = useLocation();
@@ -48,6 +59,8 @@ const Index = () => {
   const [selectedOpExBreakdown, setSelectedOpExBreakdown] = useState<any>(null);
   const [gmDrawerOpen, setGmDrawerOpen] = useState(false);
   const [selectedGMBreakdown, setSelectedGMBreakdown] = useState<any>(null);
+  const [currentView, setCurrentView] = useState<'economics' | 'cash'>('economics');
+  const [cashPanelOpen, setCashPanelOpen] = useState(false);
 
   // Sync currentPage state with URL changes
   useEffect(() => {
@@ -308,8 +321,164 @@ const Index = () => {
     </div>
   );
 
+  // Get Cash KPI Data for the drawer
+  const getCashKPIData = (): KPIMetric[] => {
+    const buCode = selectedBU === "All Company" ? undefined : buMap[selectedBU];
+    const budgetScenario = selectedScenario === 'PY' ? 'Budget_Base' : selectedScenario;
+    
+    // 1. Cash Balance
+    const cashActual = getCashBalance('Actual', CURRENT_DATE, buCode);
+    const cashComparison = selectedScenario === 'PY'
+      ? getCashBalance('Actual', getPYDate(CURRENT_DATE), buCode)
+      : getCashBalance(budgetScenario, CURRENT_DATE, buCode);
+    
+    // 2. Burn Rate (current month)
+    const monthStart = getMonthStart(CURRENT_DATE);
+    const burnActual = getMonthlyBurn(monthStart, CURRENT_DATE, 'Actual');
+    const burnComparison = selectedScenario === 'PY'
+      ? getMonthlyBurn(getPYDate(monthStart), getPYDate(CURRENT_DATE), 'Actual')
+      : getMonthlyBurn(monthStart, CURRENT_DATE, budgetScenario);
+    
+    // 3. Payables
+    const payablesActual = getPayables('Actual', CURRENT_DATE, buCode);
+    const payablesComparison = selectedScenario === 'PY'
+      ? getPayables('Actual', getPYDate(CURRENT_DATE), buCode)
+      : getPayables(budgetScenario, CURRENT_DATE, buCode);
+    
+    // 4. Receivables
+    const receivablesActual = getReceivables('Actual', CURRENT_DATE, buCode);
+    const receivablesComparison = selectedScenario === 'PY'
+      ? getReceivables('Actual', getPYDate(CURRENT_DATE), buCode)
+      : getReceivables(budgetScenario, CURRENT_DATE, buCode);
+    
+    return [
+      {
+        label: "Cash Balance",
+        actual: cashActual,
+        budget: cashComparison,
+        variance: cashActual - cashComparison,
+        variancePercent: cashComparison !== 0 ? ((cashActual - cashComparison) / Math.abs(cashComparison)) * 100 : 0,
+        format: "currency" as const
+      },
+      {
+        label: "Monthly Burn",
+        actual: burnActual,
+        budget: burnComparison,
+        variance: burnActual - burnComparison,
+        variancePercent: burnComparison !== 0 ? ((burnActual - burnComparison) / Math.abs(burnComparison)) * 100 : 0,
+        format: "currency" as const
+      },
+      {
+        label: `Payables (${payablesActual.avgAgingMonths.toFixed(1)} mo)`,
+        actual: payablesActual.amount,
+        budget: payablesComparison.amount,
+        variance: payablesActual.amount - payablesComparison.amount,
+        variancePercent: payablesComparison.amount !== 0 ? ((payablesActual.amount - payablesComparison.amount) / Math.abs(payablesComparison.amount)) * 100 : 0,
+        format: "currency" as const
+      },
+      {
+        label: `Receivables (${receivablesActual.avgAgingMonths.toFixed(1)} mo)`,
+        actual: receivablesActual.amount,
+        budget: receivablesComparison.amount,
+        variance: receivablesActual.amount - receivablesComparison.amount,
+        variancePercent: receivablesComparison.amount !== 0 ? ((receivablesActual.amount - receivablesComparison.amount) / Math.abs(receivablesComparison.amount)) * 100 : 0,
+        format: "currency" as const
+      }
+    ];
+  };
+
+  const renderCashSection = () => {
+    const cashKPIData = getCashKPIData();
+    
+    return (
+      <div className="space-y-6 animate-fade-in">
+        {/* Filters: Only Scenario + BU */}
+        <div className="flex gap-4">
+          <Select 
+            value={selectedScenario} 
+            onValueChange={(value) => setSelectedScenario(value as typeof selectedScenario)}
+          >
+            <SelectTrigger className="w-56 bg-background font-medium">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {scenarioOptions.map(option => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={selectedBU} onValueChange={setSelectedBU}>
+            <SelectTrigger className="w-56 bg-background font-medium">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {businessUnits.map((bu) => (
+                <SelectItem key={bu.value} value={bu.value}>
+                  {bu.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Section Title */}
+        <h2 className="text-3xl font-heading tracking-wide">CASH</h2>
+
+        {/* 4 KPI Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {cashKPIData.map((metric) => (
+            <KPICard
+              key={metric.label}
+              metric={metric}
+              periodLabel=""
+              scenario={selectedScenario === 'PY' ? 'py' : 'base'}
+            />
+          ))}
+        </div>
+
+        {/* Cash Trend Chart */}
+        <CashTrendChart 
+          scenario={selectedScenario} 
+          selectedBU={selectedBU} 
+        />
+      </div>
+    );
+  };
+
   const renderOverview = () => (
     <div className="space-y-6 animate-fade-in">
+      {/* Segmented Control */}
+      <div className="flex gap-2 mb-6">
+        <button
+          onClick={() => {
+            setCurrentView('economics');
+            setCashPanelOpen(false);
+          }}
+          className={`px-6 py-2 rounded-lg font-semibold transition-all ${
+            currentView === 'economics'
+              ? 'bg-[hsl(var(--gold))] text-white'
+              : 'bg-transparent text-muted-foreground hover:bg-muted'
+          }`}
+        >
+          Economics
+        </button>
+        <button
+          onClick={() => {
+            setCurrentView('cash');
+            setCashPanelOpen(true);
+          }}
+          className={`px-6 py-2 rounded-lg font-semibold transition-all ${
+            currentView === 'cash'
+              ? 'bg-[hsl(var(--gold))] text-white'
+              : 'bg-transparent text-muted-foreground hover:bg-muted'
+          }`}
+        >
+          Cash
+        </button>
+      </div>
+      
       {renderFilters()}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {filteredKPIData.map((metric, index) => (
@@ -406,7 +575,7 @@ const Index = () => {
         <CashFlowWaterfall data={cashFlowData} />
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           <div className="lg:col-span-3">
-            <CashTrendChart data={cashTrendData} />
+            <CashTrendChartOld data={cashTrendData} />
           </div>
           <div className="lg:col-span-2">
             <RunwayScenarios 
@@ -541,6 +710,19 @@ const Index = () => {
         onClose={() => setGmDrawerOpen(false)}
         breakdown={selectedGMBreakdown}
       />
+      <Drawer open={cashPanelOpen} onOpenChange={(open) => {
+        setCashPanelOpen(open);
+        if (!open) setCurrentView('economics');
+      }}>
+        <DrawerContent className="h-[90vh] w-full md:w-[60%] md:max-w-[800px] md:ml-auto">
+          <DrawerHeader className="border-b">
+            <DrawerTitle className="text-2xl font-heading tracking-wide">CASH MANAGEMENT</DrawerTitle>
+          </DrawerHeader>
+          <div className="overflow-y-auto p-6">
+            {renderCashSection()}
+          </div>
+        </DrawerContent>
+      </Drawer>
     </div>
   );
 };

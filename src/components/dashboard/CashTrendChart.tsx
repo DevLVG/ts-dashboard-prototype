@@ -1,18 +1,38 @@
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
-import { Area, AreaChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
-
-interface CashTrendData {
-  month: string;
-  balance: number;
-  forecast?: boolean;
-  runway?: number;
-}
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Area, AreaChart, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Line } from "recharts";
+import { getMonthlyCashBalances, buMap } from "@/data/financialDataV7";
+import type { TrendData } from "@/types/dashboard";
 
 interface CashTrendChartProps {
-  data: CashTrendData[];
+  scenario: string;
+  selectedBU: string;
 }
 
-export const CashTrendChart = ({ data }: CashTrendChartProps) => {
+type PeriodType = "6months" | "quarterly" | "yearly";
+
+export const CashTrendChart = ({ scenario, selectedBU }: CashTrendChartProps) => {
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>("yearly");
+
+  const getData = (): TrendData[] => {
+    const buCode = selectedBU !== "All Company" ? buMap[selectedBU] : undefined;
+    const budgetScenario = scenario === "PY" ? "Budget_Base" : scenario;
+    const balances = getMonthlyCashBalances(budgetScenario, buCode);
+    
+    // Filter by period
+    let dataToShow = balances;
+    if (selectedPeriod === "quarterly") {
+      dataToShow = balances.slice(-3);
+    } else if (selectedPeriod === "6months") {
+      dataToShow = balances.slice(-6);
+    }
+    
+    return dataToShow;
+  };
+
+  const data = getData();
+
   const formatCurrency = (value: number) => {
     return `${(value / 1000000).toFixed(1)}M`;
   };
@@ -26,17 +46,76 @@ export const CashTrendChart = ({ data }: CashTrendChartProps) => {
     }).format(value);
   };
 
+  const getTitle = () => {
+    const buText = selectedBU === "All Company" ? "" : ` - ${selectedBU}`;
+    return `CASH BALANCE TREND${buText}`;
+  };
+
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      const actualValue = data.actual;
+      const budgetValue = data.budget;
+      const delta = actualValue - budgetValue;
+      const deltaPercent = budgetValue !== 0 ? ((delta / budgetValue) * 100).toFixed(1) : "0.0";
+
+      return (
+        <div className="chart-tooltip">
+          <p className="chart-tooltip-title">{data.month}</p>
+          <div className="chart-tooltip-content">
+            <p className="text-cyan-400">Actual: {formatTooltipCurrency(actualValue)}</p>
+            <p className="text-muted-foreground">
+              {scenario === "PY" ? "PY" : "Budget"}: {formatTooltipCurrency(budgetValue)}
+            </p>
+            <p className={delta >= 0 ? "text-cyan-400" : "text-red-400"}>
+              Δ: {formatTooltipCurrency(delta)} ({deltaPercent}%)
+            </p>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  // Calculate variance areas for shading
+  const chartData = data.map(d => {
+    const variance = d.actual - d.budget;
+    return {
+      ...d,
+      baseArea: d.budget,
+      positiveVariance: variance > 0 ? variance : 0,
+      negativeVariance: variance < 0 ? Math.abs(variance) : 0
+    };
+  });
+
   return (
-    <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300">
-      <h3 className="text-2xl md:text-xl font-heading tracking-wide mb-6">
-        CASH BALANCE TREND & FORECAST
-      </h3>
+    <Card className="dashboard-card group">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
+        <h3 className="dashboard-card-title">{getTitle()}</h3>
+        <div className="flex gap-4">
+          <Select value={selectedPeriod} onValueChange={(value: PeriodType) => setSelectedPeriod(value)}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="6months">6 Months</SelectItem>
+              <SelectItem value="quarterly">Quarterly</SelectItem>
+              <SelectItem value="yearly">Yearly</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      
       <ResponsiveContainer width="100%" height={320}>
-        <AreaChart data={data}>
+        <AreaChart data={chartData}>
           <defs>
-            <linearGradient id="cashGradient" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id="positiveGradient" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.3} />
               <stop offset="95%" stopColor="#22d3ee" stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="negativeGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#dc3545" stopOpacity={0.3} />
+              <stop offset="95%" stopColor="#dc3545" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} />
@@ -52,62 +131,51 @@ export const CashTrendChart = ({ data }: CashTrendChartProps) => {
             stroke="hsl(var(--muted-foreground))"
             tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 14 }}
           />
-          <Tooltip
-            content={({ active, payload }) => {
-              if (active && payload && payload.length) {
-                const data = payload[0].payload;
-                return (
-                  <div className="chart-tooltip">
-                    <p className="chart-tooltip-title">
-                      {data.month} {data.forecast ? "(Forecast)" : ""}
-                    </p>
-                    <div className="chart-tooltip-content">
-                      <p className="text-popover-foreground">
-                        Balance: {formatTooltipCurrency(data.balance)}
-                      </p>
-                      {data.runway && (
-                        <p className="text-muted-foreground">
-                          Runway: {data.runway.toFixed(1)} months
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                );
-              }
-              return null;
-            }}
-            cursor={{ fill: 'hsl(var(--gold) / 0.1)' }}
-          />
-          {/* Danger zone at 2M */}
-          <ReferenceLine 
-            y={2000000} 
-            stroke="#dc3545" 
-            strokeDasharray="3 3" 
-            strokeWidth={2}
-            label={{ 
-              value: 'Critical Level (3mo runway)', 
-              position: 'insideTopRight',
-              fill: '#dc3545',
-              fontSize: 12,
-              fontWeight: 600
+          <Tooltip content={<CustomTooltip />} cursor={{ fill: 'hsl(var(--gold) / 0.1)' }} />
+          <Legend
+            wrapperStyle={{ paddingTop: '20px' }}
+            iconType="line"
+            formatter={(value) => {
+              if (value === "actual") return "Actual";
+              if (value === "budget") return scenario === "PY" ? "PY" : "Budget";
+              return value;
             }}
           />
+          
+          {/* Base area (budget) */}
           <Area
             type="monotone"
-            dataKey="balance"
+            dataKey="baseArea"
+            stackId="1"
+            stroke="none"
+            fill="transparent"
+          />
+          
+          {/* Positive variance area */}
+          <Area
+            type="monotone"
+            dataKey="positiveVariance"
+            stackId="1"
+            stroke="none"
+            fill="url(#positiveGradient)"
+          />
+          
+          {/* Lines for actual and budget */}
+          <Line
+            type="monotone"
+            dataKey="actual"
             stroke="#22d3ee"
             strokeWidth={3}
-            fill="url(#cashGradient)"
-            fillOpacity={1}
+            dot={{ fill: '#22d3ee', r: 4 }}
+            activeDot={{ r: 6 }}
           />
           <Line
             type="monotone"
-            dataKey="balance"
-            stroke="#6c757d"
+            dataKey="budget"
+            stroke="hsl(var(--muted-foreground))"
             strokeWidth={2}
             strokeDasharray="5 5"
-            dot={false}
-            connectNulls
+            dot={{ fill: 'hsl(var(--muted-foreground))', r: 3 }}
           />
         </AreaChart>
       </ResponsiveContainer>

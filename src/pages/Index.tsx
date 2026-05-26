@@ -9,6 +9,8 @@ import { PLMatrix } from "@/components/dashboard/PLMatrix";
 import { OpExDrawer } from "@/components/dashboard/OpExDrawer";
 import { GrossMarginDrawer } from "@/components/dashboard/GrossMarginDrawer";
 import { CashTrendChart } from "@/components/dashboard/CashTrendChart";
+import { WorkingCapitalPanel } from "@/components/dashboard/WorkingCapitalPanel";
+import { CashFlowBudgetVsActual } from "@/components/dashboard/CashFlowBudgetVsActual";
 import { PageType, type KPIMetric } from "@/types/dashboard";
 import { trendData, buPerformance } from "@/data/mockData";
 import { 
@@ -447,11 +449,17 @@ const Index = () => {
 
         {/* Chart Section */}
         <Card className="p-6">
-          <CashTrendChart 
-            scenario={selectedScenario} 
-            selectedBU={selectedBU} 
+          <CashTrendChart
+            scenario={selectedScenario}
+            selectedBU={selectedBU}
           />
         </Card>
+
+        {/* Working Capital Panel — C3b */}
+        <WorkingCapitalPanel />
+
+        {/* Cash Flow Statement Budget vs Actual — C3b */}
+        <CashFlowBudgetVsActual />
       </div>
     );
   };

@@ -2,17 +2,21 @@ import { Card } from "@/components/ui/card";
 import { KPIMetric } from "@/types/dashboard";
 import { TrendingDown, TrendingUp } from "lucide-react";
 import { getVarianceTextColor, getVarianceBackgroundColor } from "@/lib/varianceColors";
+import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 interface KPICardProps {
   metric: KPIMetric;
   onClick?: () => void;
   periodLabel?: string;
   scenario?: string;
+  /** Provenance of the comparison series (budget/PY). Undefined = no badge. */
+  comparisonSource?: "live" | "mock";
 }
 export const KPICard = ({
   metric,
   onClick,
   periodLabel = "MTD",
-  scenario = "base"
+  scenario = "base",
+  comparisonSource
 }: KPICardProps) => {
   const formatValue = (value: number, format: KPIMetric["format"]) => {
     switch (format) {
@@ -33,7 +37,7 @@ export const KPICard = ({
   };
 
 
-  const comparisonLabel = scenario === "py" ? "Pr. Year" : "Budget";
+  const comparisonLabel = scenario?.toLowerCase() === "py" ? "Pr. Year" : "Budget";
   return <Card className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getVarianceBackgroundColor(metric.variancePercent, metric.label)}`} onClick={onClick}>
       <div className="space-y-3">
         <p className="text-base md:text-sm text-muted-foreground font-semibold uppercase tracking-wide transition-colors group-hover:text-foreground">
@@ -77,6 +81,7 @@ export const KPICard = ({
             </div>
             <p className="text-sm md:text-xs text-muted-foreground">
               {comparisonLabel}: {formatValue(metric.budget, metric.format)}
+              {comparisonSource && <DataSourceBadge source={comparisonSource} className="ml-1.5" />}
             </p>
           </> : <div className="flex items-center gap-2">
             <span className="text-base md:text-sm text-muted-foreground">--</span>

@@ -3,10 +3,13 @@ import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { TrendData } from "@/types/dashboard";
-import { getMonthlyPLData, calculateGM, calculateEBITDA } from "@/data/financialData";
+import { getRevenuesForPeriod, getCogsForPeriod, getOpexForPeriod } from "@/data/financialData";
+import { usePnlByBu, getLiveMonthlySeries, type LivePLTotals } from "@/data/liveData";
+import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 
 interface RevenueTrendChartProps {
   scenario?: 'Budget_Base' | 'Budget_Worst' | 'Budget_Best' | 'PY';
+  /** Live BU code (LIV/HSE/...) or "All Company" */
   selectedBU?: string;
 }
 
@@ -16,93 +19,55 @@ type PeriodType = "6months" | "quarterly" | "yearly";
 export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All Company" }: RevenueTrendChartProps) => {
   const [selectedMetric, setSelectedMetric] = useState<MetricType>("revenue");
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>("yearly");
+  // LIVE monthly series (Supabase pnl_by_bu); Budget comparatives stay MOCK.
+  const { data: liveRows } = usePnlByBu();
 
   const formatCurrency = (value: number) => {
     return `${(value / 1000).toFixed(0)}K`;
   };
-  
-  const comparisonLabel = scenario === "PY" ? "PY" : "Budget";
 
-  // Get data based on selected metric and period using new financialData system
-  const getData = (): TrendData[] => {
-    // Map BU display name to code
-    const buMap: Record<string, string> = {
-      "Equestrian": "BU1_Equestrian",
-      "Events": "BU2_Events",
-      "Retail": "BU3_Retail",
-      "Advisory": "BU4_Advisory"
-    };
-    
-    const buCode = selectedBU !== "All Company" ? (buMap[selectedBU] || selectedBU) : undefined;
-    const budgetScenario = scenario === "PY" ? "Budget_Base" : scenario;
-    const plData = getMonthlyPLData(buCode, budgetScenario);
-    
-    // Determine how many months to show based on period
-    let dataToShow = plData;
-    if (selectedPeriod === "quarterly") {
-      dataToShow = plData.slice(-3); // Last 3 months
-    } else if (selectedPeriod === "6months") {
-      dataToShow = plData.slice(-6); // Last 6 months
+  const comparisonLabel = scenario === "PY" ? "PY (LIVE)" : "Budget (MOCK)";
+
+  const metricOf = (t: LivePLTotals): number => {
+    switch (selectedMetric) {
+      case "grossMargin": return t.grossMargin;
+      case "opex": return Math.abs(t.opex);
+      case "ebitda": return t.ebitda;
+      default: return t.revenue;
     }
-    // else yearly = all 12 months
-    
-    return dataToShow.map(monthData => {
-      let actual = 0;
-      let comparison = 0;
-      
-      // Calculate actual values
-      switch (selectedMetric) {
-        case "grossMargin":
-          actual = calculateGM(monthData.revenues.actual, monthData.cogs.actual);
-          break;
-        case "opex":
-          actual = Math.abs(monthData.opex.actual);
-          break;
-        case "ebitda":
-          actual = calculateEBITDA(monthData.revenues.actual, monthData.cogs.actual, monthData.opex.actual);
-          break;
-        default: // revenue
-          actual = monthData.revenues.actual;
-      }
-      
-      // Calculate comparison values based on scenario
-      let revComparison: number;
-      let cogsComparison: number;
-      let opexComparison: number;
-      
-      if (scenario === "PY") {
-        // Compare against Previous Year
-        revComparison = monthData.revenues.previousYear;
-        cogsComparison = monthData.cogs.previousYear;
-        opexComparison = monthData.opex.previousYear;
-      } else {
-        // Use budget from selected scenario (Budget_Base/Worst/Best)
-        revComparison = monthData.revenues.budget;
-        cogsComparison = monthData.cogs.budget;
-        opexComparison = monthData.opex.budget;
-      }
-      
-      // Calculate comparison metric value
-      switch (selectedMetric) {
-        case "grossMargin":
-          comparison = calculateGM(revComparison, cogsComparison);
-          break;
-        case "opex":
-          comparison = Math.abs(opexComparison);
-          break;
-        case "ebitda":
-          comparison = calculateEBITDA(revComparison, cogsComparison, opexComparison);
-          break;
-        default: // revenue
-          comparison = revComparison;
-      }
-      
-      return {
-        month: monthData.month,
-        actual,
-        budget: comparison
-      };
-    });
+  };
+
+  // MOCK budget for one live month key ("YYYY-MM"). The mock dataset only
+  // covers the consolidated prototype calendar (Dec '24 - Nov '25) — months
+  // and BUs outside it return 0.
+  const mockBudgetFor = (monthKey: string): number => {
+    if (selectedBU !== "All Company") return 0; // no mock budget on live BU taxonomy
+    const budgetScenario = scenario === "PY" ? "Budget_Base" : scenario;
+    const [y, m] = monthKey.split("-").map(Number);
+    const start = `${monthKey}-01`;
+    const end = `${monthKey}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+    const rev = getRevenuesForPeriod(budgetScenario, start, end);
+    const cog = getCogsForPeriod(budgetScenario, start, end);
+    const op = getOpexForPeriod(budgetScenario, start, end);
+    switch (selectedMetric) {
+      case "grossMargin": return rev - cog;
+      case "opex": return Math.abs(op);
+      case "ebitda": return rev - cog - op;
+      default: return rev;
+    }
+  };
+
+  // Get data: LIVE actuals (+ LIVE PY / MOCK budget comparison) per month
+  const getData = (): TrendData[] => {
+    const buCode = selectedBU !== "All Company" ? selectedBU : undefined;
+    const count = selectedPeriod === "quarterly" ? 3 : selectedPeriod === "6months" ? 6 : 12;
+    const series = getLiveMonthlySeries(liveRows, buCode, count);
+
+    return series.map((point) => ({
+      month: point.month,
+      actual: metricOf(point.actual),
+      budget: scenario === "PY" ? metricOf(point.previousYear) : mockBudgetFor(point.monthKey),
+    }));
   };
 
   const data = getData();
@@ -179,7 +144,7 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
     <Card className="dashboard-card group">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
         <h3 className="dashboard-card-title">
-          {getTitle()}
+          {getTitle()} <DataSourceBadge source="live" className="ml-2" />
         </h3>
         <div className="flex gap-3">
           <Select value={selectedMetric} onValueChange={(value) => setSelectedMetric(value as MetricType)}>

@@ -12,14 +12,26 @@ import { CashTrendChart } from "@/components/dashboard/CashTrendChart";
 import { WorkingCapitalPanel } from "@/components/dashboard/WorkingCapitalPanel";
 import { CashFlowBudgetVsActual } from "@/components/dashboard/CashFlowBudgetVsActual";
 import { PageType, type KPIMetric } from "@/types/dashboard";
-import { trendData, buPerformance } from "@/data/mockData";
-import { 
-  getPLDataForPeriod, 
-  type PLPeriodData,
-  CURRENT_DATE,
-  businessUnits as buCodes,
-  businessUnitLabels 
+import {
+  getPLDataForPeriod,
+  CURRENT_DATE
 } from "@/data/financialData";
+// LIVE data layer (Supabase pnl_by_bu) — Actual + PY are LIVE; Budget stays MOCK
+import {
+  usePnlByBu,
+  aggregateLivePL,
+  listLiveBUs,
+  listLivePeriods,
+  shiftMonthKey,
+  monthKeyLabel,
+  LIVE_BU_LABELS,
+  LIVE_CURRENT_MONTH,
+  LIVE_TODAY,
+  type LivePLTotals,
+} from "@/data/liveData";
+import { isSupabaseConfigured } from "@/lib/supabaseClient";
+import { PnLLiveTable } from "@/components/dashboard/PnLLiveTable";
+import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import {
   getCashBalance,
   getMonthlyBurn,
@@ -49,6 +61,8 @@ const Index = () => {
   };
   
   const [currentPage, setCurrentPage] = useState<PageType>(getCurrentPageFromPath());
+  // LIVE P&L rows from Supabase (pnl_by_bu) — single cached fetch
+  const { data: liveRows, isLoading: liveLoading, isError: liveError } = usePnlByBu();
   const [selectedMonth, setSelectedMonth] = useState("MTD");
   const [selectedScenario, setSelectedScenario] = useState<'Budget_Base' | 'Budget_Worst' | 'Budget_Best' | 'PY'>("Budget_Base");
   const [selectedBU, setSelectedBU] = useState("All Company");
@@ -63,30 +77,33 @@ const Index = () => {
     setCurrentPage(getCurrentPageFromPath());
   }, [location.pathname]);
 
+  // Period selector — built from the REAL periods available in the live view
+  // (falls back to the current month while loading). Values are "YYYY-MM" keys
+  // or the aggregate keywords MTD/QTD/YTD/LTM.
+  const livePeriods = listLivePeriods(liveRows);
+  const lastLivePeriod = livePeriods.length > 0 ? livePeriods[livePeriods.length - 1] : LIVE_CURRENT_MONTH;
+  const monthOptions = (() => {
+    const keys: string[] = [];
+    for (let i = 0; i < 14; i++) keys.push(shiftMonthKey(lastLivePeriod, -i));
+    return keys
+      .filter((k) => livePeriods.length === 0 || livePeriods.includes(k))
+      .map((k) => ({ value: k, label: monthKeyLabel(k) }));
+  })();
   const months = [
-    { value: "January", label: "January 2025" },
-    { value: "February", label: "February 2025" },
-    { value: "March", label: "March 2025" },
-    { value: "April", label: "April 2025" },
-    { value: "May", label: "May 2025" },
-    { value: "June", label: "June 2025" },
-    { value: "July", label: "July 2025" },
-    { value: "August", label: "August 2025" },
-    { value: "September", label: "September 2025" },
-    { value: "October", label: "October 2025" },
-    { value: "November", label: "November 2025" },
-    { value: "December", label: "December 2025" },
     { value: "MTD", label: "MTD (Month to Date)" },
     { value: "QTD", label: "QTD (Quarter to Date)" },
     { value: "YTD", label: "YTD (Year to Date)" },
+    { value: "LTM", label: "LTM (12m Rolling)" },
+    ...monthOptions,
   ];
 
+  // BU selector — ADR-003 live taxonomy, discovered from the live rows
   const businessUnits = [
     { value: "All Company", label: "All Company" },
-    { value: "Equestrian", label: "Equestrian" },
-    { value: "Events", label: "Events" },
-    { value: "Retail", label: "Retail" },
-    { value: "Advisory", label: "Advisory" },
+    ...listLiveBUs(liveRows).map((b) => ({
+      value: b,
+      label: `${LIVE_BU_LABELS[b] ?? b} (${b})`,
+    })),
   ];
 
   const scenarioOptions = [
@@ -96,188 +113,157 @@ const Index = () => {
     { value: "PY", label: "Actual vs PY" },
   ];
 
-  // Calculate date range based on selected month
-  const getDateRange = (): { startDate: string; endDate: string } => {
-    const currentDate = new Date(CURRENT_DATE); // "2025-11-20"
-    
+  // Calculate the selected period as an inclusive month-key range, anchored on
+  // the REAL current date (live data is monthly-grained). Also exposes ISO
+  // dates for the legacy mock-budget lookup.
+  const getPeriodRange = (): { startKey: string; endKey: string; startDate: string; endDate: string } => {
+    const toDates = (startKey: string, endKey: string) => {
+      const [ey, em] = endKey.split("-").map(Number);
+      const lastDay = new Date(ey, em, 0).getDate();
+      return {
+        startKey,
+        endKey,
+        startDate: `${startKey}-01`,
+        endDate: `${endKey}-${String(lastDay).padStart(2, "0")}`,
+      };
+    };
+
+    const cur = LIVE_CURRENT_MONTH; // "YYYY-MM" of today
+    const [curYear, curMonth] = cur.split("-").map(Number);
+
     if (selectedMonth === "MTD") {
-      // Month to Date: Nov 1 to Nov 20, 2025
-      const year = currentDate.getFullYear();
-      const month = String(currentDate.getMonth() + 1).padStart(2, '0');
-      const day = String(currentDate.getDate()).padStart(2, '0');
-      return {
-        startDate: `${year}-${month}-01`,
-        endDate: `${year}-${month}-${day}`
-      };
+      return { startKey: cur, endKey: cur, startDate: `${cur}-01`, endDate: LIVE_TODAY };
     } else if (selectedMonth === "QTD") {
-      // Quarter to Date: Oct 1 to Nov 20 (Q4: Aug-Oct in guide, but seems to be Oct-Dec)
-      return {
-        startDate: "2025-10-01",
-        endDate: CURRENT_DATE
-      };
+      const qStartMonth = Math.floor((curMonth - 1) / 3) * 3 + 1;
+      const startKey = `${curYear}-${String(qStartMonth).padStart(2, "0")}`;
+      return { startKey, endKey: cur, startDate: `${startKey}-01`, endDate: LIVE_TODAY };
     } else if (selectedMonth === "YTD") {
-      // Year to Date: Nov 1, 2024 to Nov 20, 2025 (fiscal year)
-      return {
-        startDate: "2024-11-01",
-        endDate: CURRENT_DATE
-      };
-    } else {
-      // Specific month selected (e.g., "January" -> "2025-01-01" to "2025-01-31")
-      const monthMap: Record<string, { month: string; year: string; lastDay: string }> = {
-        "December": { month: "12", year: "2024", lastDay: "31" },
-        "January": { month: "01", year: "2025", lastDay: "31" },
-        "February": { month: "02", year: "2025", lastDay: "28" },
-        "March": { month: "03", year: "2025", lastDay: "31" },
-        "April": { month: "04", year: "2025", lastDay: "30" },
-        "May": { month: "05", year: "2025", lastDay: "31" },
-        "June": { month: "06", year: "2025", lastDay: "30" },
-        "July": { month: "07", year: "2025", lastDay: "31" },
-        "August": { month: "08", year: "2025", lastDay: "31" },
-        "September": { month: "09", year: "2025", lastDay: "30" },
-        "October": { month: "10", year: "2025", lastDay: "31" },
-        "November": { month: "11", year: "2025", lastDay: "30" },
-      };
-      
-      const monthInfo = monthMap[selectedMonth] || monthMap["November"];
-      return {
-        startDate: `${monthInfo.year}-${monthInfo.month}-01`,
-        endDate: `${monthInfo.year}-${monthInfo.month}-${monthInfo.lastDay}`
-      };
+      const startKey = `${curYear}-01`;
+      return { startKey, endKey: cur, startDate: `${startKey}-01`, endDate: LIVE_TODAY };
+    } else if (selectedMonth === "LTM") {
+      const startKey = shiftMonthKey(cur, -11);
+      return { startKey, endKey: cur, startDate: `${startKey}-01`, endDate: LIVE_TODAY };
     }
+    // Specific month key "YYYY-MM"
+    return toDates(selectedMonth, selectedMonth);
   };
 
-  // Filter/aggregate data based on selected BU using new financialData system
-  const getFilteredKPIData = () => {
-    const { startDate, endDate } = getDateRange();
-    
-    // Map BU display name to code
-    const buMap: Record<string, string> = {
-      "Equestrian": "BU1_Equestrian",
-      "Events": "BU2_Events",
-      "Retail": "BU3_Retail",
-      "Advisory": "BU4_Advisory"
-    };
-    const buCode = selectedBU === "All Company" ? undefined : buMap[selectedBU];
-    
-    // Get the correct budget scenario
-    const budgetScenario = selectedScenario === 'PY' ? 'Budget_Base' : selectedScenario;
-    
-    // Get P&L data for the period
-    const plData = getPLDataForPeriod(startDate, endDate, budgetScenario, buCode);
-    
-    // Determine comparison values based on scenario
-    let revComparison: number, cogsComparison: number, opexComparison: number;
-    
-    if (selectedScenario === 'PY') {
-      // Compare against Previous Year
-      revComparison = plData.previousYear.revenue;
-      cogsComparison = plData.previousYear.cogs;
-      opexComparison = plData.previousYear.opex;
+  // Selected live BU code (undefined = consolidated)
+  const selectedBUCode = selectedBU === "All Company" ? undefined : selectedBU;
+
+  // KPI data — Actual and PY are LIVE (Supabase pnl_by_bu); Budget scenarios
+  // remain MOCK (budget table not yet populated) and are badged as such.
+  const getFilteredKPIData = (): { metrics: KPIMetric[]; comparisonSource: "live" | "mock" } => {
+    const { startKey, endKey, startDate, endDate } = getPeriodRange();
+
+    const actual = aggregateLivePL(liveRows, startKey, endKey, selectedBUCode);
+
+    let comparison: Pick<LivePLTotals, "revenue" | "cogs" | "opex" | "grossMargin" | "ebitda">;
+    let comparisonSource: "live" | "mock";
+
+    if (selectedScenario === "PY") {
+      // Previous Year — LIVE, computed by shifting the period -12 months
+      comparison = aggregateLivePL(
+        liveRows,
+        shiftMonthKey(startKey, -12),
+        shiftMonthKey(endKey, -12),
+        selectedBUCode,
+      );
+      comparisonSource = "live";
     } else {
-      // Compare against selected budget scenario
-      revComparison = plData.budget.revenue;
-      cogsComparison = plData.budget.cogs;
-      opexComparison = plData.budget.opex;
+      // Budget — MOCK dataset (no live budget table yet). Mock only covers the
+      // consolidated company on the old prototype calendar; live BU codes have
+      // no mock equivalent -> zeros -> card shows "No budget comparison".
+      const mockPl = getPLDataForPeriod(
+        startDate,
+        endDate,
+        selectedScenario,
+        selectedBUCode ? "NO_MOCK_FOR_LIVE_BU" : undefined,
+      );
+      comparison = mockPl.budget;
+      comparisonSource = "mock";
     }
-    
-    const gmActual = plData.actual.grossMargin;
-    const gmComparison = selectedScenario === 'PY' 
-      ? plData.previousYear.grossMargin 
-      : plData.budget.grossMargin;
-    
-    const ebitdaActual = plData.actual.ebitda;
-    const ebitdaComparison = selectedScenario === 'PY'
-      ? plData.previousYear.ebitda
-      : plData.budget.ebitda;
 
     // Helper to detect opposite signs
-    const hasOppositeSigns = (actual: number, comparison: number): boolean => {
-      return (actual >= 0 && comparison < 0) || (actual < 0 && comparison >= 0);
-    };
+    const hasOppositeSigns = (a: number, c: number): boolean =>
+      (a >= 0 && c < 0) || (a < 0 && c >= 0);
 
-    return [
+    const pct = (a: number, c: number) => (c !== 0 ? ((a - c) / Math.abs(c)) * 100 : 0);
+
+    const metrics: KPIMetric[] = [
       {
         label: "Revenue",
-        actual: plData.actual.revenue,
-        budget: revComparison,
-        variance: plData.actual.revenue - revComparison,
-        variancePercent: revComparison !== 0 ? ((plData.actual.revenue - revComparison) / Math.abs(revComparison)) * 100 : 0,
+        actual: actual.revenue,
+        budget: comparison.revenue,
+        variance: actual.revenue - comparison.revenue,
+        variancePercent: pct(actual.revenue, comparison.revenue),
         format: "currency" as const,
-        isOppositeSigns: hasOppositeSigns(plData.actual.revenue, revComparison),
+        isOppositeSigns: hasOppositeSigns(actual.revenue, comparison.revenue),
       },
       {
         label: "Gross Margin",
-        actual: gmActual,
-        budget: gmComparison,
-        variance: gmActual - gmComparison,
-        variancePercent: gmComparison !== 0 ? ((gmActual - gmComparison) / Math.abs(gmComparison)) * 100 : 0,
+        actual: actual.grossMargin,
+        budget: comparison.grossMargin,
+        variance: actual.grossMargin - comparison.grossMargin,
+        variancePercent: pct(actual.grossMargin, comparison.grossMargin),
         format: "currency" as const,
-        isOppositeSigns: hasOppositeSigns(gmActual, gmComparison),
+        isOppositeSigns: hasOppositeSigns(actual.grossMargin, comparison.grossMargin),
       },
       {
         label: "OpEx",
-        actual: Math.abs(plData.actual.opex),
-        budget: Math.abs(opexComparison),
-        variance: Math.abs(plData.actual.opex) - Math.abs(opexComparison),
-        variancePercent: opexComparison !== 0 ? ((Math.abs(plData.actual.opex) - Math.abs(opexComparison)) / Math.abs(opexComparison)) * 100 : 0,
+        actual: Math.abs(actual.opex),
+        budget: Math.abs(comparison.opex),
+        variance: Math.abs(actual.opex) - Math.abs(comparison.opex),
+        variancePercent: pct(Math.abs(actual.opex), Math.abs(comparison.opex)),
         format: "currency" as const,
-        isOppositeSigns: hasOppositeSigns(Math.abs(plData.actual.opex), Math.abs(opexComparison)),
+        isOppositeSigns: hasOppositeSigns(Math.abs(actual.opex), Math.abs(comparison.opex)),
       },
       {
         label: "EBITDA",
-        actual: ebitdaActual,
-        budget: ebitdaComparison,
-        variance: ebitdaActual - ebitdaComparison,
-        variancePercent: ebitdaComparison !== 0 
-          ? ((ebitdaActual - ebitdaComparison) / Math.abs(ebitdaComparison)) * 100
-          : 0,
+        actual: actual.ebitda,
+        budget: comparison.ebitda,
+        variance: actual.ebitda - comparison.ebitda,
+        variancePercent: pct(actual.ebitda, comparison.ebitda),
         format: "currency" as const,
-        isOppositeSigns: hasOppositeSigns(ebitdaActual, ebitdaComparison),
+        isOppositeSigns: hasOppositeSigns(actual.ebitda, comparison.ebitda),
       },
     ];
+
+    return { metrics, comparisonSource };
   };
 
+  // Per-BU performance — LIVE actuals for every BU present in the live data.
+  // Comparison: PY (LIVE) when the PY scenario is selected; Budget scenarios
+  // have no live/mock budget on the ADR-003 taxonomy -> zeros (actual only).
   const getFilteredBUPerformance = () => {
-    // Only show BU performance when "All Company" is selected
-    if (selectedBU !== "All Company") {
-      return [];
-    }
-    
-    const { startDate, endDate } = getDateRange();
-    const budgetScenario = selectedScenario === 'PY' ? 'Budget_Base' : selectedScenario;
-    
-    // Get data for all BUs
-    return buCodes.map(buCode => {
-      const plData = getPLDataForPeriod(startDate, endDate, budgetScenario, buCode);
-      const label = businessUnitLabels[buCode];
-      
-      // Determine comparison values based on scenario
-      const comparison = selectedScenario === 'PY' ? plData.previousYear : plData.budget;
-      
+    if (selectedBU !== "All Company") return [];
+
+    const { startKey, endKey } = getPeriodRange();
+
+    return listLiveBUs(liveRows).map((bu) => {
+      const actual = aggregateLivePL(liveRows, startKey, endKey, bu);
+      const py = aggregateLivePL(
+        liveRows,
+        shiftMonthKey(startKey, -12),
+        shiftMonthKey(endKey, -12),
+        bu,
+      );
+      const comparison = selectedScenario === "PY"
+        ? py
+        : { revenue: 0, grossMargin: 0, opex: 0, ebitda: 0 };
+
       return {
-        name: label,
-        revenue: {
-          actual: plData.actual.revenue,
-          budget: comparison.revenue,
-        },
-        grossMargin: {
-          actual: plData.actual.grossMargin,
-          budget: comparison.grossMargin,
-        },
-        opex: {
-          actual: Math.abs(plData.actual.opex),
-          budget: Math.abs(comparison.opex),
-        },
-        ebitda: {
-          actual: plData.actual.ebitda,
-          budget: comparison.ebitda,
-        },
+        name: LIVE_BU_LABELS[bu] ?? bu,
+        revenue: { actual: actual.revenue, budget: comparison.revenue },
+        grossMargin: { actual: actual.grossMargin, budget: comparison.grossMargin },
+        opex: { actual: Math.abs(actual.opex), budget: Math.abs(comparison.opex) },
+        ebitda: { actual: actual.ebitda, budget: comparison.ebitda },
         services: undefined,
       };
     });
   };
 
-  const filteredKPIData = getFilteredKPIData();
+  const { metrics: filteredKPIData, comparisonSource } = getFilteredKPIData();
   const filteredBUPerformance = getFilteredBUPerformance();
 
   const renderFilters = () => (
@@ -509,7 +495,22 @@ const Index = () => {
         </Select>
       </div>
 
-      {/* KPI Cards */}
+      {/* Live data status banner */}
+      {!isSupabaseConfigured && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm text-amber-400">
+          Supabase is not configured (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY missing) — live figures show as zero.
+        </div>
+      )}
+      {isSupabaseConfigured && liveError && (
+        <div className="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-400">
+          Could not load live P&amp;L data from Supabase — figures show as zero.
+        </div>
+      )}
+      {isSupabaseConfigured && liveLoading && (
+        <div className="text-sm text-muted-foreground">Loading live P&amp;L data…</div>
+      )}
+
+      {/* KPI Cards — Actual/PY LIVE, Budget MOCK */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {filteredKPIData.map((metric, index) => (
           <KPICard
@@ -517,6 +518,7 @@ const Index = () => {
             metric={metric}
             periodLabel={selectedMonth}
             scenario={selectedScenario}
+            comparisonSource={comparisonSource}
             onClick={() => {
               if (metric.label.includes("Revenue") || metric.label.includes("EBITDA") || metric.label.includes("OpEx")) {
                 setCurrentPage("performance");
@@ -528,10 +530,25 @@ const Index = () => {
         ))}
       </div>
 
+      {/* P&L Monthly table — LIVE (Supabase pnl_by_bu) */}
+      <PnLLiveTable
+        buCode={selectedBUCode}
+        buLabel={selectedBUCode ? LIVE_BU_LABELS[selectedBUCode] ?? selectedBUCode : undefined}
+      />
+
       {/* Charts */}
       <RevenueTrendChart scenario={selectedScenario} selectedBU={selectedBU} />
       {selectedBU === "All Company" && (
-        <BUPerformanceChart data={filteredBUPerformance} onClick={() => setCurrentPage("performance")} />
+        <div className="space-y-2">
+          <BUPerformanceChart data={filteredBUPerformance} onClick={() => setCurrentPage("performance")} />
+          {selectedScenario !== "PY" && (
+            <p className="text-xs text-muted-foreground px-1">
+              <DataSourceBadge source="mock" className="mr-1.5" />
+              Budget comparatives are not yet populated in Supabase — bars show LIVE actuals only.
+              Select "Actual vs PY" for a live comparison.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

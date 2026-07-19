@@ -36,7 +36,8 @@ export const PLMatrix = ({ data, onServiceClick, onOpExClick, onGrossMarginClick
 
   const calculateVariance = (actual: number, budget: number) => {
     const variance = actual - budget;
-    const variancePercent = (variance / budget) * 100;
+    // Guard: comparison may legitimately be 0 (e.g. budget not yet populated)
+    const variancePercent = budget !== 0 ? (variance / Math.abs(budget)) * 100 : 0;
     return { variance, variancePercent };
   };
 

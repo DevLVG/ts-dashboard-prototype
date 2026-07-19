@@ -1,13 +1,16 @@
-// LIVE data layer — Supabase view `pnl_by_bu` (trio-sporting-pm).
+// LIVE data layer — Supabase views `pnl_by_bu` + `v_budget_monthly`
+// (trio-sporting-pm).
 //
 // One fetch (few hundred rows: month x BU), cached by React Query; all
 // aggregation happens client-side with pure helpers that mirror the sign
 // conventions of the mock layer (financialData.ts): COGS and OpEx returned
-// as POSITIVE numbers, D&A positive; the view stores costs as negatives.
+// as POSITIVE numbers, D&A positive; the views store costs as negatives.
 //
 // LIVE here means: Actual + Previous Year (computed by -12m shift on live
-// rows). Budget comparatives are NOT live (budget table not yet populated)
-// and stay on the mock dataset, flagged with a MOCK badge in the UI.
+// rows) + Budget BASE scenario (v_budget_monthly, loaded 2026-07-19 from the
+// approved 2026-07-16 budget — window Jul-2026..Dec-2027, EBITDA-deep only:
+// no D&A/EBIT budget exists). Budget Worst/Best scenarios are NOT loaded and
+// stay on the mock dataset, flagged with a MOCK badge in the UI.
 import { useQuery } from "@tanstack/react-query";
 import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
 
@@ -97,6 +100,50 @@ export const usePnlByBu = () =>
     enabled: isSupabaseConfigured,
   });
 
+// ------------------------------------------------------------------ budget
+
+/** Budget window loaded in Supabase (BASE scenario, approved 2026-07-16).
+ * Months outside this inclusive range have NO budget comparative — the UI
+ * must show "—" (absent), never zero. */
+export const BUDGET_START_KEY = "2026-07";
+export const BUDGET_END_KEY = "2027-12";
+
+/** True when the whole inclusive month-key range falls inside the loaded
+ * budget window (a partial overlap would produce a misleading comparative). */
+export const budgetCoversRange = (startKey: string, endKey: string): boolean =>
+  startKey >= BUDGET_START_KEY && endKey <= BUDGET_END_KEY;
+
+export interface BudgetMonthlyRow {
+  period_month: string; // "YYYY-MM-01"
+  moa_code: string;
+  bu_code: string | null; // NULL for unallocated lines (e.g. recurring COGS)
+  section: string; // Revenue | COGS | OPEX-People | OPEX-MS | OPEX-GA (CASHFLOW filtered out)
+  line_label: string;
+  budget_amount_sar: number; // signed like pnl_management: revenue +, costs -
+  version_id: string;
+}
+
+export const fetchBudgetMonthly = async (): Promise<BudgetMonthlyRow[]> => {
+  if (!supabase) throw new Error("Supabase is not configured (missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)");
+  // P&L sections only — the CASHFLOW section belongs to the Cash tab (still mock).
+  const { data, error } = await supabase
+    .from("v_budget_monthly")
+    .select("*")
+    .neq("section", "CASHFLOW")
+    .order("period_month", { ascending: true })
+    .limit(5000);
+  if (error) throw error;
+  return (data ?? []) as BudgetMonthlyRow[];
+};
+
+export const useBudgetMonthly = () =>
+  useQuery({
+    queryKey: ["v_budget_monthly"],
+    queryFn: fetchBudgetMonthly,
+    staleTime: 60 * 60 * 1000, // budget changes only on re-approval
+    enabled: isSupabaseConfigured,
+  });
+
 // ---------------------------------------------------------------- helpers
 
 const n = (v: number | null | undefined): number => v ?? 0;
@@ -164,6 +211,52 @@ export const aggregateLivePL = (
   out.ebitda = out.revenue - out.cogs - out.opex;
   return out;
 };
+
+/**
+ * Aggregate LIVE budget rows (v_budget_monthly) over an inclusive month-key
+ * range, optionally one BU. Same sign conventions as aggregateLivePL: costs
+ * positive, GM = rev - cogs, EBITDA = rev - cogs - opex. The budget is
+ * EBITDA-deep: `da` is always 0 and MUST NOT be rendered as a real budget
+ * (no D&A/EBIT budget exists — show "—").
+ *
+ * Returns null when the range is not fully covered by the loaded budget
+ * window (months before Jul-2026 / after Dec-2027 have no budget).
+ */
+export const aggregateBudgetPL = (
+  rows: BudgetMonthlyRow[] | undefined,
+  startMonthKey: string,
+  endMonthKey: string,
+  bu?: string,
+): LivePLTotals | null => {
+  if (!rows || rows.length === 0) return null;
+  if (!budgetCoversRange(startMonthKey, endMonthKey)) return null;
+  const out = emptyTotals();
+  for (const r of rows) {
+    const k = monthKey(r.period_month);
+    if (k < startMonthKey || k > endMonthKey) continue;
+    if (bu && r.bu_code !== bu) continue;
+    switch (r.section) {
+      case "Revenue": out.revenue += r.budget_amount_sar; break;
+      case "COGS": out.cogs += -r.budget_amount_sar; break;
+      case "OPEX-People": out.opexPeople += -r.budget_amount_sar; break;
+      case "OPEX-MS": out.opexMs += -r.budget_amount_sar; break;
+      case "OPEX-GA": out.opexGa += -r.budget_amount_sar; break;
+      default: break;
+    }
+  }
+  out.opex = out.opexPeople + out.opexMs + out.opexGa;
+  out.grossMargin = out.revenue - out.cogs;
+  out.ebitda = out.revenue - out.cogs - out.opex;
+  return out;
+};
+
+/** Budget totals for a single month ("YYYY-MM"), or null when the month is
+ * outside the loaded budget window. */
+export const budgetForMonth = (
+  rows: BudgetMonthlyRow[] | undefined,
+  key: string,
+  bu?: string,
+): LivePLTotals | null => aggregateBudgetPL(rows, key, key, bu);
 
 /** Distinct BU codes present in the live data, ordered by ADR-003 taxonomy. */
 export const listLiveBUs = (rows: PnlByBuRow[] | undefined): string[] => {

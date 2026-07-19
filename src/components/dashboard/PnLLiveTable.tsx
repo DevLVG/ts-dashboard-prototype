@@ -1,13 +1,19 @@
 // P&L LIVE monthly table — R1 Tab 1 MVP core.
 // Rows = P&L lines (Revenue / COGS / GM / OpEx People / OpEx M&S / OpEx G&A /
 // EBITDA / D&A / EBIT), columns = last N months, straight from the Supabase
-// view pnl_by_bu (via the shared usePnlByBu query). Respects the global BU
-// filter. Costs are shown as negatives (natural P&L presentation).
+// view pnl_by_bu (via the shared usePnlByBu query). Each line carries a muted
+// "Budget" sub-row from v_budget_monthly (BASE scenario, Jul-2026..Dec-2027):
+// months outside that window show "—" (no budget, not zero), and D&A / EBIT
+// always show "—" because the approved budget stops at EBITDA. Respects the
+// global BU filter. Costs are shown as negatives (natural P&L presentation).
+import { Fragment } from "react";
 import { Card } from "@/components/ui/card";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import {
   usePnlByBu,
+  useBudgetMonthly,
   getLiveMonthlySeries,
+  budgetForMonth,
   type LiveMonthlyPoint,
   type LivePLTotals,
 } from "@/data/liveData";
@@ -25,7 +31,12 @@ interface LineDef {
   sign: 1 | -1; // -1 = cost line, displayed negative
   emphasis?: boolean;
   indent?: boolean;
+  /** No budget exists for this line (budget stops at EBITDA) */
+  noBudget?: boolean;
 }
+
+const NO_BUDGET_TOOLTIP =
+  "No budget for this line — the approved budget (2026-07-16) stops at EBITDA; no D&A or EBIT budget exists.";
 
 const LINES: LineDef[] = [
   { label: "Revenue", value: (t) => t.revenue, sign: 1, emphasis: true },
@@ -35,8 +46,8 @@ const LINES: LineDef[] = [
   { label: "OpEx — Marketing & Sales", value: (t) => t.opexMs, sign: -1, indent: true },
   { label: "OpEx — G&A", value: (t) => t.opexGa, sign: -1, indent: true },
   { label: "EBITDA", value: (t) => t.ebitda, sign: 1, emphasis: true },
-  { label: "D&A", value: (t) => t.da, sign: -1 },
-  { label: "EBIT", value: (t) => t.ebitda - t.da, sign: 1, emphasis: true },
+  { label: "D&A", value: (t) => t.da, sign: -1, noBudget: true },
+  { label: "EBIT", value: (t) => t.ebitda - t.da, sign: 1, emphasis: true, noBudget: true },
 ];
 
 const fmt = (v: number) =>
@@ -46,7 +57,12 @@ const fmt = (v: number) =>
 
 export const PnLLiveTable = ({ buCode, buLabel, monthsBack = 12 }: PnLLiveTableProps) => {
   const { data: rows, isLoading, isError } = usePnlByBu();
+  const { data: budgetRows } = useBudgetMonthly();
   const series: LiveMonthlyPoint[] = getLiveMonthlySeries(rows, buCode, monthsBack);
+  // LIVE budget per column month (null = month outside the budget window)
+  const budgetByMonth: (LivePLTotals | null)[] = series.map((p) =>
+    budgetForMonth(budgetRows, p.monthKey, buCode),
+  );
 
   const scope = buCode ? buLabel ?? buCode : "Consolidated";
 
@@ -58,7 +74,7 @@ export const PnLLiveTable = ({ buCode, buLabel, monthsBack = 12 }: PnLLiveTableP
         </h3>
         <DataSourceBadge source="live" />
         <span className="text-xs text-muted-foreground">
-          Supabase · pnl_by_bu · SAR
+          Supabase · pnl_by_bu + v_budget_monthly · SAR
         </span>
       </div>
 
@@ -86,31 +102,59 @@ export const PnLLiveTable = ({ buCode, buLabel, monthsBack = 12 }: PnLLiveTableP
           </thead>
           <tbody>
             {LINES.map((line) => (
-              <tr
-                key={line.label}
-                className={
-                  line.emphasis
-                    ? "border-b border-border/60 font-semibold"
-                    : "border-b border-border/30"
-                }
-              >
-                <td className={`py-2 pr-4 whitespace-nowrap ${line.indent ? "pl-4 text-muted-foreground" : ""}`}>
-                  {line.label}
-                </td>
-                {series.map((p) => {
-                  const raw = line.value(p.actual) * line.sign;
-                  return (
-                    <td
-                      key={p.monthKey}
-                      className={`text-right py-2 px-2 tabular-nums whitespace-nowrap ${
-                        raw < 0 ? "text-muted-foreground" : ""
-                      }`}
-                    >
-                      {fmt(raw)}
-                    </td>
-                  );
-                })}
-              </tr>
+              <Fragment key={line.label}>
+                <tr
+                  className={
+                    line.emphasis
+                      ? "border-b border-border/20 font-semibold"
+                      : "border-b border-border/10"
+                  }
+                >
+                  <td className={`py-2 pr-4 whitespace-nowrap ${line.indent ? "pl-4 text-muted-foreground" : ""}`}>
+                    {line.label}
+                  </td>
+                  {series.map((p) => {
+                    const raw = line.value(p.actual) * line.sign;
+                    return (
+                      <td
+                        key={p.monthKey}
+                        className={`text-right py-2 px-2 tabular-nums whitespace-nowrap ${
+                          raw < 0 ? "text-muted-foreground" : ""
+                        }`}
+                      >
+                        {fmt(raw)}
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr
+                  className={`text-xs text-muted-foreground ${
+                    line.emphasis ? "border-b border-border/60" : "border-b border-border/30"
+                  }`}
+                >
+                  <td className={`pb-2 pr-4 whitespace-nowrap ${line.indent ? "pl-8" : "pl-4"}`}>
+                    Budget
+                  </td>
+                  {series.map((p, i) => {
+                    const budget = budgetByMonth[i];
+                    const noValue = line.noBudget || budget === null;
+                    const title = line.noBudget
+                      ? NO_BUDGET_TOOLTIP
+                      : budget === null
+                        ? "No budget for this month — the approved budget covers Jul-2026 to Dec-2027."
+                        : undefined;
+                    return (
+                      <td
+                        key={p.monthKey}
+                        className="text-right pb-2 px-2 tabular-nums whitespace-nowrap"
+                        title={title}
+                      >
+                        {noValue ? "—" : fmt(line.value(budget!) * line.sign)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -119,8 +163,11 @@ export const PnLLiveTable = ({ buCode, buLabel, monthsBack = 12 }: PnLLiveTableP
       <p className="mt-4 text-xs text-muted-foreground">
         Actuals synced from Qoyod. Costs (COGS/OpEx) appear only where bill
         line-items carry MoA tags; D&amp;A derives from depreciation journal
-        entries (503xx accounts). Budget comparatives are not shown here —
-        budget table not yet populated.
+        entries (503xx accounts). Budget rows{" "}
+        <DataSourceBadge source="live" className="mx-0.5" /> come from Supabase
+        v_budget_monthly (BASE scenario approved 2026-07-16, Jul-2026 → Dec-2027);
+        months outside that window and D&amp;A/EBIT lines show "—" — the budget
+        stops at EBITDA.
       </p>
     </Card>
   );

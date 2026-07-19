@@ -2,10 +2,23 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { TrendData } from "@/types/dashboard";
 import { getRevenuesForPeriod, getCogsForPeriod, getOpexForPeriod } from "@/data/financialData";
-import { usePnlByBu, getLiveMonthlySeries, type LivePLTotals } from "@/data/liveData";
+import {
+  usePnlByBu,
+  useBudgetMonthly,
+  getLiveMonthlySeries,
+  budgetForMonth,
+  type LivePLTotals,
+} from "@/data/liveData";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
+
+/** Local trend point — budget is null when no budget exists for the month
+ * (before Jul-2026 / after Dec-2027): the line shows a gap, not zero. */
+interface LiveTrendPoint {
+  month: string;
+  actual: number;
+  budget: number | null;
+}
 
 interface RevenueTrendChartProps {
   scenario?: 'Budget_Base' | 'Budget_Worst' | 'Budget_Best' | 'PY';
@@ -19,14 +32,17 @@ type PeriodType = "6months" | "quarterly" | "yearly";
 export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All Company" }: RevenueTrendChartProps) => {
   const [selectedMetric, setSelectedMetric] = useState<MetricType>("revenue");
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>("yearly");
-  // LIVE monthly series (Supabase pnl_by_bu); Budget comparatives stay MOCK.
+  // LIVE monthly series (Supabase pnl_by_bu) + LIVE budget (v_budget_monthly,
+  // BASE scenario). Budget Worst/Best scenarios are not loaded and stay MOCK.
   const { data: liveRows } = usePnlByBu();
+  const { data: budgetRows } = useBudgetMonthly();
 
   const formatCurrency = (value: number) => {
     return `${(value / 1000).toFixed(0)}K`;
   };
 
-  const comparisonLabel = scenario === "PY" ? "PY (LIVE)" : "Budget (MOCK)";
+  const comparisonLabel =
+    scenario === "PY" ? "PY (LIVE)" : scenario === "Budget_Base" ? "Budget (LIVE)" : "Budget (MOCK)";
 
   const metricOf = (t: LivePLTotals): number => {
     switch (selectedMetric) {
@@ -57,16 +73,27 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
     }
   };
 
-  // Get data: LIVE actuals (+ LIVE PY / MOCK budget comparison) per month
-  const getData = (): TrendData[] => {
+  // Get data: LIVE actuals + comparison per month. PY -> LIVE (-12m shift);
+  // Budget_Base -> LIVE from v_budget_monthly (null outside Jul-2026..Dec-2027,
+  // and null anyway for the OpEx/GM metrics before the window — gap, not zero);
+  // Budget_Worst/Best -> MOCK (only BASE is loaded in Supabase).
+  const getData = (): LiveTrendPoint[] => {
     const buCode = selectedBU !== "All Company" ? selectedBU : undefined;
     const count = selectedPeriod === "quarterly" ? 3 : selectedPeriod === "6months" ? 6 : 12;
     const series = getLiveMonthlySeries(liveRows, buCode, count);
 
+    const budgetOf = (monthKey: string): number | null => {
+      if (scenario === "Budget_Base") {
+        const b = budgetForMonth(budgetRows, monthKey, buCode);
+        return b === null ? null : metricOf(b);
+      }
+      return mockBudgetFor(monthKey);
+    };
+
     return series.map((point) => ({
       month: point.month,
       actual: metricOf(point.actual),
-      budget: scenario === "PY" ? metricOf(point.previousYear) : mockBudgetFor(point.monthKey),
+      budget: scenario === "PY" ? metricOf(point.previousYear) : budgetOf(point.monthKey),
     }));
   };
 
@@ -91,8 +118,9 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       const actual = payload.find((p: any) => p.dataKey === "actual")?.value || 0;
-      const budget = payload.find((p: any) => p.dataKey === "budget")?.value || 0;
-      const delta = actual - budget;
+      const budgetRaw = payload.find((p: any) => p.dataKey === "budget")?.value;
+      const budget: number | null = budgetRaw === null || budgetRaw === undefined ? null : budgetRaw;
+      const delta = budget === null ? null : actual - budget;
 
       return (
         <div className="chart-tooltip">
@@ -106,20 +134,24 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
               }).format(actual)}
             </p>
             <p className="chart-tooltip-budget">
-              {comparisonLabel}: {new Intl.NumberFormat("en-SA", {
-                style: "currency",
-                currency: "SAR",
-                minimumFractionDigits: 0,
-              }).format(budget)}
+              {comparisonLabel}: {budget === null
+                ? "— (no budget before Jul '26)"
+                : new Intl.NumberFormat("en-SA", {
+                    style: "currency",
+                    currency: "SAR",
+                    minimumFractionDigits: 0,
+                  }).format(budget)}
             </p>
-            <p className={delta >= 0 ? "chart-tooltip-delta-positive" : "chart-tooltip-delta-negative"}>
-              Delta: {new Intl.NumberFormat("en-SA", {
-                style: "currency",
-                currency: "SAR",
-                minimumFractionDigits: 0,
-                signDisplay: "always",
-              }).format(delta)}
-            </p>
+            {delta !== null && (
+              <p className={delta >= 0 ? "chart-tooltip-delta-positive" : "chart-tooltip-delta-negative"}>
+                Delta: {new Intl.NumberFormat("en-SA", {
+                  style: "currency",
+                  currency: "SAR",
+                  minimumFractionDigits: 0,
+                  signDisplay: "always",
+                }).format(delta)}
+              </p>
+            )}
           </div>
         </div>
       );
@@ -127,15 +159,16 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
     return null;
   };
 
-  // Create data with variance shading between the two lines
-  // For OpEx, invert the logic: over budget is bad (red), under budget is good (cyan)
+  // Create data with variance shading between the two lines.
+  // For OpEx, invert the logic: over budget is bad (red), under budget is good (cyan).
+  // Months without a budget comparative (null) get no shading and a gap in the line.
   const chartData = data.map((item) => ({
     ...item,
-    baseArea: Math.min(item.actual, item.budget),
-    positiveVariance: isOpEx 
+    baseArea: item.budget === null ? 0 : Math.min(item.actual, item.budget),
+    positiveVariance: item.budget === null ? 0 : isOpEx
       ? (item.budget > item.actual ? item.budget - item.actual : 0) // For OpEx: under budget is positive (cyan)
       : (item.actual > item.budget ? item.actual - item.budget : 0), // For others: over budget is positive (cyan)
-    negativeVariance: isOpEx
+    negativeVariance: item.budget === null ? 0 : isOpEx
       ? (item.actual > item.budget ? item.actual - item.budget : 0) // For OpEx: over budget is negative (red)
       : (item.budget > item.actual ? item.budget - item.actual : 0), // For others: under budget is negative (red)
   }));
@@ -235,7 +268,9 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
             strokeWidth={3}
             strokeDasharray="5 5"
             name={comparisonLabel}
-            dot={false}
+            // Small dot so isolated budget months (e.g. only Jul '26 in a
+            // window that starts before the budget) remain visible.
+            dot={{ fill: "hsl(var(--muted-foreground))", r: 3, strokeWidth: 0 }}
           />
           <Line
             type="monotone"

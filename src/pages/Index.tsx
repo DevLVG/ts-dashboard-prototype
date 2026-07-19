@@ -16,10 +16,15 @@ import {
   getPLDataForPeriod,
   CURRENT_DATE
 } from "@/data/financialData";
-// LIVE data layer (Supabase pnl_by_bu) — Actual + PY are LIVE; Budget stays MOCK
+// LIVE data layer (Supabase pnl_by_bu + v_budget_monthly) — Actual, PY and
+// Budget BASE are LIVE; Budget Worst/Best scenarios stay MOCK (not loaded).
 import {
   usePnlByBu,
+  useBudgetMonthly,
   aggregateLivePL,
+  aggregateBudgetPL,
+  budgetCoversRange,
+  BUDGET_START_KEY,
   listLiveBUs,
   listLivePeriods,
   shiftMonthKey,
@@ -63,6 +68,8 @@ const Index = () => {
   const [currentPage, setCurrentPage] = useState<PageType>(getCurrentPageFromPath());
   // LIVE P&L rows from Supabase (pnl_by_bu) — single cached fetch
   const { data: liveRows, isLoading: liveLoading, isError: liveError } = usePnlByBu();
+  // LIVE budget rows (v_budget_monthly, BASE scenario, Jul-2026..Dec-2027)
+  const { data: budgetRows } = useBudgetMonthly();
   const [selectedMonth, setSelectedMonth] = useState("MTD");
   const [selectedScenario, setSelectedScenario] = useState<'Budget_Base' | 'Budget_Worst' | 'Budget_Best' | 'PY'>("Budget_Base");
   const [selectedBU, setSelectedBU] = useState("All Company");
@@ -151,8 +158,9 @@ const Index = () => {
   // Selected live BU code (undefined = consolidated)
   const selectedBUCode = selectedBU === "All Company" ? undefined : selectedBU;
 
-  // KPI data — Actual and PY are LIVE (Supabase pnl_by_bu); Budget scenarios
-  // remain MOCK (budget table not yet populated) and are badged as such.
+  // KPI data — Actual, PY and Budget BASE are LIVE (Supabase pnl_by_bu +
+  // v_budget_monthly). Budget Worst/Best scenarios are not loaded in Supabase
+  // and remain MOCK, badged as such.
   const getFilteredKPIData = (): { metrics: KPIMetric[]; comparisonSource: "live" | "mock" } => {
     const { startKey, endKey, startDate, endDate } = getPeriodRange();
 
@@ -170,10 +178,18 @@ const Index = () => {
         selectedBUCode,
       );
       comparisonSource = "live";
+    } else if (selectedScenario === "Budget_Base") {
+      // Budget BASE — LIVE from v_budget_monthly. Budget starts Jul-2026;
+      // ranges not fully inside the window get NO comparative (zeros ->
+      // card shows "No budget comparison" — absent, not zero).
+      const budget = aggregateBudgetPL(budgetRows, startKey, endKey, selectedBUCode);
+      comparison = budget ?? { revenue: 0, cogs: 0, opex: 0, grossMargin: 0, ebitda: 0 };
+      comparisonSource = "live";
     } else {
-      // Budget — MOCK dataset (no live budget table yet). Mock only covers the
-      // consolidated company on the old prototype calendar; live BU codes have
-      // no mock equivalent -> zeros -> card shows "No budget comparison".
+      // Budget Worst/Best — MOCK dataset (only the BASE scenario is loaded in
+      // Supabase). Mock only covers the consolidated company on the old
+      // prototype calendar; live BU codes have no mock equivalent -> zeros ->
+      // card shows "No budget comparison".
       const mockPl = getPLDataForPeriod(
         startDate,
         endDate,
@@ -233,8 +249,11 @@ const Index = () => {
   };
 
   // Per-BU performance — LIVE actuals for every BU present in the live data.
-  // Comparison: PY (LIVE) when the PY scenario is selected; Budget scenarios
-  // have no live/mock budget on the ADR-003 taxonomy -> zeros (actual only).
+  // Comparison: PY (LIVE) for the PY scenario; Budget BASE (LIVE, from
+  // v_budget_monthly filtered by bu_code) when the period is inside the
+  // budget window. Worst/Best have no live budget -> zeros (actual only).
+  // NB: budget costs are largely unallocated (recurring COGS bu NULL, OpEx on
+  // CORP) — mirrors the same allocation limitation as the live actuals.
   const getFilteredBUPerformance = () => {
     if (selectedBU !== "All Company") return [];
 
@@ -250,7 +269,9 @@ const Index = () => {
       );
       const comparison = selectedScenario === "PY"
         ? py
-        : { revenue: 0, grossMargin: 0, opex: 0, ebitda: 0 };
+        : (selectedScenario === "Budget_Base"
+            ? aggregateBudgetPL(budgetRows, startKey, endKey, bu)
+            : null) ?? { revenue: 0, grossMargin: 0, opex: 0, ebitda: 0 };
 
       return {
         name: LIVE_BU_LABELS[bu] ?? bu,
@@ -541,11 +562,27 @@ const Index = () => {
       {selectedBU === "All Company" && (
         <div className="space-y-2">
           <BUPerformanceChart data={filteredBUPerformance} onClick={() => setCurrentPage("performance")} />
-          {selectedScenario !== "PY" && (
+          {selectedScenario === "Budget_Base" && (() => {
+            const { startKey, endKey } = getPeriodRange();
+            return budgetCoversRange(startKey, endKey) ? (
+              <p className="text-xs text-muted-foreground px-1">
+                <DataSourceBadge source="live" className="mr-1.5" />
+                Budget comparatives from Supabase v_budget_monthly (BASE scenario, approved 2026-07-16).
+                Budget costs are largely unallocated to BUs (recurring COGS, OpEx on Corporate) — same
+                limitation as the live actuals.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground px-1">
+                Budget starts {monthKeyLabel(BUDGET_START_KEY)} — no budget comparative for this period;
+                bars show LIVE actuals only.
+              </p>
+            );
+          })()}
+          {(selectedScenario === "Budget_Worst" || selectedScenario === "Budget_Best") && (
             <p className="text-xs text-muted-foreground px-1">
               <DataSourceBadge source="mock" className="mr-1.5" />
-              Budget comparatives are not yet populated in Supabase — bars show LIVE actuals only.
-              Select "Actual vs PY" for a live comparison.
+              Only the BASE budget scenario is loaded in Supabase — Worst/Best remain mock, so bars
+              show LIVE actuals only. Select "Actual vs Budget Base" or "Actual vs PY" for a live comparison.
             </p>
           )}
         </div>

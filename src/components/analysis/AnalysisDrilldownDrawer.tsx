@@ -104,8 +104,12 @@ export function AnalysisDrilldownDrawer({
   // Primary comparison = first active one with a value on this line
   const primary = comps.find((c) => line.comps[c] !== null && line.comps[c] !== undefined);
 
-  // % of revenue summary (skip for the revenue line itself)
-  const isCost = line.actual < 0 || ["cogs", "opexPeople", "opexMs", "opexGa", "opexGaU", "nonRecurring", "da"].includes(line.key);
+  // % of revenue summary (skip for the revenue line itself). Key-based: a
+  // negative margin (e.g. EBITDA in a loss period) is NOT a cost line.
+  const isCost = [
+    "cogs", "opexPeople", "opexMs", "opexGa", "opexGaU", "opex",
+    "nonRecurring", "projectCosts", "unmapped", "da",
+  ].includes(line.key);
   const summary = (() => {
     if (line.key === "revenue" || revActual === 0 || !primary) return null;
     const revComp = revenue?.comps[primary];

@@ -54,7 +54,8 @@ export const AnalysisWaterfall = ({
   const byKey = new Map(lines.map((l) => [l.key, l]));
   const L = (k: string): AnalysisLine | undefined => byKey.get(k);
 
-  // Build-down sequence: [lineKey, label, type]
+  // Build-down sequence: [lineKey, label, type] — G3 structure since
+  // migration 018: Recurring EBITDA -> Project Costs -> EBITDA incl. PC.
   const seq: [string, string, WaterfallItem["type"]][] = view === "management"
     ? [
         ["revenue", "Revenue", "total"],
@@ -63,7 +64,9 @@ export const AnalysisWaterfall = ({
         ["opex", "OpEx (underlying)", "decrease"],
         ["ebitdaU", "EBITDA Underlying", "subtotal"],
         ["nonRecurring", "Non-Recurring", "decrease"],
-        ["ebitda", "EBITDA Reported", "subtotal"],
+        ["ebitda", "Recurring EBITDA", "subtotal"],
+        ["projectCosts", "Project Costs", "decrease"],
+        ["ebitdaIncl", "EBITDA incl. PC", "subtotal"],
         ["da", "D&A", "decrease"],
         ["ebit", "EBIT", "total"],
       ]
@@ -72,20 +75,32 @@ export const AnalysisWaterfall = ({
         ["cogs", "COGS", "decrease"],
         ["gm", "Gross Margin", "subtotal"],
         ["opex", "OpEx", "decrease"],
-        ["ebitda", "EBITDA", "subtotal"],
+        ["ebitda", "Recurring EBITDA", "subtotal"],
+        ["projectCosts", "Project Costs", "decrease"],
+        ["ebitdaIncl", "EBITDA incl. PC", "subtotal"],
         ["da", "D&A", "decrease"],
         ["ebit", "EBIT", "total"],
       ];
 
-  // "opex" is a synthetic bar = sum of the OpEx lines in the current view
+  // "opex" is a synthetic bar = sum of the OpEx lines in the current view,
+  // plus the (tiny) Unmapped slice so the walk lands exactly on the recurring
+  // EBITDA subtotal (bridge convention counts Unmapped inside recurring; the
+  // table shows it as its own line when nonzero).
   const opexKeys = view === "management"
-    ? ["opexPeople", "opexMs", "opexGaU"]
-    : ["opexPeople", "opexMs", "opexGa"];
+    ? ["opexPeople", "opexMs", "opexGaU", "unmapped"]
+    : ["opexPeople", "opexMs", "opexGa", "unmapped"];
   const sumComp = (keys: string[], c: ComparisonKind): number | null => {
     let acc = 0;
     for (const k of keys) {
-      const v = L(k)?.comps[c];
-      if (v === null || v === undefined) return null;
+      const line = L(k);
+      if (!line) continue; // conditional line (e.g. Unmapped) not present -> 0
+      const v = line.comps[c];
+      if (v === null || v === undefined) {
+        // Unmapped never has a budget by construction — count it as 0
+        // instead of voiding the whole synthetic bar's comparison.
+        if (k === "unmapped") continue;
+        return null;
+      }
       acc += v;
     }
     return acc;

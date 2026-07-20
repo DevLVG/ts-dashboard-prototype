@@ -235,7 +235,7 @@ const Index = () => {
         isOppositeSigns: hasOppositeSigns(Math.abs(actual.opex), Math.abs(comparison.opex)),
       },
       {
-        label: "EBITDA",
+        label: "Recurring EBITDA", // G3: pre project costs (migration 018)
         actual: actual.ebitda,
         budget: comparison.ebitda,
         variance: actual.ebitda - comparison.ebitda,

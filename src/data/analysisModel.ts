@@ -4,9 +4,12 @@
 // and the live budget (v_budget_monthly):
 //   - side-by-side comparisons: Actual always + up to 2 of Budget / PY / PP
 //     (ratified by Marcello 2026-07-20 — option 3 of build-plan Open Decision B)
+//   - G3 headline block (migration 018, complete P&L incl. manual JEs):
+//     Recurring EBITDA (pre Project Costs) -> Project Costs (Leveredge/F&F,
+//     TPC actuals ∥ GA-NRP budget lines) -> EBITDA incl. Project Costs
 //   - IFRS (Reported) vs Management (Adjusted) reading — FR-1: in Management
-//     the GA-NRP cluster (Non-Recurring Professional Fees) is isolated and the
-//     P&L shows EBITDA Underlying above Non-Recurring above EBITDA Reported
+//     any GA-NRP actuals inside G&A are isolated as EBITDA Underlying above
+//     Non-Recurring above the recurring EBITDA
 //   - drill tree: P&L line -> L3 cluster -> L4 leaf (max MoA granularity,
 //     ratified drill depth for R1; journal-entry drill is a fast-follow)
 //
@@ -68,15 +71,22 @@ export interface AnalysisLine {
 }
 
 // P&L sections in scope (NON-OP / Other are below-EBIT and excluded, matching
-// the pnl_by_bu spine definition of ebitda_reported).
+// the pnl_by_bu spine). Since migration 018 the views carry the COMPLETE P&L
+// (documents + manual JEs): 'Project-Costs' (Leveredge/F&F TPC-* fees, below
+// EBITDA per the reconciliation Option A / Margins-deck convention) and
+// 'Unmapped' (JE lines pending decision D378, conservatively inside recurring
+// EBITDA per the bridge convention).
 const SECTION_REVENUE = "Revenue";
 const SECTION_COGS = "COGS";
 const SECTION_PPL = "OPEX-People";
 const SECTION_MS = "OPEX-MS";
 const SECTION_GA = "OPEX-GA";
 const SECTION_DA = "D&A";
+const SECTION_TPC = "Project-Costs";
+const SECTION_UNMAPPED = "Unmapped";
 export const PL_SECTIONS = [
-  SECTION_REVENUE, SECTION_COGS, SECTION_PPL, SECTION_MS, SECTION_GA, SECTION_DA,
+  SECTION_REVENUE, SECTION_COGS, SECTION_PPL, SECTION_MS, SECTION_GA,
+  SECTION_DA, SECTION_TPC, SECTION_UNMAPPED,
 ] as const;
 export type PLSection = (typeof PL_SECTIONS)[number];
 
@@ -125,16 +135,20 @@ export const aggregateLeafSections = (
     let sec = out.get(r.section);
     if (!sec) { sec = { total: 0, nr: 0, clusters: new Map() }; out.set(r.section, sec); }
     sec.total += r.amount_sar;
-    if (isNonRecurring(r.moa_code)) sec.nr += r.amount_sar;
+    if (r.moa_code !== null && isNonRecurring(r.moa_code)) sec.nr += r.amount_sar;
 
-    const info = moaInfo(r.moa_code);
+    // 'Unmapped' rows carry NULL moa_code (JE accounts pending D378 mapping)
+    const code = r.moa_code ?? "UNMAPPED";
+    const info = r.moa_code !== null
+      ? moaInfo(r.moa_code)
+      : { clusterCode: "UNMAPPED", clusterName: "Unmapped JE lines", leafName: "Pending mapping (D378)" };
     const clusterName = r.cluster ?? info.clusterName;
     const leafName = r.leaf ?? info.leafName;
     let cl = sec.clusters.get(info.clusterCode);
     if (!cl) { cl = { name: clusterName, total: 0, leaves: new Map() }; sec.clusters.set(info.clusterCode, cl); }
     cl.total += r.amount_sar;
-    let lf = cl.leaves.get(r.moa_code);
-    if (!lf) { lf = { name: leafName, total: 0 }; cl.leaves.set(r.moa_code, lf); }
+    let lf = cl.leaves.get(code);
+    if (!lf) { lf = { name: leafName, total: 0 }; cl.leaves.set(code, lf); }
     lf.total += r.amount_sar;
   }
   return out;
@@ -192,7 +206,15 @@ interface Derived {
   revenue: number; cogs: number; gm: number;
   ppl: number; ms: number; ga: number;
   nr: number; gaUnderlying: number;
-  ebitda: number; ebitdaUnderlying: number;
+  unmapped: number;
+  /** Recurring EBITDA (pre project costs) — the G3 headline. Includes the
+   * Unmapped slice (bridge convention, ties to pnl_by_bu.ebitda_reported). */
+  ebitda: number;
+  ebitdaUnderlying: number;
+  /** Leveredge/F&F project fees, signed (negative). */
+  projectCosts: number;
+  /** EBITDA incl. project costs. */
+  ebitdaIncl: number;
   da: number; ebit: number;
 }
 
@@ -203,16 +225,22 @@ const deriveFromSections = (agg: SectionAggMap): Derived => {
   const ms = sectionTotal(agg, SECTION_MS);
   const ga = sectionTotal(agg, SECTION_GA);
   const nr = sectionNr(agg, SECTION_GA);
+  const unmapped = sectionTotal(agg, SECTION_UNMAPPED);
+  const projectCosts = sectionTotal(agg, SECTION_TPC);
   const da = sectionTotal(agg, SECTION_DA);
   const gm = revenue + cogs;
-  const ebitda = revenue + cogs + ppl + ms + ga;
+  const ebitda = revenue + cogs + ppl + ms + ga + unmapped; // recurring, pre project costs
+  const ebitdaIncl = ebitda + projectCosts;
   return {
     revenue, cogs, gm, ppl, ms, ga, nr,
     gaUnderlying: ga - nr,
+    unmapped,
     ebitda,
     ebitdaUnderlying: ebitda - nr,
+    projectCosts,
+    ebitdaIncl,
     da,
-    ebit: ebitda + da,
+    ebit: ebitdaIncl + da,
   };
 };
 
@@ -222,14 +250,22 @@ const deriveFromBudget = (b: BudgetSectionTotals | null): Partial<Derived> | nul
   const cogs = b.bySection[SECTION_COGS] ?? 0;
   const ppl = b.bySection[SECTION_PPL] ?? 0;
   const ms = b.bySection[SECTION_MS] ?? 0;
-  const ga = b.bySection[SECTION_GA] ?? 0;
-  const nr = b.nr;
-  const ebitda = revenue + cogs + ppl + ms + ga;
+  // The budget plans the Leveredge/F&F fees as GA-NRP-* lines inside OPEX-GA;
+  // actuals record the same fees as 'Project-Costs' (TPC-*) below EBITDA
+  // (migration 018). Map budget GA-NRP onto the Project-Costs line so budget
+  // vs actual is like-for-like on G&A, recurring EBITDA and EBITDA incl. PC.
+  const ga = (b.bySection[SECTION_GA] ?? 0) - b.nr;
+  const projectCosts = b.nr;
+  const ebitda = revenue + cogs + ppl + ms + ga; // recurring (GA-NRP re-mapped)
   return {
-    revenue, cogs, gm: revenue + cogs, ppl, ms, ga, nr,
-    gaUnderlying: ga - nr,
+    revenue, cogs, gm: revenue + cogs, ppl, ms, ga,
+    nr: 0, // nothing non-recurring left inside budget G&A after the re-map
+    gaUnderlying: ga,
+    unmapped: 0,
     ebitda,
-    ebitdaUnderlying: ebitda - nr,
+    ebitdaUnderlying: ebitda,
+    projectCosts,
+    ebitdaIncl: ebitda + projectCosts,
     // no D&A / EBIT budget — the approved budget stops at EBITDA
   };
 };
@@ -360,13 +396,43 @@ export const buildAnalysisLines = (input: AnalysisInput): AnalysisLine[] => {
 
   if (view === "management") {
     // FR-1 Management (Adjusted): G&A excluding non-recurring, then
-    // EBITDA Underlying above Non-Recurring above EBITDA Reported.
+    // EBITDA Underlying above Non-Recurring above the recurring EBITDA.
+    // (GA-NRP actuals are currently zero — the fees the budget plans as
+    // GA-NRP live on the Project-Costs line; this block populates if bills
+    // get tagged on the GA-NRP01 leaf.)
     lines.push({
       key: "opexGaU", label: "OpEx — G&A (underlying)", indent: true,
       actual: act.gaUnderlying, comps: compsFor("gaUnderlying"),
       clusters: clustersFor(SECTION_GA, (mc) => !isNonRecurring(mc)),
       budgetNote: windowNote,
     });
+  } else {
+    lines.push({
+      key: "opexGa", label: "OpEx — G&A", indent: true,
+      actual: act.ga, comps: compsFor("ga"),
+      clusters: clustersFor(SECTION_GA), budgetNote: windowNote,
+    });
+  }
+
+  // Unmapped JE lines (pending D378) — inside recurring EBITDA (bridge
+  // convention). Shown only when something is there, so the line disappears
+  // by itself once the accountant maps the residual accounts.
+  const unmappedVisible =
+    act.unmapped !== 0 ||
+    comps.some((c) => {
+      const d = der[c];
+      return d !== null && d !== undefined && (d.unmapped ?? 0) !== 0;
+    });
+  if (unmappedVisible) {
+    lines.push({
+      key: "unmapped", label: "Unmapped JE lines (pending mapping)", indent: true,
+      actual: act.unmapped, comps: compsFor("unmapped", false),
+      clusters: clustersFor(SECTION_UNMAPPED),
+      budgetNote: "No budget exists for unmapped journal lines — they empty out once decision D378 maps the residual accounts.",
+    });
+  }
+
+  if (view === "management") {
     lines.push({
       key: "ebitdaU", label: "EBITDA Underlying", emphasis: true,
       actual: act.ebitdaUnderlying, comps: compsFor("ebitdaUnderlying"),
@@ -378,21 +444,23 @@ export const buildAnalysisLines = (input: AnalysisInput): AnalysisLine[] => {
       clusters: clustersFor(SECTION_GA, (mc) => isNonRecurring(mc)),
       budgetNote: windowNote,
     });
-    lines.push({
-      key: "ebitda", label: "EBITDA Reported", emphasis: true,
-      actual: act.ebitda, comps: compsFor("ebitda"), budgetNote: windowNote,
-    });
-  } else {
-    lines.push({
-      key: "opexGa", label: "OpEx — G&A", indent: true,
-      actual: act.ga, comps: compsFor("ga"),
-      clusters: clustersFor(SECTION_GA), budgetNote: windowNote,
-    });
-    lines.push({
-      key: "ebitda", label: "EBITDA", emphasis: true,
-      actual: act.ebitda, comps: compsFor("ebitda"), budgetNote: windowNote,
-    });
   }
+
+  // G3 headline block: Recurring EBITDA -> Project Costs -> EBITDA incl. PC
+  lines.push({
+    key: "ebitda", label: "Recurring EBITDA (pre Project Costs)", emphasis: true,
+    actual: act.ebitda, comps: compsFor("ebitda"), budgetNote: windowNote,
+  });
+  lines.push({
+    key: "projectCosts", label: "Project Costs (Leveredge / F&F)", indent: true,
+    actual: act.projectCosts, comps: compsFor("projectCosts"),
+    clusters: clustersFor(SECTION_TPC),
+    budgetNote: windowNote,
+  });
+  lines.push({
+    key: "ebitdaIncl", label: "EBITDA incl. Project Costs", emphasis: true,
+    actual: act.ebitdaIncl, comps: compsFor("ebitdaIncl"), budgetNote: windowNote,
+  });
 
   lines.push({
     key: "da", label: "D&A",

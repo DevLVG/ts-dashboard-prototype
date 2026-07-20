@@ -218,7 +218,8 @@ export const EconomicAnalysis = () => {
       mk("Revenue", rev.actual, rev.comp),
       mk("Gross Margin", gm.actual, gm.comp),
       mk("OpEx", opexActual, opexComp),
-      mk(view === "management" ? "EBITDA Underlying" : "EBITDA", ebitda.actual, ebitda.comp),
+      // G3 headline: the true recurring EBITDA, pre Leveredge/F&F project fees
+      mk(view === "management" ? "EBITDA Underlying" : "Recurring EBITDA", ebitda.actual, ebitda.comp),
     ];
   }, [lineByKey, primary, view]);
 
@@ -228,12 +229,18 @@ export const EconomicAnalysis = () => {
     if (!drillKey) return null;
     if (drillKey === "opex") {
       // Synthetic OpEx bar from the waterfall: merge the OpEx lines' clusters
-      const parts = opexKeys.map((k) => lineByKey.get(k)).filter(Boolean) as AnalysisLine[];
+      // (+ the Unmapped slice when present, so the drawer total matches the bar)
+      const parts = [...opexKeys, "unmapped"]
+        .map((k) => lineByKey.get(k))
+        .filter(Boolean) as AnalysisLine[];
       const sumComp = (c: ComparisonKind): number | null => {
         let acc = 0;
         for (const p of parts) {
           const v = p.comps[c];
-          if (v === null || v === undefined) return null;
+          if (v === null || v === undefined) {
+            if (p.key === "unmapped") continue; // never budgeted — count as 0
+            return null;
+          }
           acc += v;
         }
         return acc;
@@ -350,13 +357,20 @@ export const EconomicAnalysis = () => {
         <p className="text-xs text-muted-foreground">
           <DataSourceBadge source="live" className="mr-1.5" />
           All figures from Supabase (Qoyod daily sync): actuals from{" "}
-          <span className="font-mono">pnl_management</span> at MoA leaf grain; Budget BASE from{" "}
+          <span className="font-mono">pnl_management</span> at MoA leaf grain — since migration 018
+          the COMPLETE P&amp;L (invoices + bills + manual journal entries, incl. payroll and
+          JE-paid costs; data starts 2022-01). Headline = <strong>Recurring EBITDA (pre Project
+          Costs)</strong>; the Leveredge/F&amp;F project fees (TPC) sit below it, with EBITDA incl.
+          Project Costs beneath — the budget plans those same fees as GA-NRP lines, mapped onto
+          the Project Costs line for like-for-like comparison. Budget BASE from{" "}
           <span className="font-mono">v_budget_monthly</span> (approved 2026-07-16, Jul-2026 → Dec-2027).
           Prev Year = same window −12 months · Prev Period = the preceding window of equal length.
-          Management view = FR-1: EBITDA Underlying excludes the Non-Recurring GA-NRP cluster
-          (Leveredge professional fees), shown as a separate add-back line. Cost-center pivot is
-          not in R1 (facility sqm allocation data pending). The tool rolls forward automatically
-          as new months sync — nothing is anchored to a fixed date.
+          Known limits (not adjusted here): revenue is gross of credit notes (none mirrored);
+          Draft invoices pending posting are excluded (SAR 296,356 in 2026); bill items without a
+          MoA tag are excluded (SAR 44,048 in 2026); a residual unmapped JE slice (−SAR 1,905)
+          stays inside recurring EBITDA until decision D378 lands. Cost-center pivot is not in R1
+          (facility sqm allocation data pending). The tool rolls forward automatically as new
+          months sync — nothing is anchored to a fixed date.
         </p>
       </Card>
 

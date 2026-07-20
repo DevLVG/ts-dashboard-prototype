@@ -11,6 +11,13 @@
 // approved 2026-07-16 budget — window Jul-2026..Dec-2027, EBITDA-deep only:
 // no D&A/EBIT budget exists). Budget Worst/Best scenarios are NOT loaded and
 // stay on the mock dataset, flagged with a MOCK badge in the UI.
+//
+// MIGRATION 018 (2026-07-20): the views now read the COMPLETE P&L (documents
+// + manual journal entries — payroll, JE-paid costs, project fees). `ebitda`
+// is the TRUE recurring EBITDA (pre project costs); the Leveredge/F&F fees
+// (TPC-*) surface separately as `projectCosts` with `ebitdaIncl` below them
+// (G3 presentation). Data starts 2022-01 (G2): PY comparatives for 2022 have
+// no live source and honestly show as absent.
 import { useQuery } from "@tanstack/react-query";
 import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
 
@@ -25,7 +32,16 @@ export interface PnlByBuRow {
   da: number | null; // negative in view
   gross_margin: number | null;
   contribution_margin: number | null;
+  /** Migration 018: TRUE recurring EBITDA (documents + manual JEs, pre
+   * project costs; conservatively includes the tiny Unmapped slice). */
   ebitda_reported: number | null;
+  /** Migration 018 (appended): Leveredge/F&F project fees (TPC-*), negative. */
+  project_costs?: number | null;
+  /** Migration 018 (appended): ebitda_reported + project_costs. */
+  ebitda_incl_project_costs?: number | null;
+  /** UNALL pseudo-rows only: JE cost on unmapped accounts (pending D378),
+   * negative. Counted inside recurring EBITDA (bridge convention). */
+  unmapped?: number | null;
 }
 
 // ADR-003 authoritative BU taxonomy labels (live Qoyod tagging)
@@ -62,6 +78,7 @@ const sliceToRows = (slice: PnlManagementSlice[]): PnlByBuRow[] => {
         period_month: s.period_month, bu: UNALLOCATED_BU,
         revenue: 0, cogs: 0, opex_people: 0, opex_ms: 0, opex_ga: 0, da: 0,
         gross_margin: 0, contribution_margin: 0, ebitda_reported: 0,
+        project_costs: 0, ebitda_incl_project_costs: 0, unmapped: 0,
       };
       byMonth.set(s.period_month, row);
     }
@@ -72,6 +89,9 @@ const sliceToRows = (slice: PnlManagementSlice[]): PnlByBuRow[] => {
       case "OPEX-MS": row.opex_ms = (row.opex_ms ?? 0) + s.amount_sar; break;
       case "OPEX-GA": row.opex_ga = (row.opex_ga ?? 0) + s.amount_sar; break;
       case "D&A": row.da = (row.da ?? 0) + s.amount_sar; break;
+      // Migration 018 sections:
+      case "Project-Costs": row.project_costs = (row.project_costs ?? 0) + s.amount_sar; break;
+      case "Unmapped": row.unmapped = (row.unmapped ?? 0) + s.amount_sar; break;
       default: break; // NON-OP / Other: below-EBIT lines, out of scope here
     }
   }
@@ -107,11 +127,14 @@ export const usePnlByBu = () =>
  * for costs (bill items) and D&A (JE-derived) — resolve names via moaMaster. */
 export interface PnlLeafRow {
   period_month: string; // "YYYY-MM-01"
-  section: string; // Revenue | COGS | OPEX-People | OPEX-MS | OPEX-GA | D&A | NON-OP | Other
+  /** Revenue | COGS | OPEX-People | OPEX-MS | OPEX-GA | D&A | Project-Costs |
+   * Unmapped | NON-OP | Other (Project-Costs/Unmapped since migration 018) */
+  section: string;
   bu: string | null; // null = unallocated (merged as UNALL)
   cluster: string | null;
   leaf: string | null;
-  moa_code: string;
+  /** NULL on 'Unmapped' rows (JE lines on accounts pending D378 mapping). */
+  moa_code: string | null;
   amount_sar: number; // signed: revenue +, costs -
   line_count: number;
 }
@@ -247,13 +270,24 @@ export interface LivePLTotals {
   opexMs: number; // positive
   opexGa: number; // positive
   opex: number; // positive, People + M&S + G&A
+  /** JE cost on accounts pending mapping (D378), positive. Inside recurring
+   * EBITDA per the bridge convention. Actuals only (budget has none). */
+  unmapped: number;
+  /** Leveredge/F&F project fees, positive. Actuals: 'Project-Costs' (TPC-*)
+   * section. Budget: the GA-NRP-* lines (the budget plans the same fees under
+   * GA-NRP; mapped here for like-for-like comparison — G3). */
+  projectCosts: number;
   da: number; // positive
   grossMargin: number;
+  /** Recurring EBITDA (pre project costs) — G3 headline. */
   ebitda: number;
+  /** EBITDA incl. project costs = ebitda - projectCosts. */
+  ebitdaIncl: number;
 }
 
 export const emptyTotals = (): LivePLTotals => ({
-  revenue: 0, cogs: 0, opexPeople: 0, opexMs: 0, opexGa: 0, opex: 0, da: 0, grossMargin: 0, ebitda: 0,
+  revenue: 0, cogs: 0, opexPeople: 0, opexMs: 0, opexGa: 0, opex: 0,
+  unmapped: 0, projectCosts: 0, da: 0, grossMargin: 0, ebitda: 0, ebitdaIncl: 0,
 });
 
 /**
@@ -278,11 +312,16 @@ export const aggregateLivePL = (
     out.opexPeople += -n(r.opex_people);
     out.opexMs += -n(r.opex_ms);
     out.opexGa += -n(r.opex_ga);
+    out.unmapped += -n(r.unmapped);
+    out.projectCosts += -n(r.project_costs);
     out.da += -n(r.da);
   }
   out.opex = out.opexPeople + out.opexMs + out.opexGa;
   out.grossMargin = out.revenue - out.cogs;
-  out.ebitda = out.revenue - out.cogs - out.opex;
+  // Recurring EBITDA (pre project costs); Unmapped counted inside — bridge
+  // convention, same as pnl_by_bu.ebitda_reported post-migration-018.
+  out.ebitda = out.revenue - out.cogs - out.opex - out.unmapped;
+  out.ebitdaIncl = out.ebitda - out.projectCosts;
   return out;
 };
 
@@ -309,6 +348,15 @@ export const aggregateBudgetPL = (
     const k = monthKey(r.period_month);
     if (k < startMonthKey || k > endMonthKey) continue;
     if (bu && r.bu_code !== bu) continue;
+    // The budget plans the Leveredge/F&F fees as GA-NRP-* lines (inside
+    // OPEX-GA). Actuals record the same fees as 'Project-Costs' (TPC-*),
+    // below EBITDA (migration 018, reconciliation Option A). Map the budget
+    // GA-NRP lines onto projectCosts so budget vs actual is like-for-like
+    // on every line (G&A, recurring EBITDA, project costs, EBITDA incl.).
+    if (r.moa_code.startsWith("GA-NRP")) {
+      out.projectCosts += -r.budget_amount_sar;
+      continue;
+    }
     switch (r.section) {
       case "Revenue": out.revenue += r.budget_amount_sar; break;
       case "COGS": out.cogs += -r.budget_amount_sar; break;
@@ -320,7 +368,8 @@ export const aggregateBudgetPL = (
   }
   out.opex = out.opexPeople + out.opexMs + out.opexGa;
   out.grossMargin = out.revenue - out.cogs;
-  out.ebitda = out.revenue - out.cogs - out.opex;
+  out.ebitda = out.revenue - out.cogs - out.opex; // recurring (GA-NRP excluded above)
+  out.ebitdaIncl = out.ebitda - out.projectCosts;
   return out;
 };
 

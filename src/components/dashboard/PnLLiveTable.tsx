@@ -38,6 +38,8 @@ interface LineDef {
 const NO_BUDGET_TOOLTIP =
   "No budget for this line — the approved budget (2026-07-16) stops at EBITDA; no D&A or EBIT budget exists.";
 
+// G3 structure (migration 018): the complete P&L, with the true recurring
+// EBITDA as headline and the Leveredge/F&F project fees as their own line.
 const LINES: LineDef[] = [
   { label: "Revenue", value: (t) => t.revenue, sign: 1, emphasis: true },
   { label: "COGS", value: (t) => t.cogs, sign: -1 },
@@ -45,9 +47,11 @@ const LINES: LineDef[] = [
   { label: "OpEx — People", value: (t) => t.opexPeople, sign: -1, indent: true },
   { label: "OpEx — Marketing & Sales", value: (t) => t.opexMs, sign: -1, indent: true },
   { label: "OpEx — G&A", value: (t) => t.opexGa, sign: -1, indent: true },
-  { label: "EBITDA", value: (t) => t.ebitda, sign: 1, emphasis: true },
+  { label: "Recurring EBITDA", value: (t) => t.ebitda, sign: 1, emphasis: true },
+  { label: "Project Costs (LVG/F&F)", value: (t) => t.projectCosts, sign: -1, indent: true },
+  { label: "EBITDA incl. Project Costs", value: (t) => t.ebitdaIncl, sign: 1, emphasis: true },
   { label: "D&A", value: (t) => t.da, sign: -1, noBudget: true },
-  { label: "EBIT", value: (t) => t.ebitda - t.da, sign: 1, emphasis: true, noBudget: true },
+  { label: "EBIT", value: (t) => t.ebitdaIncl - t.da, sign: 1, emphasis: true, noBudget: true },
 ];
 
 const fmt = (v: number) =>
@@ -161,13 +165,15 @@ export const PnLLiveTable = ({ buCode, buLabel, monthsBack = 12 }: PnLLiveTableP
       )}
 
       <p className="mt-4 text-xs text-muted-foreground">
-        Actuals synced from Qoyod. Costs (COGS/OpEx) appear only where bill
-        line-items carry MoA tags; D&amp;A derives from depreciation journal
-        entries (503xx accounts). Budget rows{" "}
-        <DataSourceBadge source="live" className="mx-0.5" /> come from Supabase
-        v_budget_monthly (BASE scenario approved 2026-07-16, Jul-2026 → Dec-2027);
-        months outside that window and D&amp;A/EBIT lines show "—" — the budget
-        stops at EBITDA.
+        Actuals synced from Qoyod — since migration 018 the COMPLETE P&amp;L
+        (invoices + bills + manual journal entries, incl. payroll and JE-paid
+        costs). Recurring EBITDA = pre Project Costs; the Leveredge/F&amp;F fees
+        (TPC, planned as GA-NRP in the budget) sit on their own line below it.
+        Budget rows <DataSourceBadge source="live" className="mx-0.5" /> come
+        from Supabase v_budget_monthly (BASE scenario approved 2026-07-16,
+        Jul-2026 → Dec-2027); months outside that window and D&amp;A/EBIT lines
+        show "—" — the budget stops at EBITDA. Revenue is gross of credit notes;
+        Draft invoices pending posting are excluded.
       </p>
     </Card>
   );

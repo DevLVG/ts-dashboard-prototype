@@ -213,10 +213,13 @@ export const AnalysisWaterfall = ({
             cursor={{ fill: "hsl(var(--muted))" }}
           />
           <ReferenceLine y={0} stroke="hsl(var(--foreground))" strokeWidth={1.5} />
-          <Bar dataKey="start" stackId="a" fill="transparent" />
+          {/* Animation off: filters/view switches re-feed the data and a
+              re-animating chart blanks out between states. */}
+          <Bar dataKey="start" stackId="a" fill="transparent" isAnimationActive={false} />
           <Bar
             dataKey={(entry: WaterfallItem) => entry.end - entry.start}
             stackId="a"
+            isAnimationActive={false}
             strokeWidth={2}
             radius={[8, 8, 8, 8]}
             onClick={(data: unknown) => {

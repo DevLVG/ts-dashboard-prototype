@@ -4,7 +4,7 @@ import { DashboardNav } from "@/components/dashboard/DashboardNav";
 import { KPICard } from "@/components/dashboard/KPICard";
 import { RevenueTrendChart } from "@/components/dashboard/RevenueTrendChart";
 import { BUPerformanceChart } from "@/components/dashboard/BUPerformanceChart";
-import { PerformanceWaterfall } from "@/components/dashboard/PerformanceWaterfall";
+import { EconomicAnalysis } from "@/components/analysis/EconomicAnalysis";
 import { PLMatrix } from "@/components/dashboard/PLMatrix";
 import { OpExDrawer } from "@/components/dashboard/OpExDrawer";
 import { GrossMarginDrawer } from "@/components/dashboard/GrossMarginDrawer";
@@ -287,50 +287,6 @@ const Index = () => {
   const { metrics: filteredKPIData, comparisonSource } = getFilteredKPIData();
   const filteredBUPerformance = getFilteredBUPerformance();
 
-  const renderFilters = () => (
-    <div className="flex flex-wrap gap-4 mb-6">
-      <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-        <SelectTrigger className="w-56 bg-background font-medium">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent className="max-h-[300px]">
-          {months.map((month) => (
-            <SelectItem key={month.value} value={month.value}>
-              {month.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Select 
-        value={selectedScenario} 
-        onValueChange={(value) => setSelectedScenario(value as typeof selectedScenario)}
-      >
-        <SelectTrigger className="w-56 bg-background font-medium">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {scenarioOptions.map(option => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Select value={selectedBU} onValueChange={setSelectedBU}>
-        <SelectTrigger className="w-56 bg-background font-medium">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {businessUnits.map((bu) => (
-            <SelectItem key={bu.value} value={bu.value}>
-              {bu.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-
   // Get Cash KPI Data for the drawer
   const getCashKPIData = (): KPIMetric[] => {
     const buCode = selectedBU === "All Company" ? undefined : buMap[selectedBU];
@@ -609,16 +565,9 @@ const Index = () => {
     </div>
   );
 
-  const renderPerformance = () => (
-    <div className="space-y-6 animate-fade-in">
-      {renderFilters()}
-      <PerformanceWaterfall 
-        selectedMonth={selectedMonth}
-        selectedScenario={selectedScenario}
-        selectedBU={selectedBU}
-      />
-    </div>
-  );
+  // Analysis page = the FULL economic-analysis tool (R1, ratified 2026-07-20).
+  // It manages its own filters/state; the home Overview stays a summary.
+  const renderPerformance = () => <EconomicAnalysis />;
 
   const renderCash = () => (
     <div className="space-y-6">

@@ -100,6 +100,52 @@ export const usePnlByBu = () =>
     enabled: isSupabaseConfigured,
   });
 
+// ------------------------------------------------- leaf-grain P&L (R1 drill)
+
+/** Full-grain row of pnl_management: month x section x BU x MoA leaf.
+ * `cluster`/`leaf` names are denormalized for revenue (invoice items) but NULL
+ * for costs (bill items) and D&A (JE-derived) — resolve names via moaMaster. */
+export interface PnlLeafRow {
+  period_month: string; // "YYYY-MM-01"
+  section: string; // Revenue | COGS | OPEX-People | OPEX-MS | OPEX-GA | D&A | NON-OP | Other
+  bu: string | null; // null = unallocated (merged as UNALL)
+  cluster: string | null;
+  leaf: string | null;
+  moa_code: string;
+  amount_sar: number; // signed: revenue +, costs -
+  line_count: number;
+}
+
+const LEAF_PAGE_SIZE = 1000; // PostgREST hard-caps responses at 1000 rows
+
+/** Fetch pnl_management at full MoA-leaf grain, paginated (the view holds
+ * ~2k rows and PostgREST silently caps a single response at 1000). */
+export const fetchPnlLeafRows = async (): Promise<PnlLeafRow[]> => {
+  if (!supabase) throw new Error("Supabase is not configured (missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)");
+  const all: PnlLeafRow[] = [];
+  for (let from = 0; ; from += LEAF_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("pnl_management")
+      .select("period_month,section,bu,cluster,leaf,moa_code,amount_sar,line_count")
+      .order("period_month", { ascending: true })
+      .order("moa_code", { ascending: true })
+      .range(from, from + LEAF_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as PnlLeafRow[];
+    all.push(...page);
+    if (page.length < LEAF_PAGE_SIZE) break;
+  }
+  return all;
+};
+
+export const usePnlLeafRows = () =>
+  useQuery({
+    queryKey: ["pnl_management_leaf"],
+    queryFn: fetchPnlLeafRows,
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+  });
+
 // ------------------------------------------------------------------ budget
 
 /** Budget window loaded in Supabase (BASE scenario, approved 2026-07-16).
@@ -159,6 +205,34 @@ export const shiftMonthKey = (key: string, months: number): string => {
   const nm = (total % 12) + 1;
   return `${ny}-${String(nm).padStart(2, "0")}`;
 };
+
+/** Number of months in an inclusive "YYYY-MM" key range. */
+export const rangeLengthMonths = (startKey: string, endKey: string): number => {
+  const [sy, sm] = startKey.split("-").map(Number);
+  const [ey, em] = endKey.split("-").map(Number);
+  return (ey * 12 + em) - (sy * 12 + sm) + 1;
+};
+
+/** Previous Period = the immediately preceding period of the SAME length.
+ * Month -> previous month, quarter -> previous quarter, YTD/LTM -> the
+ * equal-length window ending right before the current one. (ADR-003 / CFO
+ * spec Tab 1: PP is a required comparison alongside Budget and PY.) */
+export const previousPeriodRange = (
+  startKey: string,
+  endKey: string,
+): { startKey: string; endKey: string } => {
+  const len = rangeLengthMonths(startKey, endKey);
+  return { startKey: shiftMonthKey(startKey, -len), endKey: shiftMonthKey(endKey, -len) };
+};
+
+/** Previous Year = same window shifted back 12 months. */
+export const previousYearRange = (
+  startKey: string,
+  endKey: string,
+): { startKey: string; endKey: string } => ({
+  startKey: shiftMonthKey(startKey, -12),
+  endKey: shiftMonthKey(endKey, -12),
+});
 
 export const monthKeyLabel = (key: string): string => {
   const [y, m] = key.split("-").map(Number);

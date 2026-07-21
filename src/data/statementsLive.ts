@@ -8,7 +8,7 @@
 // degrades to { available: false } and silently re-polls every 60s until the
 // view lands — the UI shows a graceful "statement not yet available" state.
 import { useQuery } from "@tanstack/react-query";
-import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
+import { supabase, isSupabaseConfigured, toFriendlyError } from "@/lib/supabaseClient";
 
 // ------------------------------------------------------------- cash flow
 
@@ -34,7 +34,7 @@ export const fetchCashflowMonthly = async (): Promise<CashflowMonthRow[]> => {
     .select("*")
     .order("period_month", { ascending: true })
     .limit(1000);
-  if (error) throw error;
+  if (error) throw toFriendlyError(error);
   return (data ?? []) as CashflowMonthRow[];
 };
 
@@ -63,7 +63,7 @@ export const fetchWorkingCapitalMonthly = async (): Promise<WorkingCapitalMonthR
     .select("*")
     .order("period_month", { ascending: true })
     .limit(1000);
-  if (error) throw error;
+  if (error) throw toFriendlyError(error);
   return (data ?? []) as WorkingCapitalMonthRow[];
 };
 
@@ -128,7 +128,7 @@ export const fetchBalanceSheet = async (): Promise<BalanceSheetResult> => {
       .range(from, from + BS_PAGE_SIZE - 1);
     if (error) {
       if (isMissingViewError(error)) return { available: false, rows: [] };
-      throw error;
+      throw toFriendlyError(error);
     }
     const page = (data ?? []) as BalanceSheetRow[];
     all.push(...page);

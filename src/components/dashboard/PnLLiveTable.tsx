@@ -15,7 +15,9 @@ import {
   getLiveMonthlySeries,
   budgetForMonth,
   isIncompleteMonth,
-  LAST_CLOSED_LABEL,
+  endOfMonthLabel,
+  deriveLastCompleteMonth,
+  LAST_CLOSED_MONTH_FALLBACK,
   type LiveMonthlyPoint,
   type LivePLTotals,
 } from "@/data/liveData";
@@ -25,6 +27,8 @@ interface PnLLiveTableProps {
   buCode?: string;
   buLabel?: string;
   monthsBack?: number;
+  /** Last complete month ("YYYY-MM"), derived by the caller from the live rows. */
+  lastClosedKey?: string;
 }
 
 interface LineDef {
@@ -61,9 +65,10 @@ const fmt = (v: number) =>
     ? "—"
     : new Intl.NumberFormat("en-SA", { maximumFractionDigits: 0 }).format(v);
 
-export const PnLLiveTable = ({ buCode, buLabel, monthsBack = 12 }: PnLLiveTableProps) => {
+export const PnLLiveTable = ({ buCode, buLabel, monthsBack = 12, lastClosedKey }: PnLLiveTableProps) => {
   const { data: rows, isLoading, isError } = usePnlByBu();
   const { data: budgetRows } = useBudgetMonthly();
+  const lastClosed = lastClosedKey ?? deriveLastCompleteMonth(rows) ?? LAST_CLOSED_MONTH_FALLBACK;
   const series: LiveMonthlyPoint[] = getLiveMonthlySeries(rows, buCode, monthsBack);
   // LIVE budget per column month (null = month outside the budget window)
   const budgetByMonth: (LivePLTotals | null)[] = series.map((p) =>
@@ -103,16 +108,16 @@ export const PnLLiveTable = ({ buCode, buLabel, monthsBack = 12 }: PnLLiveTableP
                 <th
                   key={p.monthKey}
                   className={`text-right py-2 px-2 font-semibold whitespace-nowrap ${
-                    isIncompleteMonth(p.monthKey) ? "text-amber-400" : ""
+                    isIncompleteMonth(p.monthKey, lastClosed) ? "text-amber-400" : ""
                   }`}
                   title={
-                    isIncompleteMonth(p.monthKey)
-                      ? `Incomplete month — revenue synced, costs not yet posted. Data complete through ${LAST_CLOSED_LABEL}.`
+                    isIncompleteMonth(p.monthKey, lastClosed)
+                      ? `Incomplete month — revenue synced, costs not yet posted. Data complete through ${endOfMonthLabel(lastClosed)}.`
                       : undefined
                   }
                 >
                   {p.month}
-                  {isIncompleteMonth(p.monthKey) && <span aria-hidden> *</span>}
+                  {isIncompleteMonth(p.monthKey, lastClosed) && <span aria-hidden> *</span>}
                 </th>
               ))}
             </tr>
@@ -185,10 +190,10 @@ export const PnLLiveTable = ({ buCode, buLabel, monthsBack = 12 }: PnLLiveTableP
         Budget rows <DataSourceBadge source="live" className="mx-0.5" /> come
         from Supabase v_budget_monthly (BASE scenario approved 2026-07-16,
         Jul-2026 → Dec-2027); months outside that window and D&amp;A/EBIT lines
-        show "—" — the budget stops at EBITDA. Revenue is gross of credit notes;
-        Draft invoices pending posting are excluded. Months marked * are
-        incomplete (revenue synced, costs not yet posted) — data is complete
-        through {LAST_CLOSED_LABEL}.
+        show "—" — the budget stops at EBITDA. Credit-note treatment follows
+        the live views; Draft invoices pending posting are excluded. Months
+        marked * are incomplete (revenue synced, costs not yet posted) — data
+        is complete through {endOfMonthLabel(lastClosed)}.
       </p>
     </Card>
   );

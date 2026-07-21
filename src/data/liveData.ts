@@ -19,7 +19,7 @@
 // (G3 presentation). Data starts 2022-01 (G2): PY comparatives for 2022 have
 // no live source and honestly show as absent.
 import { useQuery } from "@tanstack/react-query";
-import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
+import { supabase, isSupabaseConfigured, toFriendlyError } from "@/lib/supabaseClient";
 
 export interface PnlByBuRow {
   period_month: string; // "YYYY-MM-01"
@@ -104,8 +104,8 @@ export const fetchPnlByBu = async (): Promise<PnlByBuRow[]> => {
     supabase.from("pnl_by_bu").select("*").order("period_month", { ascending: true }).limit(5000),
     supabase.from("pnl_management").select("period_month,section,amount_sar").is("bu", null).limit(5000),
   ]);
-  if (byBu.error) throw byBu.error;
-  if (unalloc.error) throw unalloc.error;
+  if (byBu.error) throw toFriendlyError(byBu.error);
+  if (unalloc.error) throw toFriendlyError(unalloc.error);
   return [
     ...((byBu.data ?? []) as PnlByBuRow[]),
     ...sliceToRows((unalloc.data ?? []) as PnlManagementSlice[]),
@@ -153,7 +153,7 @@ export const fetchPnlLeafRows = async (): Promise<PnlLeafRow[]> => {
       .order("period_month", { ascending: true })
       .order("moa_code", { ascending: true })
       .range(from, from + LEAF_PAGE_SIZE - 1);
-    if (error) throw error;
+    if (error) throw toFriendlyError(error);
     const page = (data ?? []) as PnlLeafRow[];
     all.push(...page);
     if (page.length < LEAF_PAGE_SIZE) break;
@@ -201,7 +201,7 @@ export const fetchBudgetMonthly = async (): Promise<BudgetMonthlyRow[]> => {
     .neq("section", "CASHFLOW")
     .order("period_month", { ascending: true })
     .limit(5000);
-  if (error) throw error;
+  if (error) throw toFriendlyError(error);
   return (data ?? []) as BudgetMonthlyRow[];
 };
 
@@ -402,15 +402,19 @@ export interface LiveMonthlyPoint {
   previousYear: LivePLTotals;
 }
 
-/** Last `count` months (ending at the latest live period), actual + PY, optional BU filter. */
+/** Last `count` months (ending at `endKey` if given, else the latest live
+ * period), actual + PY, optional BU filter. Charts pass the last COMPLETE
+ * month as `endKey` so a partial in-progress month (revenue synced, no costs)
+ * never plots as a fake collapse. */
 export const getLiveMonthlySeries = (
   rows: PnlByBuRow[] | undefined,
   bu?: string,
   count = 12,
+  endKey?: string,
 ): LiveMonthlyPoint[] => {
   const periods = listLivePeriods(rows);
   if (periods.length === 0) return [];
-  const last = periods[periods.length - 1];
+  const last = endKey && periods.includes(endKey) ? endKey : periods[periods.length - 1];
   const keys: string[] = [];
   for (let i = count - 1; i >= 0; i--) keys.push(shiftMonthKey(last, -i));
   return keys.map((k) => ({
@@ -427,16 +431,51 @@ export const LIVE_CURRENT_MONTH = monthKey(LIVE_TODAY);
 
 // ------------------------------------------------------------ data freshness
 
-/** Last month with a COMPLETE close (revenue AND costs posted in Qoyod).
- * Update at every month-end close. Months after this key may show synced
- * revenue with no costs yet — the UI flags them as incomplete. */
-export const LAST_CLOSED_MONTH = "2026-06";
-export const LAST_CLOSED_LABEL = "30 June 2026";
+/** Fallback last-closed month, used ONLY until the live rows load (the real
+ * value is DERIVED from the data — see deriveLastCompleteMonth). */
+export const LAST_CLOSED_MONTH_FALLBACK = "2026-06";
 
-/** True for months after the last complete close (e.g. July 2026: revenue
- * synced, costs not yet posted — figures are partial, not final). */
-export const isIncompleteMonth = (key: string): boolean => key > LAST_CLOSED_MONTH;
+/** Latest month whose live rows carry POSTED COSTS (cogs / opex / D&A /
+ * project costs). Months after it may show synced revenue with no costs yet
+ * (e.g. the current month mid-close) — the UI must treat them as partial and
+ * never default headline KPIs onto them. Derived from the data on every
+ * fetch, so it rolls forward automatically at each month-end close. */
+export const deriveLastCompleteMonth = (rows: PnlByBuRow[] | undefined): string | null => {
+  if (!rows || rows.length === 0) return null;
+  let last: string | null = null;
+  for (const r of rows) {
+    const costs =
+      n(r.cogs) + n(r.opex_people) + n(r.opex_ms) + n(r.opex_ga) +
+      n(r.da) + n(r.project_costs) + n(r.unmapped);
+    if (costs !== 0) {
+      const k = monthKey(r.period_month);
+      if (last === null || k > last) last = k;
+    }
+  }
+  return last;
+};
+
+/** "30 June 2026"-style label for the end of a "YYYY-MM" month. */
+export const endOfMonthLabel = (key: string): string => {
+  const [y, m] = key.split("-").map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  return `${lastDay} ${monthNames[m - 1]} ${y}`;
+};
+
+/** True for months after the last complete close (revenue synced, costs not
+ * yet posted — figures are partial, not final). */
+export const isIncompleteMonth = (
+  key: string,
+  lastClosed: string = LAST_CLOSED_MONTH_FALLBACK,
+): boolean => key > lastClosed;
 
 /** True when an inclusive month-key range touches any incomplete month. */
-export const rangeHasIncompleteMonths = (_startKey: string, endKey: string): boolean =>
-  isIncompleteMonth(endKey);
+export const rangeHasIncompleteMonths = (
+  _startKey: string,
+  endKey: string,
+  lastClosed: string = LAST_CLOSED_MONTH_FALLBACK,
+): boolean => isIncompleteMonth(endKey, lastClosed);

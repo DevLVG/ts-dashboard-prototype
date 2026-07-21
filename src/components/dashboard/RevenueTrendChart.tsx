@@ -23,12 +23,15 @@ interface RevenueTrendChartProps {
   scenario?: 'Budget_Base' | 'PY';
   /** Live BU code (LIV/HSE/...) or "All Company" */
   selectedBU?: string;
+  /** Last complete month ("YYYY-MM") — the series ends here so the partial
+   * in-progress month (revenue synced, no costs) never plots as a collapse. */
+  endMonthKey?: string;
 }
 
 type MetricType = "revenue" | "grossMargin" | "opex" | "ebitda";
 type PeriodType = "6months" | "quarterly" | "yearly";
 
-export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All Company" }: RevenueTrendChartProps) => {
+export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All Company", endMonthKey }: RevenueTrendChartProps) => {
   const [selectedMetric, setSelectedMetric] = useState<MetricType>("revenue");
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>("yearly");
   // LIVE monthly series (Supabase pnl_by_bu) + LIVE budget (v_budget_monthly,
@@ -57,7 +60,7 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
   const getData = (): LiveTrendPoint[] => {
     const buCode = selectedBU !== "All Company" ? selectedBU : undefined;
     const count = selectedPeriod === "quarterly" ? 3 : selectedPeriod === "6months" ? 6 : 12;
-    const series = getLiveMonthlySeries(liveRows, buCode, count);
+    const series = getLiveMonthlySeries(liveRows, buCode, count, endMonthKey);
 
     const budgetOf = (monthKey: string): number | null => {
       const b = budgetForMonth(budgetRows, monthKey, buCode);
@@ -170,9 +173,9 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="6months">6 Months</SelectItem>
-              <SelectItem value="quarterly">Quarterly</SelectItem>
-              <SelectItem value="yearly">Yearly</SelectItem>
+              <SelectItem value="quarterly">Last 3 months</SelectItem>
+              <SelectItem value="6months">Last 6 months</SelectItem>
+              <SelectItem value="yearly">Last 12 months</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -208,7 +211,10 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
           />
           <Tooltip content={<CustomTooltip />} />
           <Legend className="chart-legend" />
-          {/* Area shading between the two lines */}
+          {/* Area shading between the two lines. Animation is OFF on every
+              series: recharts replays its entry animation on remount/resize/
+              tab switches and the series blanks out mid-animation (same bug
+              class previously fixed on the analysis waterfall). */}
           <Area
             type="monotone"
             dataKey="baseArea"
@@ -216,6 +222,7 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
             fill="transparent"
             stroke="none"
             legendType="none"
+            isAnimationActive={false}
           />
           <Area
             type="monotone"
@@ -225,6 +232,7 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
             stroke="none"
             fillOpacity={1}
             legendType="none"
+            isAnimationActive={false}
           />
           <Area
             type="monotone"
@@ -234,14 +242,19 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
             stroke="none"
             fillOpacity={1}
             legendType="none"
+            isAnimationActive={false}
           />
           <Line
             type="monotone"
             dataKey="budget"
-            stroke="hsl(var(--muted-foreground) / 0.6)"
-            strokeWidth={3}
-            strokeDasharray="5 5"
+            // Full-opacity muted ink: the 0.6-alpha stroke used before sat
+            // below 3:1 contrast on the dark card surface (dataviz check).
+            // Identity is double-encoded: color AND dash pattern.
+            stroke="hsl(var(--muted-foreground))"
+            strokeWidth={2.5}
+            strokeDasharray="6 4"
             name={comparisonLabel}
+            isAnimationActive={false}
             // Small dot so isolated budget months (e.g. only Jul '26 in a
             // window that starts before the budget) remain visible.
             dot={{ fill: "hsl(var(--muted-foreground))", r: 3, strokeWidth: 0 }}
@@ -252,6 +265,7 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
             stroke="hsl(var(--gold))"
             strokeWidth={4}
             name="Actual"
+            isAnimationActive={false}
             dot={{ fill: "hsl(var(--gold))", r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }}
             activeDot={{ r: 7, strokeWidth: 3 }}
           />

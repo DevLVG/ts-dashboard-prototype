@@ -139,10 +139,12 @@ export const AnalysisWaterfall = ({
         break;
       }
     }
-    const isWarning = base === "#ffc107";
+    // Legible tints: the old 0.10/0.15 fills composited to ~1.2:1 contrast on
+    // the dark surface (invisible). Fill 0.40 + full-opacity stroke keeps the
+    // ghost-bar grammar while passing the 3:1 mark-contrast check.
     return {
-      fill: hexToRgba(base, isWarning ? 0.15 : 0.1),
-      stroke: hexToRgba(base, isWarning ? 0.4 : 0.3),
+      fill: hexToRgba(base, 0.4),
+      stroke: base,
     };
   };
 

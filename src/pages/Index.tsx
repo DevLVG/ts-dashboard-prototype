@@ -24,8 +24,9 @@ import {
   monthKeyLabel,
   LIVE_BU_LABELS,
   LIVE_CURRENT_MONTH,
-  LIVE_TODAY,
   rangeHasIncompleteMonths,
+  deriveLastCompleteMonth,
+  LAST_CLOSED_MONTH_FALLBACK,
   type LivePLTotals,
 } from "@/data/liveData";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
@@ -52,10 +53,14 @@ const Index = () => {
   
   const [currentPage, setCurrentPage] = useState<PageType>(getCurrentPageFromPath());
   // LIVE P&L rows from Supabase (pnl_by_bu) — single cached fetch
-  const { data: liveRows, isLoading: liveLoading, isError: liveError } = usePnlByBu();
+  const { data: liveRows, isLoading: liveLoading, isError: liveError, error: liveErrorObj } = usePnlByBu();
   // LIVE budget rows (v_budget_monthly, BASE scenario, Jul-2026..Dec-2027)
   const { data: budgetRows } = useBudgetMonthly();
-  const [selectedMonth, setSelectedMonth] = useState("MTD");
+  // Default period: AUTO = the last month with a COMPLETE close (derived from
+  // the data). The current in-progress month (revenue synced, costs not yet
+  // posted) is reachable only via an explicit "current month (partial)"
+  // option — a CFO must never land on a cost-less month by default.
+  const [selectedMonth, setSelectedMonth] = useState("AUTO");
   const [selectedScenario, setSelectedScenario] = useState<'Budget_Base' | 'PY'>("Budget_Base");
   const [selectedBU, setSelectedBU] = useState("All Company");
   const [currentView, setCurrentView] = useState<'economics' | 'cashflow' | 'balancesheet'>('economics');
@@ -67,21 +72,28 @@ const Index = () => {
 
   // Period selector — built from the REAL periods available in the live view
   // (falls back to the current month while loading). Values are "YYYY-MM" keys
-  // or the aggregate keywords MTD/QTD/YTD/LTM.
+  // or the aggregate keywords QTD/YTD/LTM (anchored on the last COMPLETE
+  // month, so aggregates never mix in the cost-less partial month).
   const livePeriods = listLivePeriods(liveRows);
   const lastLivePeriod = livePeriods.length > 0 ? livePeriods[livePeriods.length - 1] : LIVE_CURRENT_MONTH;
+  const lastComplete = deriveLastCompleteMonth(liveRows) ?? LAST_CLOSED_MONTH_FALLBACK;
+  const hasPartialMonth = lastLivePeriod > lastComplete;
+  // Resolved period value ("AUTO" -> last complete month)
+  const effectiveMonth = selectedMonth === "AUTO" ? lastComplete : selectedMonth;
   const monthOptions = (() => {
     const keys: string[] = [];
-    for (let i = 0; i < 14; i++) keys.push(shiftMonthKey(lastLivePeriod, -i));
+    for (let i = 0; i < 14; i++) keys.push(shiftMonthKey(lastComplete, -i));
     return keys
       .filter((k) => livePeriods.length === 0 || livePeriods.includes(k))
       .map((k) => ({ value: k, label: monthKeyLabel(k) }));
   })();
   const months = [
-    { value: "MTD", label: "MTD (Month to Date)" },
-    { value: "QTD", label: "QTD (Quarter to Date)" },
-    { value: "YTD", label: "YTD (Year to Date)" },
-    { value: "LTM", label: "LTM (12m Rolling)" },
+    ...(hasPartialMonth
+      ? [{ value: lastLivePeriod, label: `⚠ ${monthKeyLabel(lastLivePeriod)} — current month (partial)` }]
+      : []),
+    { value: "QTD", label: `QTD (quarter to ${monthKeyLabel(lastComplete)})` },
+    { value: "YTD", label: `YTD (Jan–${monthKeyLabel(lastComplete)})` },
+    { value: "LTM", label: `LTM (12m to ${monthKeyLabel(lastComplete)})` },
     ...monthOptions,
   ];
 
@@ -101,9 +113,10 @@ const Index = () => {
     { value: "PY", label: "Actual vs PY" },
   ];
 
-  // Calculate the selected period as an inclusive month-key range, anchored on
-  // the REAL current date (live data is monthly-grained). Also exposes ISO
-  // dates for the legacy mock-budget lookup.
+  // Calculate the selected period as an inclusive month-key range. Aggregates
+  // (QTD/YTD/LTM) are anchored on the LAST COMPLETE month — never on the
+  // partial in-progress month — so headline KPIs always describe closed
+  // figures. Also exposes ISO dates for downstream consumers.
   const getPeriodRange = (): { startKey: string; endKey: string; startDate: string; endDate: string } => {
     const toDates = (startKey: string, endKey: string) => {
       const [ey, em] = endKey.split("-").map(Number);
@@ -116,24 +129,20 @@ const Index = () => {
       };
     };
 
-    const cur = LIVE_CURRENT_MONTH; // "YYYY-MM" of today
-    const [curYear, curMonth] = cur.split("-").map(Number);
+    const anchor = lastComplete; // "YYYY-MM" of the last complete close
+    const [anchorYear, anchorMonth] = anchor.split("-").map(Number);
 
-    if (selectedMonth === "MTD") {
-      return { startKey: cur, endKey: cur, startDate: `${cur}-01`, endDate: LIVE_TODAY };
-    } else if (selectedMonth === "QTD") {
-      const qStartMonth = Math.floor((curMonth - 1) / 3) * 3 + 1;
-      const startKey = `${curYear}-${String(qStartMonth).padStart(2, "0")}`;
-      return { startKey, endKey: cur, startDate: `${startKey}-01`, endDate: LIVE_TODAY };
-    } else if (selectedMonth === "YTD") {
-      const startKey = `${curYear}-01`;
-      return { startKey, endKey: cur, startDate: `${startKey}-01`, endDate: LIVE_TODAY };
-    } else if (selectedMonth === "LTM") {
-      const startKey = shiftMonthKey(cur, -11);
-      return { startKey, endKey: cur, startDate: `${startKey}-01`, endDate: LIVE_TODAY };
+    if (effectiveMonth === "QTD") {
+      const qStartMonth = Math.floor((anchorMonth - 1) / 3) * 3 + 1;
+      const startKey = `${anchorYear}-${String(qStartMonth).padStart(2, "0")}`;
+      return toDates(startKey, anchor);
+    } else if (effectiveMonth === "YTD") {
+      return toDates(`${anchorYear}-01`, anchor);
+    } else if (effectiveMonth === "LTM") {
+      return toDates(shiftMonthKey(anchor, -11), anchor);
     }
-    // Specific month key "YYYY-MM"
-    return toDates(selectedMonth, selectedMonth);
+    // Specific month key "YYYY-MM" (incl. the explicit partial current month)
+    return toDates(effectiveMonth, effectiveMonth);
   };
 
   // Selected live BU code (undefined = consolidated)
@@ -261,15 +270,16 @@ const Index = () => {
           warning appears when the selected window touches July (revenue
           synced, costs not yet posted). */}
       <DataFreshnessNote
+        lastClosedKey={lastComplete}
         showIncompleteWarning={(() => {
           const { startKey, endKey } = getPeriodRange();
-          return rangeHasIncompleteMonths(startKey, endKey);
+          return rangeHasIncompleteMonths(startKey, endKey, lastComplete);
         })()}
       />
 
       {/* Filter Controls */}
       <div className="flex gap-4">
-        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+        <Select value={effectiveMonth} onValueChange={setSelectedMonth}>
           <SelectTrigger className="w-56 bg-background font-medium">
             <SelectValue />
           </SelectTrigger>
@@ -318,7 +328,9 @@ const Index = () => {
       )}
       {isSupabaseConfigured && liveError && (
         <div className="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-400">
-          Could not load live P&amp;L data from Supabase — figures show as zero.
+          {(liveErrorObj as Error | null)?.name === "PermissionDeniedError"
+            ? (liveErrorObj as Error).message
+            : "Could not load live P&L data from Supabase — figures show as zero."}
         </div>
       )}
       {isSupabaseConfigured && liveLoading && (
@@ -331,7 +343,11 @@ const Index = () => {
           <KPICard
             key={index}
             metric={metric}
-            periodLabel={selectedMonth}
+            periodLabel={
+              ["QTD", "YTD", "LTM"].includes(effectiveMonth)
+                ? effectiveMonth
+                : monthKeyLabel(effectiveMonth)
+            }
             scenario={selectedScenario}
             comparisonSource={comparisonSource}
             onClick={() => {
@@ -349,10 +365,12 @@ const Index = () => {
       <PnLLiveTable
         buCode={selectedBUCode}
         buLabel={selectedBUCode ? LIVE_BU_LABELS[selectedBUCode] ?? selectedBUCode : undefined}
+        lastClosedKey={lastComplete}
       />
 
-      {/* Charts */}
-      <RevenueTrendChart scenario={selectedScenario} selectedBU={selectedBU} />
+      {/* Charts — series end at the last COMPLETE month (a partial month
+          would plot as a fake collapse in every cost metric) */}
+      <RevenueTrendChart scenario={selectedScenario} selectedBU={selectedBU} endMonthKey={lastComplete} />
       {selectedBU === "All Company" && (
         <div className="space-y-2">
           <BUPerformanceChart data={filteredBUPerformance} onClick={() => setCurrentPage("performance")} />

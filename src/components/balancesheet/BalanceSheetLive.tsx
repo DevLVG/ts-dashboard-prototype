@@ -15,21 +15,22 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Info, Scale, HardHat } from "lucide-react";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import { DataFreshnessNote } from "@/components/dashboard/DataFreshnessNote";
-import { monthKey, monthKeyLabel, LAST_CLOSED_MONTH, isIncompleteMonth } from "@/data/liveData";
+import {
+  monthKey,
+  monthKeyLabel,
+  LAST_CLOSED_MONTH_FALLBACK,
+  isIncompleteMonth,
+  endOfMonthLabel,
+  usePnlByBu,
+  deriveLastCompleteMonth,
+} from "@/data/liveData";
 import { useBalanceSheet, type BalanceSheetRow } from "@/data/statementsLive";
 
-const fmt = (v: number) =>
-  new Intl.NumberFormat("en-SA", { maximumFractionDigits: 0 }).format(v);
-
-/** Last day of a "YYYY-MM" key, e.g. "2026-06" -> "30 June 2026". */
-const endOfMonthLabel = (key: string): string => {
-  const [y, m] = key.split("-").map(Number);
-  const lastDay = new Date(y, m, 0).getDate();
-  const monthNames = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-  ];
-  return `${lastDay} ${monthNames[m - 1]} ${y}`;
+// Negative-zero guard: rounding a tiny negative (e.g. -0.4) must render "0",
+// never "-0" (CFO-visible cosmetic bug on adjustment lines).
+const fmt = (v: number) => {
+  const safe = Math.abs(v) < 0.5 ? 0 : v;
+  return new Intl.NumberFormat("en-SA", { maximumFractionDigits: 0 }).format(safe);
 };
 
 interface SubsectionGroup {
@@ -124,7 +125,10 @@ const SectionCard = ({
 );
 
 export const BalanceSheetLive = () => {
-  const { data, isLoading, isError } = useBalanceSheet();
+  const { data, isLoading, isError, error } = useBalanceSheet();
+  // P&L rows only to DERIVE the last complete month (query is shared/cached)
+  const { data: pnlRows } = usePnlByBu();
+  const lastClosed = deriveLastCompleteMonth(pnlRows) ?? LAST_CLOSED_MONTH_FALLBACK;
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
   const months = useMemo(() => {
@@ -135,9 +139,9 @@ export const BalanceSheetLive = () => {
   // Default month: latest CLOSED month present (fall back to latest month).
   const defaultMonth = useMemo(() => {
     if (months.length === 0) return null;
-    const closed = months.filter((m) => m <= LAST_CLOSED_MONTH);
+    const closed = months.filter((m) => m <= lastClosed);
     return closed.length > 0 ? closed[closed.length - 1] : months[months.length - 1];
-  }, [months]);
+  }, [months, lastClosed]);
 
   const activeMonth = selectedMonth && months.includes(selectedMonth) ? selectedMonth : defaultMonth;
 
@@ -179,7 +183,10 @@ export const BalanceSheetLive = () => {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <DataFreshnessNote showIncompleteWarning={activeMonth ? isIncompleteMonth(activeMonth) : false} />
+        <DataFreshnessNote
+          lastClosedKey={lastClosed}
+          showIncompleteWarning={activeMonth ? isIncompleteMonth(activeMonth, lastClosed) : false}
+        />
         {months.length > 0 && (
           <Select value={activeMonth ?? undefined} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-44 bg-background font-medium">
@@ -188,7 +195,7 @@ export const BalanceSheetLive = () => {
             <SelectContent className="max-h-[300px]">
               {[...months].reverse().map((m) => (
                 <SelectItem key={m} value={m}>
-                  {monthKeyLabel(m)}
+                  {monthKeyLabel(m)}{isIncompleteMonth(m, lastClosed) ? " — partial" : ""}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -213,7 +220,9 @@ export const BalanceSheetLive = () => {
         {isLoading && <p className="text-sm text-muted-foreground">Loading balance sheet…</p>}
         {isError && (
           <p className="text-sm text-destructive">
-            Could not load the balance sheet from Supabase.
+            {(error as Error | null)?.name === "PermissionDeniedError"
+              ? (error as Error).message
+              : "Could not load the balance sheet from Supabase."}
           </p>
         )}
 

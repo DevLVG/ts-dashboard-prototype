@@ -19,13 +19,17 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
     const metricData = bu[selectedMetric];
     const actual = metricData?.actual || 0;
     const budget = metricData?.budget || 0;
-    const variance = budget !== 0 ? ((actual - budget) / Math.abs(budget)) * 100 : 0;
-    
+    const hasComp = budget !== 0;
+    // variance is null (not 0) when no comparison exists — the label stays
+    // empty and the bar wears the neutral gold, never a fake "0.0% = good".
+    const variance = hasComp ? ((actual - budget) / Math.abs(budget)) * 100 : null;
+
     return {
       name: bu.name,
       actual,
       budget,
       variance,
+      hasComp,
     };
   });
 
@@ -59,31 +63,25 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
     }
   };
 
-  // Get bar fill color with transparency (matching waterfall style)
-  const getBarFill = (variance: number) => {
-    const baseColor = getVarianceHexColor(variance, getMetricLabel());
-    const hexToRgba = (hex: string, opacity: number) => {
-      const r = parseInt(hex.slice(1, 3), 16);
-      const g = parseInt(hex.slice(3, 5), 16);
-      const b = parseInt(hex.slice(5, 7), 16);
-      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-    };
-    const opacity = baseColor === "#ffc107" ? 0.15 : 0.10;
-    return hexToRgba(baseColor, opacity);
+  // Bar colours — variance-status tint + FULL-opacity stroke. The previous
+  // 0.10/0.15-alpha fills composited to ~1.2:1 contrast on the dark card
+  // surface (invisible bars — founder-reported defect); the validated status
+  // hues pass 3:1 at full opacity, so the stroke carries the shape and the
+  // fill is raised to a clearly readable tint.
+  const hexToRgba = (hex: string, opacity: number) => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
   };
 
-  // Get bar stroke color (matching waterfall style)
-  const getBarStroke = (variance: number) => {
-    const baseColor = getVarianceHexColor(variance, getMetricLabel());
-    const hexToRgba = (hex: string, opacity: number) => {
-      const r = parseInt(hex.slice(1, 3), 16);
-      const g = parseInt(hex.slice(3, 5), 16);
-      const b = parseInt(hex.slice(5, 7), 16);
-      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-    };
-    const strokeOpacity = baseColor === "#ffc107" ? 0.40 : 0.30;
-    return hexToRgba(baseColor, strokeOpacity);
-  };
+  const NEUTRAL_GOLD = "#c9b37e"; // no-comparison bars: neutral house accent
+
+  const getBarFill = (variance: number | null) =>
+    hexToRgba(variance === null ? NEUTRAL_GOLD : getVarianceHexColor(variance, getMetricLabel()), 0.45);
+
+  const getBarStroke = (variance: number | null) =>
+    variance === null ? NEUTRAL_GOLD : getVarianceHexColor(variance, getMetricLabel());
 
   return (
     <Card className="dashboard-card group">
@@ -138,6 +136,7 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
                 const budgetEntry = payload.find((p: any) => p.dataKey === "budget");
                 const actual = typeof actualEntry?.value === 'number' ? actualEntry.value : 0;
                 const budget = typeof budgetEntry?.value === 'number' ? budgetEntry.value : 0;
+                const hasComp = Boolean((payload[0] as any)?.payload?.hasComp);
                 const delta = actual - budget;
 
                 return (
@@ -152,20 +151,24 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
                         }).format(actual)}
                       </p>
                       <p className="chart-tooltip-budget">
-                        Budget: {new Intl.NumberFormat("en-SA", {
-                          style: "currency",
-                          currency: "SAR",
-                          minimumFractionDigits: 0,
-                        }).format(budget)}
+                        Budget: {hasComp
+                          ? new Intl.NumberFormat("en-SA", {
+                              style: "currency",
+                              currency: "SAR",
+                              minimumFractionDigits: 0,
+                            }).format(budget)
+                          : "n/a (no budget for this period)"}
                       </p>
-                      <p className={delta >= 0 ? "chart-tooltip-delta-positive" : "chart-tooltip-delta-negative"}>
-                        Delta: {new Intl.NumberFormat("en-SA", {
-                          style: "currency",
-                          currency: "SAR",
-                          minimumFractionDigits: 0,
-                          signDisplay: "always",
-                        }).format(delta)}
-                      </p>
+                      {hasComp && (
+                        <p className={delta >= 0 ? "chart-tooltip-delta-positive" : "chart-tooltip-delta-negative"}>
+                          Delta: {new Intl.NumberFormat("en-SA", {
+                            style: "currency",
+                            currency: "SAR",
+                            minimumFractionDigits: 0,
+                            signDisplay: "always",
+                          }).format(delta)}
+                        </p>
+                      )}
                       <p className="chart-tooltip-hint">Click to view BU detail</p>
                     </div>
                   </div>
@@ -175,44 +178,51 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
             }}
             cursor={{ fill: 'hsl(var(--gold) / 0.1)' }}
           />
-          <Legend 
-            content={({ payload }) => {
+          <Legend
+            content={() => {
+              // Honest legend: Budget is the neutral gray bar; the Actual bar
+              // is coloured by its variance status, so the legend spells the
+              // three states out (never colour alone — labels + tooltip too).
               return (
-                <ul className="flex items-center justify-center gap-6 mt-4">
+                <ul className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1 mt-4">
                   <li className="flex items-center gap-2">
-                    <div 
-                      className="w-4 h-4 rounded" 
-                      style={{ backgroundColor: '#6c757d', opacity: 0.7 }}
-                    />
+                    <div className="w-4 h-4 rounded" style={{ backgroundColor: "#6c757d", opacity: 0.85 }} />
                     <span className="text-sm text-muted-foreground">Budget</span>
                   </li>
                   <li className="flex items-center gap-2">
-                    <div 
-                      className="w-4 h-4 rounded border-2" 
-                      style={{ 
-                        backgroundColor: 'rgba(0, 0, 0, 0.15)',
-                        borderColor: 'rgba(0, 0, 0, 0.5)'
-                      }}
-                    />
-                    <span className="text-sm text-muted-foreground">Actual</span>
+                    <span className="text-sm text-muted-foreground">Actual, by variance:</span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded-sm border" style={{ backgroundColor: "rgba(34,211,238,0.45)", borderColor: "#22d3ee" }} />
+                      <span className="text-xs text-muted-foreground">on/above</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded-sm border" style={{ backgroundColor: "rgba(255,193,7,0.45)", borderColor: "#ffc107" }} />
+                      <span className="text-xs text-muted-foreground">−5–0%</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded-sm border" style={{ backgroundColor: "rgba(220,53,69,0.45)", borderColor: "#dc3545" }} />
+                      <span className="text-xs text-muted-foreground">below</span>
+                    </span>
                   </li>
                 </ul>
               );
             }}
           />
-          <Bar 
-            dataKey="budget" 
-            fill="#6c757d" 
-            name="Budget" 
+          <Bar
+            dataKey="budget"
+            fill="#6c757d"
+            name="Budget"
             radius={[0, 6, 6, 0]}
-            opacity={0.7}
+            opacity={0.85}
+            isAnimationActive={false}
           />
-          <Bar 
-            dataKey="actual" 
-            name="Actual" 
+          <Bar
+            dataKey="actual"
+            name="Actual"
             radius={[0, 6, 6, 0]}
             strokeWidth={2}
             className="cursor-pointer"
+            isAnimationActive={false}
           >
             {chartData.map((entry, index) => (
               <Cell 
@@ -222,10 +232,10 @@ export const BUPerformanceChart = ({ data, onClick }: BUPerformanceChartProps) =
                 className="transition-all hover:brightness-110"
               />
             ))}
-            <LabelList 
-              dataKey="variance" 
+            <LabelList
+              dataKey="variance"
               position="right"
-              formatter={(value: number) => `${value.toFixed(1)}%`}
+              formatter={(value: number | null) => (value === null || value === undefined ? "" : `${value.toFixed(1)}%`)}
               fill="#ffffff"
               style={{ 
                 fontWeight: 600, 

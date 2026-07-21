@@ -26,3 +26,28 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
       },
     })
   : null;
+
+// ---------------------------------------------------- graceful error mapping
+
+/** PostgREST "permission denied" (SQLSTATE 42501) — happens when the request
+ * reaches the views without an `authenticated` JWT (expired/broken session):
+ * the views are readable by `authenticated` only since 2026-07-21. */
+export const isPermissionDeniedError = (err: unknown): boolean => {
+  const e = err as { code?: string; message?: string } | null;
+  if (!e) return false;
+  return e.code === "42501" || (e.message ?? "").toLowerCase().includes("permission denied");
+};
+
+export const SESSION_REQUIRED_MESSAGE =
+  "Your session no longer has access to the live financial data — please sign out and sign in again.";
+
+/** Normalise a PostgREST error into a user-presentable Error. Permission
+ * denials become a clean "session required" message instead of raw SQL text. */
+export const toFriendlyError = (err: unknown): Error => {
+  if (isPermissionDeniedError(err)) {
+    const e = new Error(SESSION_REQUIRED_MESSAGE);
+    e.name = "PermissionDeniedError";
+    return e;
+  }
+  return err instanceof Error ? err : new Error(String((err as { message?: string })?.message ?? err));
+};

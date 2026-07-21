@@ -28,6 +28,8 @@ import {
   LIVE_CURRENT_MONTH,
   UNALLOCATED_BU,
   rangeHasIncompleteMonths,
+  LAST_CLOSED_MONTH_FALLBACK,
+  type PnlLeafRow,
 } from "@/data/liveData";
 import {
   buildAnalysisLines,
@@ -79,20 +81,38 @@ const rangeLabel = (startKey: string, endKey: string): string =>
     ? monthKeyLabel(startKey)
     : `${monthKeyLabel(startKey)}–${monthKeyLabel(endKey)}`;
 
-/** Resolve the selected period value into an inclusive month-key range.
- * Anchored on the REAL current month — never on a hardcoded date. */
-const resolvePeriod = (sel: string): PeriodRange => {
-  const cur = LIVE_CURRENT_MONTH;
-  const [curYear] = cur.split("-").map(Number);
-  if (sel === "MTD") return { startKey: cur, endKey: cur, label: `${monthKeyLabel(cur)} (MTD)` };
-  if (sel === "QTD") {
-    const { q, y, startKey } = quarterOf(cur);
-    return { startKey, endKey: cur, label: `Q${q} ${y} (QTD)` };
+/** Latest month whose LEAF rows carry posted costs (any non-revenue section
+ * with a nonzero amount) — the analysis twin of deriveLastCompleteMonth. */
+const deriveLastCompleteFromLeaves = (rows: PnlLeafRow[] | undefined): string | null => {
+  if (!rows || rows.length === 0) return null;
+  let last: string | null = null;
+  for (const r of rows) {
+    if (r.section === "Revenue" || r.amount_sar === 0) continue;
+    const k = monthKey(r.period_month);
+    if (last === null || k > last) last = k;
   }
-  if (sel === "YTD") return { startKey: `${curYear}-01`, endKey: cur, label: `YTD ${curYear}` };
+  return last;
+};
+
+/** Resolve the selected period value into an inclusive month-key range.
+ * Aggregates (QTD/YTD/LTM) are ANCHORED ON THE LAST COMPLETE MONTH — never on
+ * the partial in-progress month (a cost-less month would zero every cost KPI).
+ * The partial current month stays reachable via the explicit CURRENT option. */
+const resolvePeriod = (sel: string, lastComplete: string): PeriodRange => {
+  const anchor = lastComplete;
+  const [anchorYear] = anchor.split("-").map(Number);
+  if (sel === "CURRENT") {
+    const cur = LIVE_CURRENT_MONTH;
+    return { startKey: cur, endKey: cur, label: `${monthKeyLabel(cur)} (partial)` };
+  }
+  if (sel === "QTD") {
+    const { q, y, startKey } = quarterOf(anchor);
+    return { startKey, endKey: anchor, label: `Q${q} ${y} (to ${monthKeyLabel(anchor)})` };
+  }
+  if (sel === "YTD") return { startKey: `${anchorYear}-01`, endKey: anchor, label: `YTD ${anchorYear} (to ${monthKeyLabel(anchor)})` };
   if (sel === "LTM") {
-    const startKey = shiftMonthKey(cur, -11);
-    return { startKey, endKey: cur, label: `LTM ${rangeLabel(startKey, cur)}` };
+    const startKey = shiftMonthKey(anchor, -11);
+    return { startKey, endKey: anchor, label: `LTM ${rangeLabel(startKey, anchor)}` };
   }
   if (sel.startsWith("Q:")) {
     const startKey = sel.slice(2);
@@ -106,10 +126,12 @@ const resolvePeriod = (sel: string): PeriodRange => {
 // ---------------------------------------------------------------- component
 
 export const EconomicAnalysis = () => {
-  const { data: leafRows, isLoading, isError } = usePnlLeafRows();
+  const { data: leafRows, isLoading, isError, error } = usePnlLeafRows();
   const { data: budgetRows } = useBudgetMonthly();
 
-  const [periodSel, setPeriodSel] = useState("MTD");
+  // Default period: AUTO = the last month with a COMPLETE close (derived from
+  // the live rows) — a CFO must never land on the cost-less partial month.
+  const [periodSel, setPeriodSel] = useState("AUTO");
   const [selectedBU, setSelectedBU] = useState("ALL");
   const [view, setViewState] = useState<PLViewMode>(loadView);
   const [comps, setCompsState] = useState<ComparisonKind[]>(loadComps);
@@ -137,31 +159,45 @@ export const EconomicAnalysis = () => {
     ];
   }, [leafRows]);
 
-  // Period options: aggregates + last 4 closed quarters + live months (max 14)
+  // Last complete month + partial-month detection (both derived from data)
+  const lastComplete = useMemo(
+    () => deriveLastCompleteFromLeaves(leafRows) ?? LAST_CLOSED_MONTH_FALLBACK,
+    [leafRows],
+  );
+  const latestLive = useMemo(() => {
+    const livePeriods = [...new Set((leafRows ?? []).map((r) => monthKey(r.period_month)))].sort();
+    return livePeriods.length > 0 ? livePeriods[livePeriods.length - 1] : LIVE_CURRENT_MONTH;
+  }, [leafRows]);
+  const hasPartialMonth = latestLive > lastComplete;
+
+  // Period options: partial current month (explicit, flagged) + aggregates
+  // anchored on the last complete month + last 4 closed quarters + months
   const periodOptions = useMemo(() => {
     const livePeriods = [...new Set((leafRows ?? []).map((r) => monthKey(r.period_month)))].sort();
-    const last = livePeriods.length > 0 ? livePeriods[livePeriods.length - 1] : LIVE_CURRENT_MONTH;
     const opts: { value: string; label: string }[] = [
-      { value: "MTD", label: "MTD (Month to Date)" },
-      { value: "QTD", label: "QTD (Quarter to Date)" },
-      { value: "YTD", label: "YTD (Year to Date)" },
-      { value: "LTM", label: "LTM (12m Rolling)" },
+      ...(hasPartialMonth
+        ? [{ value: "CURRENT", label: `⚠ ${monthKeyLabel(latestLive)} — current month (partial)` }]
+        : []),
+      { value: "QTD", label: `QTD (quarter to ${monthKeyLabel(lastComplete)})` },
+      { value: "YTD", label: `YTD (Jan–${monthKeyLabel(lastComplete)})` },
+      { value: "LTM", label: `LTM (12m to ${monthKeyLabel(lastComplete)})` },
     ];
-    const curQ = quarterOf(LIVE_CURRENT_MONTH);
+    const anchorQ = quarterOf(lastComplete);
     for (let i = 1; i <= 4; i++) {
-      const startKey = shiftMonthKey(curQ.startKey, -3 * i);
+      const startKey = shiftMonthKey(anchorQ.startKey, -3 * i);
       const { q, y } = quarterOf(startKey);
       opts.push({ value: `Q:${startKey}`, label: `Q${q} ${y}` });
     }
     const monthKeys: string[] = [];
-    for (let i = 0; i < 14; i++) monthKeys.push(shiftMonthKey(last, -i));
+    for (let i = 0; i < 14; i++) monthKeys.push(shiftMonthKey(lastComplete, -i));
     for (const k of monthKeys.filter((k) => livePeriods.length === 0 || livePeriods.includes(k))) {
       opts.push({ value: `M:${k}`, label: monthKeyLabel(k) });
     }
     return opts;
-  }, [leafRows]);
+  }, [leafRows, lastComplete, latestLive, hasPartialMonth]);
 
-  const range = resolvePeriod(periodSel);
+  const effectiveSel = periodSel === "AUTO" ? `M:${lastComplete}` : periodSel;
+  const range = resolvePeriod(effectiveSel, lastComplete);
   const pyRange = previousYearRange(range.startKey, range.endKey);
   const ppRange = previousPeriodRange(range.startKey, range.endKey);
   const buCode = selectedBU === "ALL" ? undefined : selectedBU;
@@ -265,12 +301,15 @@ export const EconomicAnalysis = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Data freshness — June 2026 close complete; July partial */}
-      <DataFreshnessNote showIncompleteWarning={rangeHasIncompleteMonths(range.startKey, range.endKey)} />
+      {/* Data freshness — last complete close derived from the data */}
+      <DataFreshnessNote
+        lastClosedKey={lastComplete}
+        showIncompleteWarning={rangeHasIncompleteMonths(range.startKey, range.endKey, lastComplete)}
+      />
 
       {/* Header + filters */}
       <div className="flex flex-wrap items-center gap-4">
-        <Select value={periodSel} onValueChange={setPeriodSel}>
+        <Select value={effectiveSel} onValueChange={setPeriodSel}>
           <SelectTrigger className="w-56 bg-background font-medium">
             <SelectValue />
           </SelectTrigger>
@@ -317,7 +356,9 @@ export const EconomicAnalysis = () => {
       )}
       {isSupabaseConfigured && isError && (
         <div className="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-400">
-          Could not load live P&amp;L data from Supabase — figures show as zero.
+          {(error as Error | null)?.name === "PermissionDeniedError"
+            ? (error as Error).message
+            : "Could not load live P&L data from Supabase — figures show as zero."}
         </div>
       )}
       {isSupabaseConfigured && isLoading && (
@@ -370,12 +411,11 @@ export const EconomicAnalysis = () => {
           the Project Costs line for like-for-like comparison. Budget BASE from{" "}
           <span className="font-mono">v_budget_monthly</span> (approved 2026-07-16, Jul-2026 → Dec-2027).
           Prev Year = same window −12 months · Prev Period = the preceding window of equal length.
-          Known limits (not adjusted here): revenue is gross of credit notes (none mirrored);
-          Draft invoices pending posting are excluded (SAR 296,356 in 2026); bill items without a
-          MoA tag are excluded (SAR 44,048 in 2026); a residual unmapped JE slice (−SAR 1,905)
-          stays inside recurring EBITDA until decision D378 lands. Cost-center pivot is not in R1
-          (facility sqm allocation data pending). The tool rolls forward automatically as new
-          months sync — nothing is anchored to a fixed date.
+          Known limits (not adjusted here): credit-note treatment follows the live views; Draft
+          invoices pending posting are excluded; bill items without a MoA tag are excluded; any
+          residual unmapped JE slice stays inside recurring EBITDA until decision D378 lands.
+          Cost-center pivot is not in R1 (facility sqm allocation data pending). The tool rolls
+          forward automatically as new months sync — nothing is anchored to a fixed date.
         </p>
       </Card>
 

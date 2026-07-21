@@ -45,7 +45,9 @@ export const KPICard = ({
   return <Card className={`group relative p-5 cursor-pointer transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] border-2 animate-fade-in ${getVarianceBackgroundColor(metric.variancePercent, metric.label)}`} onClick={onClick}>
       <div className="space-y-3">
         <p className="text-base md:text-sm text-muted-foreground font-semibold uppercase tracking-wide transition-colors group-hover:text-foreground">
-          {metric.label} {periodLabel !== "MTD" && periodLabel !== "QTD" && periodLabel !== "YTD" ? periodLabel.split(" ")[0] : periodLabel}
+          {/* Compact period: strip any parenthetical qualifier but keep the
+              full month+year (e.g. "Jun '26", "LTM"), never a bare "Jun". */}
+          {metric.label} {periodLabel.replace(/\s*\(.*\)\s*$/, "")}
         </p>
         <div className="flex items-center gap-2">
           <p className="text-4xl md:text-3xl font-heading tracking-tight transition-transform group-hover:scale-105">

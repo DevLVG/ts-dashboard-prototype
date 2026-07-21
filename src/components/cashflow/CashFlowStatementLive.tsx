@@ -51,7 +51,7 @@ const LINES: LineDef[] = [
 type WindowSize = 6 | 12 | 24;
 
 export const CashFlowStatementLive = () => {
-  const { data: rows, isLoading, isError } = useCashflowMonthly();
+  const { data: rows, isLoading, isError, error } = useCashflowMonthly();
   const { data: wcRows } = useWorkingCapitalMonthly();
   const [windowSize, setWindowSize] = useState<WindowSize>(12);
 
@@ -172,6 +172,9 @@ export const CashFlowStatementLive = () => {
               stroke="hsl(var(--gold))"
               strokeWidth={3}
               dot={{ fill: "hsl(var(--gold))", r: 3, strokeWidth: 0 }}
+              // Animation off — a re-animating line blanks out on remounts
+              // (tab switches / resizes), same bug class as the waterfall.
+              isAnimationActive={false}
             />
           </ComposedChart>
         </ResponsiveContainer>
@@ -190,7 +193,9 @@ export const CashFlowStatementLive = () => {
         {isLoading && <p className="text-sm text-muted-foreground">Loading live cash-flow data…</p>}
         {isError && (
           <p className="text-sm text-destructive">
-            Could not load the cash-flow statement from Supabase.
+            {(error as Error | null)?.name === "PermissionDeniedError"
+              ? (error as Error).message
+              : "Could not load the cash-flow statement from Supabase."}
           </p>
         )}
 

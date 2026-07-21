@@ -238,8 +238,11 @@ export const CashFlowStatementLive = () => {
               ))}
               {/* Cumulative cash flow since first synced month */}
               <tr className="font-semibold text-gold">
-                <td className="py-2 pr-4 whitespace-nowrap">
-                  Cumulative cash flow{firstKey ? ` (since ${monthKeyLabel(firstKey)})` : ""}
+                <td
+                  className="py-2 pr-4 whitespace-nowrap"
+                  title={firstKey ? `Running sum of net cash flow since ${monthKeyLabel(firstKey)}` : undefined}
+                >
+                  Cumulative{firstKey ? ` (since ${monthKeyLabel(firstKey)})` : ""}
                 </td>
                 {windowRows.map((r) => (
                   <td key={r.period_month} className="text-right py-2 px-2 tabular-nums whitespace-nowrap">

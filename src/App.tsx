@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, RequireAuth } from "@/contexts/AuthContext";
+import { AlignmentProvider } from "@/contexts/AlignmentContext";
 import Login from "./pages/Login";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
@@ -23,6 +24,7 @@ const App = () => {
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
+            <AlignmentProvider>
             <Routes>
               <Route path="/login" element={<Login />} />
               {/* EVERYTHING below sits behind the auth guard */}
@@ -31,12 +33,16 @@ const App = () => {
                 <Route path="/overview" element={<Index />} />
                 <Route path="/performance" element={<Index />} />
                 <Route path="/cash" element={<Index />} />
-                <Route path="/ratios" element={<Index />} />
-                <Route path="/statements" element={<Index />} />
+                <Route path="/balance" element={<Index />} />
+                <Route path="/analysis" element={<Index />} />
+                {/* Legacy routes from the pre-alignment IA */}
+                <Route path="/ratios" element={<Navigate to="/overview" replace />} />
+                <Route path="/statements" element={<Navigate to="/overview" replace />} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Routes>
+            </AlignmentProvider>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>

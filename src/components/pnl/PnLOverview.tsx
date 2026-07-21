@@ -1,0 +1,478 @@
+// P&L OVERVIEW — spec §1.1 (rewired to the two-basis engine).
+//
+// One P&L matrix, 5 comparison columns for the selected window:
+//   Actual · Budget · Δ Bud (SAR + %) · PY · Δ PY (SAR + %)
+// Structure toggle: View A "As booked (IFRS)" (statutory shape) · View B
+// "Management (validated)" (the package §2 shape — DB-1 gated).
+// Budget rules (register §E): Jun-26 = "n/a — no budget exists (by design)";
+// TTM aggregates disclose coverage; basis footnote on every comparison;
+// budget is EBITDA-deep (D&A/EBIT/Net = "—").
+// Charts answer the screen's CFO question — "am I on plan, and vs last
+// year?": monthly Revenue and EBITDA, Actual bars vs Budget tick vs PY line.
+import { useMemo, useState } from "react";
+import { Card } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsListPill, TabsTriggerPill } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Info } from "lucide-react";
+import {
+  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
+  ResponsiveContainer, ReferenceLine, Legend, Cell,
+} from "recharts";
+import { useAlignment } from "@/contexts/AlignmentContext";
+import { BasisBadge, BasisToggle, WindowPicker, CompletenessBanner, BudgetBasisFootnote, IncompleteMark } from "@/components/chrome/AlignmentChrome";
+import {
+  useBasisRows, useRecurrence, useModelAdjustments, aggregatePL, aggregateRecurring,
+  aggregateBudgetWindow, budgetMonthsSet, monthlySeries, deriveCompleteness,
+  adjustmentLadder, factMonths, winLabel, type PLAgg, type Win,
+} from "@/data/alignment";
+import { useBudgetMonthly, LIVE_BU_LABELS, monthKeyLabel, shiftMonthKey } from "@/data/liveData";
+import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtCompact, pctChange, comparePct } from "@/lib/format";
+
+// ---------------------------------------------------------------- helpers
+
+// Signed storage (revenue +, costs −, profit +): a POSITIVE SAR delta is
+// always favourable — more revenue, less cost, more profit.
+const deltaColor = (v: number | null): string => {
+  if (v === null || Math.abs(v) < 0.05) return "text-muted-foreground";
+  return v > 0 ? "text-success" : "text-destructive";
+};
+
+interface MatrixRow {
+  label: string;
+  indent?: boolean;
+  emphasis?: boolean;
+  topBorder?: boolean;
+  /** invert = a HIGHER value is BAD (cost lines). */
+  invert?: boolean;
+  actual: number | null;
+  budget: number | null;
+  budgetNote?: string;
+  py: number | null;
+  badge?: string; // e.g. "model adj — not in books"
+  pctOfRevenue?: number | null;
+}
+
+const MatrixTable = ({
+  rows, winText, pyText, budgetHeader, budgetNa,
+}: {
+  rows: MatrixRow[];
+  winText: string;
+  pyText: string;
+  budgetHeader: string;
+  budgetNa: string | null; // non-null => whole budget column is n/a with this reason
+}) => (
+  <div className="overflow-x-auto">
+    <table className="w-full min-w-[860px] text-sm">
+      <thead>
+        <tr className="border-b-2 border-border text-xs uppercase tracking-wider text-muted-foreground">
+          <th className="text-left py-2.5 pr-4 font-semibold">SAR</th>
+          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">Actual ({winText})</th>
+          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">{budgetHeader}</th>
+          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">Δ Bud</th>
+          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">Δ Bud %</th>
+          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">PY ({pyText})</th>
+          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">Δ PY</th>
+          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">Δ PY %</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => {
+          const dBud = r.actual !== null && r.budget !== null ? r.actual - r.budget : null;
+          const dBudPct = r.actual !== null && r.budget !== null ? comparePct(r.actual, r.budget, r.invert) : null;
+          const dPy = r.actual !== null && r.py !== null ? r.actual - r.py : null;
+          const dPyPct = r.actual !== null && r.py !== null ? comparePct(r.actual, r.py, r.invert) : null;
+          return (
+            <tr
+              key={r.label}
+              className={[
+                r.emphasis ? "border-b border-border/50 font-semibold bg-muted/20" : "border-b border-border/10",
+                r.topBorder ? "border-t-2 border-t-border" : "",
+              ].join(" ")}
+            >
+              <td className={`py-2 pr-4 whitespace-nowrap ${r.indent ? "pl-5 text-muted-foreground font-normal" : ""}`}>
+                {r.label}
+                {r.pctOfRevenue !== null && r.pctOfRevenue !== undefined && (
+                  <span className="ml-2 text-xs text-muted-foreground font-normal">({r.pctOfRevenue.toFixed(1)}%)</span>
+                )}
+                {r.badge && (
+                  <span className="ml-2 inline-flex items-center rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-amber-400">
+                    {r.badge}
+                  </span>
+                )}
+              </td>
+              <td className="text-right py-2 px-3 tabular-nums whitespace-nowrap">{r.actual === null ? "—" : fmtSAR(r.actual)}</td>
+              <td className="text-right py-2 px-3 tabular-nums whitespace-nowrap text-muted-foreground">
+                {budgetNa !== null || r.budget === null ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild><span className="cursor-help">{budgetNa !== null ? "n/a" : "—"}</span></TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs text-xs">
+                      {budgetNa !== null ? budgetNa : (r.budgetNote ?? "Budget is EBITDA-deep — no budget exists below EBITDA (D&A, EBIT, non-operating, net result).")}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : fmtSAR(r.budget)}
+              </td>
+              <td className={`text-right py-2 px-3 tabular-nums whitespace-nowrap ${deltaColor(dBud)}`}>{dBud === null ? "—" : fmtDeltaSAR(dBud)}</td>
+              <td className={`text-right py-2 px-3 tabular-nums whitespace-nowrap ${deltaColor(dBud)}`}>{dBudPct === null ? "—" : fmtDeltaPct(dBudPct)}</td>
+              <td className="text-right py-2 px-3 tabular-nums whitespace-nowrap text-muted-foreground">{r.py === null ? "—" : fmtSAR(r.py)}</td>
+              <td className={`text-right py-2 px-3 tabular-nums whitespace-nowrap ${deltaColor(dPy)}`}>{dPy === null ? "—" : fmtDeltaSAR(dPy)}</td>
+              <td className={`text-right py-2 px-3 tabular-nums whitespace-nowrap ${deltaColor(dPy)}`}>{dPyPct === null ? "—" : fmtDeltaPct(dPyPct)}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+);
+
+// ------------------------------------------------------- monthly chart
+
+const MonthlyVarianceChart = ({
+  title, data, winText,
+}: {
+  title: string;
+  data: { label: string; key: string; actual: number; budget: number | null; py: number }[];
+  winText: string;
+}) => {
+  const ChartTip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ dataKey: string; value: number | null }>; label?: string }) => {
+    if (!active || !payload || payload.length === 0) return null;
+    const get = (k: string) => payload.find((p) => p.dataKey === k)?.value;
+    const actual = get("actual") as number | undefined;
+    const budget = get("budget") as number | null | undefined;
+    const py = get("py") as number | undefined;
+    return (
+      <div className="chart-tooltip">
+        <p className="chart-tooltip-title">{label}</p>
+        <div className="chart-tooltip-content space-y-0.5">
+          {actual !== undefined && <p className="chart-tooltip-actual">Actual: {fmtSAR(actual)}</p>}
+          <p className="chart-tooltip-budget">Budget: {budget === null || budget === undefined ? "n/a" : fmtSAR(budget)}</p>
+          {py !== undefined && <p className="chart-tooltip-budget">PY (same month −12): {fmtSAR(py)}</p>}
+          {actual !== undefined && budget !== null && budget !== undefined && (
+            <p className={actual - budget >= 0 ? "chart-tooltip-delta-positive" : "chart-tooltip-delta-negative"}>
+              Δ Bud: {fmtDeltaSAR(actual - budget)}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  };
+  return (
+    <Card className="p-5 shadow-sm">
+      <div className="flex items-baseline justify-between mb-4 gap-2 flex-wrap">
+        <h3 className="text-lg font-heading tracking-wide">{title}</h3>
+        <span className="text-xs text-muted-foreground">{winText} · monthly</span>
+      </div>
+      <ResponsiveContainer width="100%" height={240}>
+        <ComposedChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
+          <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} interval="preserveStartEnd" />
+          <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={52} />
+          <RTooltip content={<ChartTip />} />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+          <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeOpacity={0.5} />
+          <Bar dataKey="actual" name="Actual" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={26}>
+            {data.map((d, i) => (
+              <Cell key={i} fill={d.actual >= 0 ? "hsl(var(--gold) / 0.85)" : "hsl(0 70% 60% / 0.7)"} />
+            ))}
+          </Bar>
+          <Line dataKey="budget" name="Budget" stroke="hsl(var(--foreground) / 0.75)" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 2.5, fill: "hsl(var(--foreground))", strokeWidth: 0 }} connectNulls={false} isAnimationActive={false} />
+          <Line dataKey="py" name="PY (−12m)" stroke="hsl(195 75% 55% / 0.8)" strokeWidth={2} dot={false} isAnimationActive={false} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </Card>
+  );
+};
+
+// ------------------------------------------------------------- the screen
+
+export const PnLOverview = () => {
+  const { basis, win, py, winLabelText, pyLabelText, windowName } = useAlignment();
+  const { data: basisData, isLoading, isError, error } = useBasisRows();
+  const { data: rec } = useRecurrence();
+  const { data: budgetRows } = useBudgetMonthly();
+  const { data: adjState } = useModelAdjustments();
+  const [selectedBU, setSelectedBU] = useState("ALL");
+  const [view, setView] = useState<"A" | "B">("A");
+  const [memoOn, setMemoOn] = useState(false);
+
+  const rows = basisData?.rows;
+  const bu = selectedBU === "ALL" ? undefined : selectedBU;
+
+  const actual = useMemo(() => aggregatePL(rows, basis, win, bu), [rows, basis, win, bu]);
+  const prior = useMemo(() => aggregatePL(rows, basis, py, bu), [rows, basis, py, bu]);
+  const budget = useMemo(() => aggregateBudgetWindow(budgetRows, win, bu), [budgetRows, win, bu]);
+  const budMonths = useMemo(() => budgetMonthsSet(budgetRows), [budgetRows]);
+  const completeness = useMemo(() => deriveCompleteness(rows), [rows]);
+  const flaggedKeys = useMemo(() => new Set(completeness.filter((f) => f.kind !== "lev-unbooked").map((f) => f.key)), [completeness]);
+
+  const recActual = useMemo(() => aggregateRecurring(rows, basis, win, rec, bu), [rows, basis, win, rec, bu]);
+  const recPrior = useMemo(() => aggregateRecurring(rows, basis, py, rec, bu), [rows, basis, py, rec, bu]);
+
+  const buList = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows ?? []) if (r.bu) set.add(r.bu);
+    const order = Object.keys(LIVE_BU_LABELS);
+    return order.filter((b) => set.has(b)).concat([...set].filter((b) => !order.includes(b)).sort());
+  }, [rows]);
+
+  // Budget n/a reason: whole window has zero budget coverage.
+  const budgetNa = budget === null
+    ? `n/a — no budget exists for ${winLabelText} (historical budget covers Jun-25→May-26; approved forward budget covers Jul-26→Dec-27; Jun-26 has no budget by design).`
+    : null;
+  const coverageNote = budget !== null && budget.coveredMonths.length < budget.monthsInWindow
+    ? `Budget covers ${budget.coveredMonths.length} of ${budget.monthsInWindow} months (Revenue ${fmtSAR(budget.revenue)} · EBITDA ${fmtSAR(budget.ebitdaAll)}); ${(() => {
+        const missing: string[] = [];
+        let k = win.startKey;
+        while (k <= win.endKey) { if (!budMonths.has(k)) missing.push(monthKeyLabel(k)); k = shiftMonthKey(k, 1); }
+        return missing.join(", ");
+      })()} ${budget.monthsInWindow - budget.coveredMonths.length === 1 ? "has" : "have"} no budget.`
+    : null;
+
+  // ------------------------------------------------------ View A rows
+  const viewARows: MatrixRow[] = useMemo(() => {
+    const b = budget;
+    const mk = (label: string, a: number, bud: number | null, p: number, opts: Partial<MatrixRow> = {}): MatrixRow => ({
+      label, actual: a, budget: bud, py: p, ...opts,
+    });
+    return [
+      mk("Revenue", actual.revenue, b?.revenue ?? null, prior.revenue),
+      mk("Cost of revenue", actual.cogs, b?.cogs ?? null, prior.cogs, { indent: true, invert: true }),
+      mk("Gross margin", actual.grossMargin, b ? b.revenue + b.cogs : null, prior.grossMargin, { emphasis: true }),
+      mk("OpEx — G&A", actual.opexGa, b?.opexGa ?? null, prior.opexGa, { indent: true, invert: true, budgetNote: "Budget G&A includes the planned Leveredge line (GA-NRP-*)." }),
+      mk("OpEx — Marketing & Sales", actual.opexMs, b?.opexMs ?? null, prior.opexMs, { indent: true, invert: true, budgetNote: "Budget M&S includes the planned F&F non-recurring line (MS-FFC)." }),
+      mk("OpEx — People", actual.opexPeople, b?.opexPeople ?? null, prior.opexPeople, { indent: true, invert: true }),
+      mk("EBITDA (5-section)", actual.ebitda5, b?.ebitdaPreNrp ?? null, prior.ebitda5, {
+        emphasis: true,
+        budgetNote: "Budget EBITDA excluding the planned Leveredge/F&F non-recurring lines (GA-NRP-*, MS-FFC) — like-for-like with the actual 5-section EBITDA, which sits above project costs.",
+      }),
+      mk("Project costs (Leveredge · F&F)", actual.projectCosts, b?.nonRecLines ?? null, prior.projectCosts, {
+        indent: true, invert: true,
+        budgetNote: "Budget plans these fees on GA-NRP-* / MS-FFC lines; actuals book them as Project-Costs (TPC-*).",
+      }),
+      mk("EBITDA reported", actual.ebitdaReported, b?.ebitdaAll ?? null, prior.ebitdaReported, { emphasis: true }),
+      mk("D&A", actual.da, null, prior.da, { indent: true, invert: true }),
+      mk("EBIT", actual.ebit, null, prior.ebit, { emphasis: true }),
+      mk("Non-operating", actual.nonOp, null, prior.nonOp, { indent: true }),
+      mk("Net result", actual.netResult, null, prior.netResult, { emphasis: true, topBorder: true }),
+    ];
+  }, [actual, prior, budget]);
+
+  // ------------------------------------------------------ View B rows
+  // Recurring-tagged memo rows only — the ladder from as-booked to the
+  // model's clean recurring EBITDA (spec §1.1 View B).
+  const ladder = useMemo(() => adjustmentLadder(adjState, win, "recurring"), [adjState, win]);
+  const viewBRows: MatrixRow[] | null = useMemo(() => {
+    if (!recActual) return null;
+    const b = budget;
+    // Budget recurring mapping rule: DRIFT budget line = COMP-IA (non-recurring
+    // by the validated perimeter); NRP lines = GA-NRP-* + MS-FFC.
+    let budRecRevenue: number | null = null, budDrift: number | null = null;
+    if (b && budgetRows) {
+      let drift = 0;
+      for (const r of budgetRows) {
+        const k = r.period_month.slice(0, 7);
+        if (k < win.startKey || k > win.endKey) continue;
+        if (bu && r.bu_code !== bu) continue;
+        if (r.section === "Revenue" && r.moa_code.startsWith("COMP-IA")) drift += r.budget_amount_sar;
+      }
+      budDrift = drift;
+      budRecRevenue = b.revenue - drift;
+    }
+    const out: MatrixRow[] = [
+      { label: "Recurring revenue", actual: recActual.recRevenue, budget: budRecRevenue, py: recPrior?.recRevenue ?? null, emphasis: true },
+      { label: "Non-recurring revenue (DRIFT)", actual: recActual.nonRecRevenue, budget: budDrift, py: recPrior?.nonRecRevenue ?? null, indent: true },
+      { label: "Total revenue", actual: recActual.totalRevenue, budget: budget?.revenue ?? null, py: recPrior?.totalRevenue ?? null, emphasis: true },
+      { label: "Recurring direct costs", actual: recActual.recDirect, budget: null, py: recPrior?.recDirect ?? null, indent: true, invert: true, budgetNote: "Budget COGS is not split by recurrence." },
+      { label: "Non-recurring direct costs", actual: recActual.nonRecDirect, budget: null, py: recPrior?.nonRecDirect ?? null, indent: true, invert: true, budgetNote: "Budget COGS is not split by recurrence." },
+      {
+        label: "Recurring gross profit", actual: recActual.recGrossProfit, budget: null, py: recPrior?.recGrossProfit ?? null, emphasis: true,
+        pctOfRevenue: recActual.recRevenue !== 0 ? (recActual.recGrossProfit / recActual.recRevenue) * 100 : null,
+      },
+      { label: "Recurring OpEx", actual: recActual.recOpex, budget: null, py: recPrior?.recOpex ?? null, indent: true, invert: true },
+      { label: "Recurring EBITDA (as booked)", actual: recActual.recEbitda, budget: null, py: recPrior?.recEbitda ?? null, emphasis: true },
+    ];
+    if (memoOn && ladder.length > 0) {
+      let running = recActual.recEbitda;
+      for (const step of ladder) {
+        running += step.amount;
+        out.push({
+          label: `${step.label}`, actual: step.amount, budget: null, py: null, indent: true,
+          badge: "model adj — not in books",
+          budgetNote: step.sourceRef ? `Source: ${step.sourceRef}` : undefined,
+        });
+      }
+      out.push({ label: "Recurring EBITDA (clean, model-adjusted)", actual: running, budget: null, py: null, emphasis: true, badge: "model adj — not in books" });
+    }
+    out.push(
+      ...recActual.nonRecOpexLines.map((l) => ({
+        label: `Non-recurring — ${l.label}`, actual: l.amount, budget: null, py: null, indent: true, invert: true,
+      })),
+      { label: "Reported EBITDA", actual: recActual.reportedEbitda, budget: budget?.ebitdaAll ?? null, py: recPrior?.reportedEbitda ?? null, emphasis: true, topBorder: true },
+      { label: "D&A", actual: actual.da, budget: null, py: prior.da, indent: true, invert: true },
+      { label: "EBIT", actual: actual.ebit, budget: null, py: prior.ebit, emphasis: true },
+      { label: "Net result", actual: actual.netResult, budget: null, py: prior.netResult, emphasis: true },
+    );
+    return out;
+  }, [recActual, recPrior, budget, budgetRows, win, bu, memoOn, ladder, actual, prior]);
+
+  // ------------------------------------------------------ monthly charts
+  const chartWin: Win = useMemo(() => {
+    // Chart always shows a month-grain series: the selected window if multi-
+    // month, else the 12 months ending at the selected month.
+    if (win.startKey !== win.endKey) return win;
+    return { startKey: shiftMonthKey(win.endKey, -11), endKey: win.endKey };
+  }, [win]);
+  const chartData = useMemo(() => {
+    const series = monthlySeries(rows, basis, chartWin, bu);
+    return series.map((p) => {
+      const budM = budMonths.has(p.key) ? aggregateBudgetWindow(budgetRows, { startKey: p.key, endKey: p.key }, bu) : null;
+      const pyM = aggregatePL(rows, basis, { startKey: shiftMonthKey(p.key, -12), endKey: shiftMonthKey(p.key, -12) }, bu);
+      return {
+        key: p.key, label: p.label,
+        actual: p.agg.revenue, budget: budM ? budM.revenue : null, py: pyM.revenue,
+        actualEbitda: p.agg.ebitdaReported, budgetEbitda: budM ? budM.ebitdaAll : null, pyEbitda: pyM.ebitdaReported,
+      };
+    });
+  }, [rows, basis, chartWin, bu, budgetRows, budMonths]);
+
+  if (isError) {
+    return (
+      <Card className="p-6">
+        <p className="text-sm text-destructive">{(error as Error | null)?.message ?? "Could not load the P&L fact rows."}</p>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-3">
+        <WindowPicker months={factMonths(rows)} />
+        <BasisToggle />
+        <Select value={selectedBU} onValueChange={setSelectedBU}>
+          <SelectTrigger className="w-52 bg-background font-medium"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All Company</SelectItem>
+            {buList.map((b) => (
+              <SelectItem key={b} value={b}>{LIVE_BU_LABELS[b] ?? b} ({b})</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Tabs value={view} onValueChange={(v) => setView(v as "A" | "B")}>
+          <TabsListPill>
+            <TabsTriggerPill value="A">As booked (IFRS)</TabsTriggerPill>
+            <TabsTriggerPill value="B">Management (validated)</TabsTriggerPill>
+          </TabsListPill>
+        </Tabs>
+        {view === "B" && adjState?.available && (
+          <label className="inline-flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+            <input type="checkbox" checked={memoOn} onChange={(e) => setMemoOn(e.target.checked)} className="accent-[hsl(var(--gold))]" />
+            Model-adjustment memo lines
+          </label>
+        )}
+      </div>
+
+      <CompletenessBanner rows={rows} />
+      {isLoading && <p className="text-sm text-muted-foreground">Loading live P&L fact rows…</p>}
+
+      {/* Headline strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {([
+          { label: "Revenue", a: actual.revenue, b: budget?.revenue ?? null, p: prior.revenue, invert: false },
+          { label: "Gross margin", a: actual.grossMargin, b: budget ? budget.revenue + budget.cogs : null, p: prior.grossMargin, invert: false },
+          { label: "EBITDA reported", a: actual.ebitdaReported, b: budget?.ebitdaAll ?? null, p: prior.ebitdaReported, invert: false },
+          { label: "Net result", a: actual.netResult, b: null, p: prior.netResult, invert: false },
+        ] as const).map((k) => {
+          const dP = comparePct(k.a, k.p ?? 0);
+          return (
+            <Card key={k.label} className="p-4 space-y-1.5">
+              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+                {k.label} <BasisBadge basis={basis} className="ml-1" />
+              </p>
+              <p className="text-2xl font-heading tracking-tight tabular-nums">{fmtSAR(k.a)}</p>
+              <div className="text-xs text-muted-foreground space-y-0.5">
+                <p>
+                  vs Budget:{" "}
+                  {k.b === null ? "n/a" : (
+                    <span className={deltaColor(k.a - k.b)}>{fmtDeltaSAR(k.a - k.b)}</span>
+                  )}
+                </p>
+                <p>
+                  vs PY ({pyLabelText}):{" "}
+                  <span className={deltaColor(k.a - k.p)}>
+                    {fmtDeltaSAR(k.a - k.p)}{dP !== null ? ` · ${fmtDeltaPct(dP)}` : ""}
+                  </span>
+                </p>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Trend charts */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <MonthlyVarianceChart
+          title="REVENUE — ACTUAL vs BUDGET vs PY"
+          winText={winLabel(chartWin)}
+          data={chartData.map((d) => ({ key: d.key, label: d.label, actual: d.actual, budget: d.budget, py: d.py }))}
+        />
+        <MonthlyVarianceChart
+          title="EBITDA REPORTED — ACTUAL vs BUDGET vs PY"
+          winText={winLabel(chartWin)}
+          data={chartData.map((d) => ({ key: d.key, label: d.label, actual: d.actualEbitda, budget: d.budgetEbitda, py: d.pyEbitda }))}
+        />
+      </div>
+
+      {/* The matrix */}
+      <Card className="p-6 shadow-sm">
+        <div className="flex items-center gap-3 mb-1 flex-wrap">
+          <h3 className="text-xl font-heading tracking-wide">P&amp;L — {windowName.toUpperCase()}</h3>
+          <BasisBadge basis={basis} />
+          {budget && (
+            <span className="inline-flex items-center rounded bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground border border-border">
+              Budget · {budget.versions.join(" + ")}
+            </span>
+          )}
+          {(() => {
+            const flagged = [...flaggedKeys].some((k) => k >= win.startKey && k <= win.endKey);
+            return <IncompleteMark flagged={flagged} className="text-base" />;
+          })()}
+        </div>
+        <p className="text-xs text-muted-foreground mb-4">
+          {view === "A" ? "Statutory shape — as booked in the ledger." : "Management shape — the validated package structure (recurring lens)."}
+          {" "}Every column header names its window; PY is the same window shifted −12 months, same basis, same perimeter.
+        </p>
+
+        {view === "A" && (
+          <MatrixTable rows={viewARows} winText={winLabelText} pyText={pyLabelText} budgetHeader={`Budget${budget ? ` · ${budget.versions.length > 1 ? "blend" : budget.versions[0]}` : ""}`} budgetNa={budgetNa} />
+        )}
+        {view === "B" && (
+          viewBRows ? (
+            <MatrixTable rows={viewBRows} winText={winLabelText} pyText={pyLabelText} budgetHeader="Budget" budgetNa={budgetNa} />
+          ) : (
+            <div className="rounded-md border border-border bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
+              Recurring view pending recurrence dimension — the validated recurring/DRIFT perimeter
+              (dim_recurrence) has not landed in the warehouse yet. This view activates automatically
+              when it does; no reload needed.
+            </div>
+          )
+        )}
+
+        <div className="mt-4 space-y-1.5">
+          {coverageNote && <p className="text-xs text-amber-300/90">{coverageNote}</p>}
+          <BudgetBasisFootnote />
+          {bu && (
+            <p className="text-xs text-muted-foreground">
+              BU view: revenue and directly-attributed costs only — budget costs largely unallocated
+              to BUs and actual costs partly unallocated (UNALL) until the allocation engine closes.
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Source: {basisData?.sourceObject ?? "…"} + v_budget_monthly (live warehouse). Drill to MoA
+            leaf and journal entries on the Analysis screen — drills inherit the active basis.
+          </p>
+        </div>
+      </Card>
+    </div>
+  );
+};

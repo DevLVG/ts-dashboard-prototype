@@ -49,10 +49,10 @@ export const LIVE_BU_LABELS: Record<string, string> = {
   LIV: "Livery",
   HSE: "Horse School",
   RET: "Retail",
-  MEM: "Membership",
+  MEM: "Memberships",
   B2B: "B2B",
   COMP: "Competitions",
-  EVT: "Events",
+  EVT: "Private Events",
   CORP: "Corporate",
   UNALL: "Unallocated",
 };
@@ -171,10 +171,11 @@ export const usePnlLeafRows = () =>
 
 // ------------------------------------------------------------------ budget
 
-/** Budget window loaded in Supabase (BASE scenario, approved 2026-07-16).
- * Months outside this inclusive range have NO budget comparative — the UI
- * must show "—" (absent), never zero. */
-export const BUDGET_START_KEY = "2026-07";
+/** Budget window loaded in Supabase (BASE scenario): historical vintage
+ * BUD-HIST-2025-26 (Jun-25→May-26, ties the delivered deck) + approved
+ * forward BUD-2026-07-16-APPROVED (Jul-26→Dec-27). Jun-2026 has NO budget
+ * by design. Months without budget rows show "n/a" (absent), never zero. */
+export const BUDGET_START_KEY = "2025-06";
 export const BUDGET_END_KEY = "2027-12";
 
 /** True when the whole inclusive month-key range falls inside the loaded
@@ -192,9 +193,45 @@ export interface BudgetMonthlyRow {
   version_id: string;
 }
 
+/** DEFAULT budget versions = the deck blend (spec §1.1: V1/V2 vintages are
+ * NEVER the default comparison — vintage picker only). Preferred source of
+ * truth: `is_default_version` from v_pnl_actual_vs_budget_monthly (DB-3);
+ * fallback: exclude version ids carrying a -V<n>- vintage marker. */
+const fetchDefaultVersionIds = async (): Promise<Set<string> | null> => {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("v_pnl_actual_vs_budget_monthly")
+    .select("budget_version_id,is_default_version")
+    .eq("is_default_version", true)
+    .limit(2000);
+  if (error || !data || data.length === 0) return null;
+  return new Set((data as { budget_version_id: string | null }[]).map((r) => r.budget_version_id).filter((v): v is string => Boolean(v)));
+};
+
+const isVintageVersionId = (v: string): boolean => /-V\d+-/.test(v);
+
 export const fetchBudgetMonthly = async (): Promise<BudgetMonthlyRow[]> => {
   if (!supabase) throw new Error("Supabase is not configured (missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)");
-  // P&L sections only — the CASHFLOW section belongs to the Cash tab (still mock).
+  // P&L sections only — the CASHFLOW section belongs to the Cash tab.
+  const [{ data, error }, defaults] = await Promise.all([
+    supabase
+      .from("v_budget_monthly")
+      .select("*")
+      .neq("section", "CASHFLOW")
+      .order("period_month", { ascending: true })
+      .limit(5000),
+    fetchDefaultVersionIds(),
+  ]);
+  if (error) throw toFriendlyError(error);
+  const rows = (data ?? []) as BudgetMonthlyRow[];
+  // Filter to the DEFAULT versions (deck blend + approved forward).
+  return rows.filter((r) => (defaults ? defaults.has(r.version_id) : !isVintageVersionId(r.version_id)));
+};
+
+/** ALL budget rows incl. the pre-blend official vintages V1/V2 (DB-6) — used
+ * ONLY by the budget-history strip / vintage picker, never as the default. */
+export const fetchBudgetAllVersions = async (): Promise<BudgetMonthlyRow[]> => {
+  if (!supabase) throw new Error("Supabase is not configured");
   const { data, error } = await supabase
     .from("v_budget_monthly")
     .select("*")
@@ -204,6 +241,14 @@ export const fetchBudgetMonthly = async (): Promise<BudgetMonthlyRow[]> => {
   if (error) throw toFriendlyError(error);
   return (data ?? []) as BudgetMonthlyRow[];
 };
+
+export const useBudgetAllVersions = () =>
+  useQuery({
+    queryKey: ["v_budget_monthly_all_versions"],
+    queryFn: fetchBudgetAllVersions,
+    staleTime: 60 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+  });
 
 export const useBudgetMonthly = () =>
   useQuery({
@@ -342,7 +387,9 @@ export const aggregateBudgetPL = (
   bu?: string,
 ): LivePLTotals | null => {
   if (!rows || rows.length === 0) return null;
-  if (!budgetCoversRange(startMonthKey, endMonthKey)) return null;
+  // Data-driven coverage: no budget rows in the range (e.g. Jun-2026, the
+  // designed hole between the vintages) -> null -> the UI renders "n/a".
+  if (!rows.some((r) => { const k = monthKey(r.period_month); return k >= startMonthKey && k <= endMonthKey; })) return null;
   const out = emptyTotals();
   for (const r of rows) {
     const k = monthKey(r.period_month);

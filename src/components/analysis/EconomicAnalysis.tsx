@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsListPill, TabsTriggerPill } from "@/components/ui/tabs";
 import { KPICard } from "@/components/dashboard/KPICard";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
+import { DataFreshnessNote } from "@/components/dashboard/DataFreshnessNote";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 import { type KPIMetric } from "@/types/dashboard";
 import {
@@ -26,6 +27,7 @@ import {
   LIVE_BU_LABELS,
   LIVE_CURRENT_MONTH,
   UNALLOCATED_BU,
+  rangeHasIncompleteMonths,
 } from "@/data/liveData";
 import {
   buildAnalysisLines,
@@ -263,6 +265,9 @@ export const EconomicAnalysis = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Data freshness — June 2026 close complete; July partial */}
+      <DataFreshnessNote showIncompleteWarning={rangeHasIncompleteMonths(range.startKey, range.endKey)} />
+
       {/* Header + filters */}
       <div className="flex flex-wrap items-center gap-4">
         <Select value={periodSel} onValueChange={setPeriodSel}>

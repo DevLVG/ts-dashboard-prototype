@@ -3,7 +3,6 @@ import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell, LabelList } from "recharts";
 import { BUPerformance } from "@/types/dashboard";
-import { getMonthlyPLData, calculateGM, calculateEBITDA, businessUnitLabels } from "@/data/financialData";
 import { getVarianceHexColor } from "@/lib/varianceColors";
 
 interface BUPerformanceChartProps {

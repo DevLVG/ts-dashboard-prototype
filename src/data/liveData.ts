@@ -2,9 +2,9 @@
 // (trio-sporting-pm).
 //
 // One fetch (few hundred rows: month x BU), cached by React Query; all
-// aggregation happens client-side with pure helpers that mirror the sign
-// conventions of the mock layer (financialData.ts): COGS and OpEx returned
+// aggregation happens client-side with pure helpers: COGS and OpEx returned
 // as POSITIVE numbers, D&A positive; the views store costs as negatives.
+// (The historical mock layer was fully removed for the 2026-07-21 go-live.)
 //
 // LIVE here means: Actual + Previous Year (computed by -12m shift on live
 // rows) + Budget BASE scenario (v_budget_monthly, loaded 2026-07-19 from the
@@ -424,3 +424,19 @@ export const getLiveMonthlySeries = (
 /** Today (real clock, not mock metadata). */
 export const LIVE_TODAY = new Date().toISOString().slice(0, 10);
 export const LIVE_CURRENT_MONTH = monthKey(LIVE_TODAY);
+
+// ------------------------------------------------------------ data freshness
+
+/** Last month with a COMPLETE close (revenue AND costs posted in Qoyod).
+ * Update at every month-end close. Months after this key may show synced
+ * revenue with no costs yet — the UI flags them as incomplete. */
+export const LAST_CLOSED_MONTH = "2026-06";
+export const LAST_CLOSED_LABEL = "30 June 2026";
+
+/** True for months after the last complete close (e.g. July 2026: revenue
+ * synced, costs not yet posted — figures are partial, not final). */
+export const isIncompleteMonth = (key: string): boolean => key > LAST_CLOSED_MONTH;
+
+/** True when an inclusive month-key range touches any incomplete month. */
+export const rangeHasIncompleteMonths = (_startKey: string, endKey: string): boolean =>
+  isIncompleteMonth(endKey);

@@ -5,19 +5,12 @@ import { KPICard } from "@/components/dashboard/KPICard";
 import { RevenueTrendChart } from "@/components/dashboard/RevenueTrendChart";
 import { BUPerformanceChart } from "@/components/dashboard/BUPerformanceChart";
 import { EconomicAnalysis } from "@/components/analysis/EconomicAnalysis";
-import { PLMatrix } from "@/components/dashboard/PLMatrix";
-import { OpExDrawer } from "@/components/dashboard/OpExDrawer";
-import { GrossMarginDrawer } from "@/components/dashboard/GrossMarginDrawer";
-import { CashTrendChart } from "@/components/dashboard/CashTrendChart";
-import { WorkingCapitalPanel } from "@/components/dashboard/WorkingCapitalPanel";
-import { CashFlowBudgetVsActual } from "@/components/dashboard/CashFlowBudgetVsActual";
+import { CashFlowStatementLive } from "@/components/cashflow/CashFlowStatementLive";
+import { BalanceSheetLive } from "@/components/balancesheet/BalanceSheetLive";
 import { PageType, type KPIMetric } from "@/types/dashboard";
-import {
-  getPLDataForPeriod,
-  CURRENT_DATE
-} from "@/data/financialData";
-// LIVE data layer (Supabase pnl_by_bu + v_budget_monthly) — Actual, PY and
-// Budget BASE are LIVE; Budget Worst/Best scenarios stay MOCK (not loaded).
+// LIVE data layer (Supabase pnl_by_bu + v_budget_monthly). ALL mock data
+// paths were removed for the production go-live (2026-07-21): Actual, PY and
+// Budget BASE are LIVE; the Worst/Best mock scenarios no longer exist.
 import {
   usePnlByBu,
   useBudgetMonthly,
@@ -32,24 +25,16 @@ import {
   LIVE_BU_LABELS,
   LIVE_CURRENT_MONTH,
   LIVE_TODAY,
+  rangeHasIncompleteMonths,
   type LivePLTotals,
 } from "@/data/liveData";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 import { PnLLiveTable } from "@/components/dashboard/PnLLiveTable";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
-import {
-  getCashBalance,
-  getMonthlyBurn,
-  getPayables,
-  getReceivables,
-  getPYDate,
-  getMonthStart,
-  buMap
-} from "@/data/financialDataV8";
+import { DataFreshnessNote } from "@/components/dashboard/DataFreshnessNote";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
-import { Tabs, TabsListPill, TabsTriggerPill, TabsContent } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
+import { Tabs, TabsListPill, TabsTriggerPill } from "@/components/ui/tabs";
 
 
 const Index = () => {
@@ -71,13 +56,9 @@ const Index = () => {
   // LIVE budget rows (v_budget_monthly, BASE scenario, Jul-2026..Dec-2027)
   const { data: budgetRows } = useBudgetMonthly();
   const [selectedMonth, setSelectedMonth] = useState("MTD");
-  const [selectedScenario, setSelectedScenario] = useState<'Budget_Base' | 'Budget_Worst' | 'Budget_Best' | 'PY'>("Budget_Base");
+  const [selectedScenario, setSelectedScenario] = useState<'Budget_Base' | 'PY'>("Budget_Base");
   const [selectedBU, setSelectedBU] = useState("All Company");
-  const [opexDrawerOpen, setOpexDrawerOpen] = useState(false);
-  const [selectedOpExBreakdown, setSelectedOpExBreakdown] = useState<any>(null);
-  const [gmDrawerOpen, setGmDrawerOpen] = useState(false);
-  const [selectedGMBreakdown, setSelectedGMBreakdown] = useState<any>(null);
-  const [currentView, setCurrentView] = useState<'economics' | 'cash'>('economics');
+  const [currentView, setCurrentView] = useState<'economics' | 'cashflow' | 'balancesheet'>('economics');
 
   // Sync currentPage state with URL changes
   useEffect(() => {
@@ -113,10 +94,10 @@ const Index = () => {
     })),
   ];
 
+  // Only LIVE comparisons: Budget BASE (v_budget_monthly) and Previous Year.
+  // The old Worst/Best mock scenarios were removed for the production go-live.
   const scenarioOptions = [
-    { value: "Budget_Base", label: "Actual vs Budget Base" },
-    { value: "Budget_Worst", label: "Actual vs Budget Worst" },
-    { value: "Budget_Best", label: "Actual vs Budget Best" },
+    { value: "Budget_Base", label: "Actual vs Budget" },
     { value: "PY", label: "Actual vs PY" },
   ];
 
@@ -162,7 +143,7 @@ const Index = () => {
   // v_budget_monthly). Budget Worst/Best scenarios are not loaded in Supabase
   // and remain MOCK, badged as such.
   const getFilteredKPIData = (): { metrics: KPIMetric[]; comparisonSource: "live" | "mock" } => {
-    const { startKey, endKey, startDate, endDate } = getPeriodRange();
+    const { startKey, endKey } = getPeriodRange();
 
     const actual = aggregateLivePL(liveRows, startKey, endKey, selectedBUCode);
 
@@ -178,26 +159,13 @@ const Index = () => {
         selectedBUCode,
       );
       comparisonSource = "live";
-    } else if (selectedScenario === "Budget_Base") {
+    } else {
       // Budget BASE — LIVE from v_budget_monthly. Budget starts Jul-2026;
       // ranges not fully inside the window get NO comparative (zeros ->
       // card shows "No budget comparison" — absent, not zero).
       const budget = aggregateBudgetPL(budgetRows, startKey, endKey, selectedBUCode);
       comparison = budget ?? { revenue: 0, cogs: 0, opex: 0, grossMargin: 0, ebitda: 0 };
       comparisonSource = "live";
-    } else {
-      // Budget Worst/Best — MOCK dataset (only the BASE scenario is loaded in
-      // Supabase). Mock only covers the consolidated company on the old
-      // prototype calendar; live BU codes have no mock equivalent -> zeros ->
-      // card shows "No budget comparison".
-      const mockPl = getPLDataForPeriod(
-        startDate,
-        endDate,
-        selectedScenario,
-        selectedBUCode ? "NO_MOCK_FOR_LIVE_BU" : undefined,
-      );
-      comparison = mockPl.budget;
-      comparisonSource = "mock";
     }
 
     // Helper to detect opposite signs
@@ -287,148 +255,18 @@ const Index = () => {
   const { metrics: filteredKPIData, comparisonSource } = getFilteredKPIData();
   const filteredBUPerformance = getFilteredBUPerformance();
 
-  // Get Cash KPI Data for the drawer
-  const getCashKPIData = (): KPIMetric[] => {
-    const buCode = selectedBU === "All Company" ? undefined : buMap[selectedBU];
-    const budgetScenario = selectedScenario === 'PY' ? 'Budget_Base' : selectedScenario;
-    
-    // 1. Cash Balance
-    const cashActual = getCashBalance('Actual', CURRENT_DATE, buCode);
-    const cashComparison = selectedScenario === 'PY'
-      ? getCashBalance('Actual', getPYDate(CURRENT_DATE), buCode)
-      : getCashBalance(budgetScenario, CURRENT_DATE, buCode);
-    
-    // 2. Burn Rate (current month)
-    const monthStart = getMonthStart(CURRENT_DATE);
-    const burnActual = getMonthlyBurn(monthStart, CURRENT_DATE, 'Actual', buCode);
-    const burnComparison = selectedScenario === 'PY'
-      ? getMonthlyBurn(getPYDate(monthStart), getPYDate(CURRENT_DATE), 'Actual', buCode)
-      : getMonthlyBurn(monthStart, CURRENT_DATE, budgetScenario, buCode);
-    
-    // 3. Payables
-    const payablesActual = getPayables('Actual', CURRENT_DATE, buCode);
-    const payablesComparison = selectedScenario === 'PY'
-      ? getPayables('Actual', getPYDate(CURRENT_DATE), buCode)
-      : getPayables(budgetScenario, CURRENT_DATE, buCode);
-    
-    // 4. Receivables
-    const receivablesActual = getReceivables('Actual', CURRENT_DATE, buCode);
-    const receivablesComparison = selectedScenario === 'PY'
-      ? getReceivables('Actual', getPYDate(CURRENT_DATE), buCode)
-      : getReceivables(budgetScenario, CURRENT_DATE, buCode);
-    
-    // Helper to detect opposite signs
-    const hasOppositeSigns = (actual: number, comparison: number): boolean => {
-      return (actual >= 0 && comparison < 0) || (actual < 0 && comparison >= 0);
-    };
-
-    return [
-      {
-        label: "Cash Balance TO DATE",
-        actual: cashActual,
-        budget: cashComparison,
-        variance: cashActual - cashComparison,
-        variancePercent: cashComparison !== 0 ? ((cashActual - cashComparison) / Math.abs(cashComparison)) * 100 : 0,
-        format: "currency" as const,
-        isOppositeSigns: hasOppositeSigns(cashActual, cashComparison),
-      },
-      {
-        label: "Cash Flow MTD",
-        actual: burnActual,
-        budget: burnComparison,
-        variance: burnActual - burnComparison,
-        variancePercent: burnComparison !== 0 ? ((burnActual - burnComparison) / Math.abs(burnComparison)) * 100 : 0,
-        format: "currency" as const,
-        isOppositeSigns: hasOppositeSigns(burnActual, burnComparison),
-      },
-      {
-        label: "Payables TO DATE",
-        actual: payablesActual.amount,
-        budget: payablesComparison.amount,
-        variance: payablesActual.amount - payablesComparison.amount,
-        variancePercent: payablesComparison.amount !== 0 ? ((payablesActual.amount - payablesComparison.amount) / Math.abs(payablesComparison.amount)) * 100 : 0,
-        format: "currency" as const,
-        isOppositeSigns: hasOppositeSigns(payablesActual.amount, payablesComparison.amount),
-      },
-      {
-        label: "Receivables TO DATE",
-        actual: receivablesActual.amount,
-        budget: receivablesComparison.amount,
-        variance: receivablesActual.amount - receivablesComparison.amount,
-        variancePercent: receivablesComparison.amount !== 0 ? ((receivablesActual.amount - receivablesComparison.amount) / Math.abs(receivablesComparison.amount)) * 100 : 0,
-        format: "currency" as const,
-        isOppositeSigns: hasOppositeSigns(receivablesActual.amount, receivablesComparison.amount),
-      }
-    ];
-  };
-
-  const renderCashSection = () => {
-    const cashKPIData = getCashKPIData();
-    
-    return (
-      <div className="space-y-6">
-        {/* Filter Controls - Only Scenario and BU */}
-        <div className="flex gap-4">
-          <Select 
-            value={selectedScenario} 
-            onValueChange={(value) => setSelectedScenario(value as typeof selectedScenario)}
-          >
-            <SelectTrigger className="w-56 bg-background font-medium">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {scenarioOptions.map(option => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={selectedBU} onValueChange={setSelectedBU}>
-            <SelectTrigger className="w-56 bg-background font-medium">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {businessUnits.map((bu) => (
-                <SelectItem key={bu.value} value={bu.value}>
-                  {bu.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {cashKPIData.map((metric) => (
-            <KPICard
-              key={metric.label}
-              metric={metric}
-              periodLabel=""
-              scenario={selectedScenario === 'PY' ? 'py' : 'base'}
-            />
-          ))}
-        </div>
-
-        {/* Chart Section */}
-        <Card className="p-6">
-          <CashTrendChart
-            scenario={selectedScenario}
-            selectedBU={selectedBU}
-          />
-        </Card>
-
-        {/* Working Capital Panel — C3b */}
-        <WorkingCapitalPanel />
-
-        {/* Cash Flow Statement Budget vs Actual — C3b */}
-        <CashFlowBudgetVsActual />
-      </div>
-    );
-  };
-
   const renderEconomicsContent = () => (
     <div className="space-y-6">
+      {/* Data freshness — figures complete through the June 2026 close; the
+          warning appears when the selected window touches July (revenue
+          synced, costs not yet posted). */}
+      <DataFreshnessNote
+        showIncompleteWarning={(() => {
+          const { startKey, endKey } = getPeriodRange();
+          return rangeHasIncompleteMonths(startKey, endKey);
+        })()}
+      />
+
       {/* Filter Controls */}
       <div className="flex gap-4">
         <Select value={selectedMonth} onValueChange={setSelectedMonth}>
@@ -534,13 +372,6 @@ const Index = () => {
               </p>
             );
           })()}
-          {(selectedScenario === "Budget_Worst" || selectedScenario === "Budget_Best") && (
-            <p className="text-xs text-muted-foreground px-1">
-              <DataSourceBadge source="mock" className="mr-1.5" />
-              Only the BASE budget scenario is loaded in Supabase — Worst/Best remain mock, so bars
-              show LIVE actuals only. Select "Actual vs Budget Base" or "Actual vs PY" for a live comparison.
-            </p>
-          )}
         </div>
       )}
     </div>
@@ -548,19 +379,22 @@ const Index = () => {
 
   const renderOverview = () => (
     <div className="space-y-8 animate-fade-in">
-      {/* Centered Pill Tab - Professional Design */}
+      {/* Centered Pill Tab — the three statements ("i tre prospetti") */}
       <div className="flex justify-center pt-4">
-        <Tabs value={currentView} onValueChange={(v) => setCurrentView(v as 'economics' | 'cash')}>
+        <Tabs value={currentView} onValueChange={(v) => setCurrentView(v as typeof currentView)}>
           <TabsListPill className="shadow-lg">
-            <TabsTriggerPill value="economics">Performance</TabsTriggerPill>
-            <TabsTriggerPill value="cash">Cash</TabsTriggerPill>
+            <TabsTriggerPill value="economics">P&amp;L</TabsTriggerPill>
+            <TabsTriggerPill value="cashflow">Cash Flow</TabsTriggerPill>
+            <TabsTriggerPill value="balancesheet">Balance Sheet</TabsTriggerPill>
           </TabsListPill>
         </Tabs>
       </div>
 
       {/* Content with proper spacing */}
       <div className="pt-2">
-        {currentView === 'economics' ? renderEconomicsContent() : renderCashSection()}
+        {currentView === 'economics' && renderEconomicsContent()}
+        {currentView === 'cashflow' && <CashFlowStatementLive />}
+        {currentView === 'balancesheet' && <BalanceSheetLive />}
       </div>
     </div>
   );
@@ -619,16 +453,6 @@ const Index = () => {
       <main className="container mx-auto px-4 py-6">
         {renderContent()}
       </main>
-      <OpExDrawer 
-        isOpen={opexDrawerOpen} 
-        onClose={() => setOpexDrawerOpen(false)}
-        breakdown={selectedOpExBreakdown}
-      />
-      <GrossMarginDrawer
-        isOpen={gmDrawerOpen}
-        onClose={() => setGmDrawerOpen(false)}
-        breakdown={selectedGMBreakdown}
-      />
     </div>
   );
 };

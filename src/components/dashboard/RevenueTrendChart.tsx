@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { getRevenuesForPeriod, getCogsForPeriod, getOpexForPeriod } from "@/data/financialData";
 import {
   usePnlByBu,
   useBudgetMonthly,
@@ -21,7 +20,7 @@ interface LiveTrendPoint {
 }
 
 interface RevenueTrendChartProps {
-  scenario?: 'Budget_Base' | 'Budget_Worst' | 'Budget_Best' | 'PY';
+  scenario?: 'Budget_Base' | 'PY';
   /** Live BU code (LIV/HSE/...) or "All Company" */
   selectedBU?: string;
 }
@@ -33,7 +32,7 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
   const [selectedMetric, setSelectedMetric] = useState<MetricType>("revenue");
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>("yearly");
   // LIVE monthly series (Supabase pnl_by_bu) + LIVE budget (v_budget_monthly,
-  // BASE scenario). Budget Worst/Best scenarios are not loaded and stay MOCK.
+  // BASE scenario). All mock paths removed for the production go-live.
   const { data: liveRows } = usePnlByBu();
   const { data: budgetRows } = useBudgetMonthly();
 
@@ -41,8 +40,7 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
     return `${(value / 1000).toFixed(0)}K`;
   };
 
-  const comparisonLabel =
-    scenario === "PY" ? "PY (LIVE)" : scenario === "Budget_Base" ? "Budget (LIVE)" : "Budget (MOCK)";
+  const comparisonLabel = scenario === "PY" ? "PY (LIVE)" : "Budget (LIVE)";
 
   const metricOf = (t: LivePLTotals): number => {
     switch (selectedMetric) {
@@ -53,41 +51,17 @@ export const RevenueTrendChart = ({ scenario = "Budget_Base", selectedBU = "All 
     }
   };
 
-  // MOCK budget for one live month key ("YYYY-MM"). The mock dataset only
-  // covers the consolidated prototype calendar (Dec '24 - Nov '25) — months
-  // and BUs outside it return 0.
-  const mockBudgetFor = (monthKey: string): number => {
-    if (selectedBU !== "All Company") return 0; // no mock budget on live BU taxonomy
-    const budgetScenario = scenario === "PY" ? "Budget_Base" : scenario;
-    const [y, m] = monthKey.split("-").map(Number);
-    const start = `${monthKey}-01`;
-    const end = `${monthKey}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
-    const rev = getRevenuesForPeriod(budgetScenario, start, end);
-    const cog = getCogsForPeriod(budgetScenario, start, end);
-    const op = getOpexForPeriod(budgetScenario, start, end);
-    switch (selectedMetric) {
-      case "grossMargin": return rev - cog;
-      case "opex": return Math.abs(op);
-      case "ebitda": return rev - cog - op;
-      default: return rev;
-    }
-  };
-
   // Get data: LIVE actuals + comparison per month. PY -> LIVE (-12m shift);
-  // Budget_Base -> LIVE from v_budget_monthly (null outside Jul-2026..Dec-2027,
-  // and null anyway for the OpEx/GM metrics before the window — gap, not zero);
-  // Budget_Worst/Best -> MOCK (only BASE is loaded in Supabase).
+  // Budget_Base -> LIVE from v_budget_monthly (null outside Jul-2026..Dec-2027 —
+  // the line shows a gap, not zero).
   const getData = (): LiveTrendPoint[] => {
     const buCode = selectedBU !== "All Company" ? selectedBU : undefined;
     const count = selectedPeriod === "quarterly" ? 3 : selectedPeriod === "6months" ? 6 : 12;
     const series = getLiveMonthlySeries(liveRows, buCode, count);
 
     const budgetOf = (monthKey: string): number | null => {
-      if (scenario === "Budget_Base") {
-        const b = budgetForMonth(budgetRows, monthKey, buCode);
-        return b === null ? null : metricOf(b);
-      }
-      return mockBudgetFor(monthKey);
+      const b = budgetForMonth(budgetRows, monthKey, buCode);
+      return b === null ? null : metricOf(b);
     };
 
     return series.map((point) => ({

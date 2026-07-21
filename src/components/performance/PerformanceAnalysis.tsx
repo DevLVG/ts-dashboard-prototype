@@ -20,16 +20,28 @@ import {
   ResponsiveContainer, ReferenceLine, Legend, Cell, LabelList,
 } from "recharts";
 import { useAlignment } from "@/contexts/AlignmentContext";
-import { BasisBadge, BasisToggle, WindowPicker, CompletenessBanner } from "@/components/chrome/AlignmentChrome";
+import { BasisBadge, BasisToggle, WindowPicker, CompletenessBanner, FrozenRefChip } from "@/components/chrome/AlignmentChrome";
 import {
   useBasisRows, useRecurrence, useModelAdjustments, useCreditNoteAudit,
+  useCollectionsMonthly, collectionsInWin,
   aggregatePL, aggregateRecurring, aggregateBudgetWindow, recurrenceIsLive,
   creditNotesInWin, adjustmentLadder, resolveRecurrence, fiscalQuarters,
   factMonths, winLabel, pyWin, AS_DELIVERED_WIN, BASIS_SHORT,
   type Basis, type BasisRow, type Win, type RecurrenceState,
 } from "@/data/alignment";
 import { useBudgetMonthly, useBudgetAllVersions, LIVE_BU_LABELS, monthKey, monthKeyLabel, shiftMonthKey } from "@/data/liveData";
-import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtCompact, pctChange, fmtOrDash } from "@/lib/format";
+import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtPct, fmtCompact, pctChange, fmtOrDash } from "@/lib/format";
+import { useIsMobile } from "@/hooks/use-mobile";
+
+// ------------------- FROZEN PACKAGE CITATIONS (punch item 6, spec §0.3/§5-A)
+// These strings/values are QUOTATIONS of the delivered 18-Jul package (12-Jun
+// extraction / 16-Jul model freeze). They legitimately exist nowhere in the
+// live warehouse — they render ONLY inside <FrozenRefChip>, clearly labeled
+// "as delivered", visually distinct from live figures. The §5-D traceability
+// gate excepts exactly these labeled citations (they are citations of the
+// delivered package, not figures of the panel).
+const DELIVERED_P1_PY_TEXT = "PY 3,027,897 · +29.3%";
+const DELIVERED_P3_CLEAN_SAR = 80942; // "Recurring EBITDA (clean)" as delivered
 
 // ------------------------------------------------------------- primitives
 
@@ -73,22 +85,30 @@ const DataStateFootnote = () => (
 
 // ------------------------------------------------------------- waterfall
 
-interface WaterfallStep { label: string; value: number; kind: "anchor" | "delta" }
+interface WaterfallStep {
+  label: string;
+  /** Compact x-axis label for narrow viewports (≤768px) — punch item 7. */
+  short?: string;
+  value: number;
+  kind: "anchor" | "delta";
+}
 
 const Waterfall = ({ steps, height = 260 }: { steps: WaterfallStep[]; height?: number }) => {
+  const isMobile = useIsMobile();
   // Build float bars: anchors run 0→value; deltas run prev→prev+value.
   const data = useMemo(() => {
     let running = 0;
     return steps.map((s) => {
+      const label = isMobile && s.short ? s.short : s.label;
       if (s.kind === "anchor") {
         running = s.value;
-        return { label: s.label, base: Math.min(0, s.value), size: Math.abs(s.value), kind: "anchor" as const, raw: s.value };
+        return { label, base: Math.min(0, s.value), size: Math.abs(s.value), kind: "anchor" as const, raw: s.value };
       }
       const from = running;
       running += s.value;
-      return { label: s.label, base: Math.min(from, running), size: Math.abs(s.value), kind: s.value >= 0 ? ("up" as const) : ("down" as const), raw: s.value };
+      return { label, base: Math.min(from, running), size: Math.abs(s.value), kind: s.value >= 0 ? ("up" as const) : ("down" as const), raw: s.value };
     });
-  }, [steps]);
+  }, [steps, isMobile]);
   const Tip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ payload: (typeof data)[number] }>; label?: string }) => {
     if (!active || !payload || payload.length === 0) return null;
     const d = payload[0].payload;
@@ -102,11 +122,20 @@ const Waterfall = ({ steps, height = 260 }: { steps: WaterfallStep[]; height?: n
     );
   };
   return (
-    <ResponsiveContainer width="100%" height={height}>
+    <ResponsiveContainer width="100%" height={isMobile ? height + 26 : height}>
       <ComposedChart data={data} margin={{ top: 18, right: 8, bottom: 0, left: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-        <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10.5 }} tickLine={false} interval={0} />
-        <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={54} />
+        <XAxis
+          dataKey="label"
+          stroke="hsl(var(--muted-foreground))"
+          tick={{ fill: "hsl(var(--muted-foreground))", fontSize: isMobile ? 9.5 : 10.5 }}
+          tickLine={false}
+          interval={0}
+          angle={isMobile ? -32 : 0}
+          textAnchor={isMobile ? "end" : "middle"}
+          height={isMobile ? 54 : 30}
+        />
+        <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={isMobile ? 42 : 54} />
         <RTooltip content={<Tip />} />
         <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeOpacity={0.5} />
         <Bar dataKey="base" stackId="wf" fill="transparent" isAnimationActive={false} />
@@ -132,11 +161,12 @@ const Waterfall = ({ steps, height = 260 }: { steps: WaterfallStep[]; height?: n
 // --------------------------------------------------------------- screen
 
 export const PerformanceAnalysis = () => {
-  const { basis, win, py, winLabelText, pyLabelText, windowName, lastComplete } = useAlignment();
+  const { basis, win, py, winLabelText, pyLabelText, windowName, lastComplete, memoOn, setMemoOn } = useAlignment();
   const { data: basisData, isLoading } = useBasisRows();
   const { data: rec } = useRecurrence();
   const { data: budgetRows } = useBudgetMonthly();
   const { data: adjState } = useModelAdjustments();
+  const { data: collState } = useCollectionsMonthly();
   const [cnDrillOpen, setCnDrillOpen] = useState(false);
   const cnAudit = useCreditNoteAudit(cnDrillOpen);
 
@@ -146,19 +176,25 @@ export const PerformanceAnalysis = () => {
   // ---------------------------------------------------------- aggregates
   const recCur = useMemo(() => aggregateRecurring(rows, basis, win, rec), [rows, basis, win, rec]);
   const recPy = useMemo(() => aggregateRecurring(rows, basis, py, rec), [rows, basis, py, rec]);
-  const recCurOther = useMemo(
-    () => aggregateRecurring(rows, basis === "VALIDATED" ? "STRICT" : "VALIDATED", win, rec),
-    [rows, basis, win, rec],
-  );
+  // BOTH bases, current AND PY — the Strict-basis explainer chip (item 1) is
+  // DATA-CONDITIONED: it states the actual live relationship between the two
+  // bases' YoY, so it needs the full 2×2 (basis × period) grid.
+  const otherBasis: Basis = basis === "VALIDATED" ? "STRICT" : "VALIDATED";
+  const recCurOther = useMemo(() => aggregateRecurring(rows, otherBasis, win, rec), [rows, otherBasis, win, rec]);
+  const recPyOther = useMemo(() => aggregateRecurring(rows, otherBasis, py, rec), [rows, otherBasis, py, rec]);
   const totCur = useMemo(() => aggregatePL(rows, basis, win), [rows, basis, win]);
   const totPy = useMemo(() => aggregatePL(rows, basis, py), [rows, basis, py]);
   const cnCur = useMemo(() => creditNotesInWin(rows, win), [rows, win]);
   const cnPy = useMemo(() => creditNotesInWin(rows, py), [rows, py]);
+  // Collections (migration 032) — denominator of the CN/collections ratio (P5).
+  const collCur = useMemo(() => collectionsInWin(collState?.rows, win), [collState, win]);
+  const collPy = useMemo(() => collectionsInWin(collState?.rows, py), [collState, py]);
   // Recurring-tagged memo adjustments only: the ladder from AS-BOOKED to the
   // model's CLEAN recurring EBITDA (non-recurring memo rows sit elsewhere).
   const ladder = useMemo(() => adjustmentLadder(adjState, win, "recurring"), [adjState, win]);
 
   const recYoY = recCur && recPy ? pctChange(recCur.recRevenue, recPy.recRevenue) : null;
+  const recYoYOther = recCurOther && recPyOther ? pctChange(recCurOther.recRevenue, recPyOther.recRevenue) : null;
   const totYoY = pctChange(totCur.revenue, totPy.revenue);
 
   // ------------------------------------------------------------- bridge
@@ -330,18 +366,48 @@ export const PerformanceAnalysis = () => {
               <p className="text-xs text-muted-foreground">
                 PY ({pyLabelText}): <span className="tabular-nums">{fmtOrDash(recPy?.recRevenue)}</span>
               </p>
-              {basis === "STRICT" && recCurOther && (
-                <div className="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-300">
-                  Direction differs from the Validated basis because customer credit notes more than
-                  doubled YoY ({fmtSAR(cnCur)} vs {fmtSAR(cnPy)} net) — see the credit-note tile.
-                </div>
-              )}
-              {basis === "VALIDATED" && (
+              {basis === "STRICT" && recYoY !== null && recYoYOther !== null && (() => {
+                // DATA-CONDITIONED explainer (punch item 1): states the ACTUAL
+                // live relationship between the two bases' YoY — direction and
+                // magnitude computed from the fetched rows, never asserted.
+                const sameDirection = (recYoY >= 0) === (recYoYOther >= 0);
+                const relation = Math.abs(recYoY - recYoYOther) < 0.05
+                  ? "in line with"
+                  : recYoY < recYoYOther ? "lower than" : "higher than";
+                const cnRatio = cnPy > 0.5 ? cnCur / cnPy : null;
+                const cnPhrase = cnRatio === null
+                  ? (cnCur > 0.5 ? "appeared this window (none in PY)" : "are immaterial in both periods")
+                  : cnRatio >= 2 ? "more than doubled YoY"
+                  : cnRatio > 1.005 ? `rose ${fmtDeltaPct(pctChange(cnCur, cnPy) ?? 0)} YoY`
+                  : cnRatio >= 0.995 ? "were flat YoY"
+                  : `declined ${fmtDeltaPct(pctChange(cnCur, cnPy) ?? 0)} YoY`;
+                return (
+                  <div className="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-300">
+                    {sameDirection ? (
+                      <>Strict basis: <strong className="tabular-nums">{fmtDeltaPct(recYoY)}</strong> — same direction
+                      as the Validated basis, {relation} its <span className="tabular-nums">{fmtDeltaPct(recYoYOther)}</span>{" "}
+                      because customer credit notes {cnPhrase} ({fmtSAR(cnCur)} vs {fmtSAR(cnPy)} net of VAT) —
+                      see the credit-note tile.</>
+                    ) : (
+                      <>Direction differs from the Validated basis (<span className="tabular-nums">{fmtDeltaPct(recYoY)}</span> Strict
+                      vs <span className="tabular-nums">{fmtDeltaPct(recYoYOther)}</span> Validated) because customer credit
+                      notes {cnPhrase} ({fmtSAR(cnCur)} vs {fmtSAR(cnPy)} net of VAT) — see the credit-note tile.</>
+                    )}
+                  </div>
+                );
+              })()}
+              {basis === "VALIDATED" && recYoY !== null && (
                 <p className="text-xs text-muted-foreground">
-                  The package headline: recurring club growth on the validated basis — the growth story
-                  the founder delivered.
+                  {recYoY > 0
+                    ? "The package headline: recurring club growth on the validated basis — the growth story the founder delivered."
+                    : "Recurring revenue is not above PY on this window — the delivered growth headline applies to the As-delivered TTM window."}
                 </p>
               )}
+              <div className="pt-0.5">
+                <FrozenRefChip label="As delivered · 12-Jun extraction">
+                  {DELIVERED_P1_PY_TEXT} <span className="text-muted-foreground/70">({winLabel(AS_DELIVERED_WIN)} window)</span>
+                </FrozenRefChip>
+              </div>
               <DataStateFootnote />
             </>
           )}
@@ -357,10 +423,18 @@ export const PerformanceAnalysis = () => {
           <p className="text-xs text-muted-foreground">
             PY ({pyLabelText}): <span className="tabular-nums">{fmtSAR(totPy.revenue)}</span>
           </p>
-          <p className="text-xs text-muted-foreground">
-            Total revenue below PY (DRIFT roll-off), as in the delivered analysis — the recurring club
-            is the growth story.
-          </p>
+          {/* DATA-CONDITIONED narrative (punch item 4): the DRIFT roll-off
+              reading renders only when the window actually shows it — total
+              below PY while the recurring perimeter grows. */}
+          {totYoY !== null && (
+            <p className="text-xs text-muted-foreground">
+              {totYoY < 0 && recYoY !== null && recYoY > 0
+                ? "Total revenue below PY (non-recurring DRIFT roll-off), as in the delivered analysis — the recurring club is the growth story."
+                : totYoY < 0
+                  ? "Total revenue below PY on this window."
+                  : "Total revenue above PY on this window."}
+            </p>
+          )}
         </Card>
 
         {/* P3 — Recurring EBITDA */}
@@ -385,10 +459,29 @@ export const PerformanceAnalysis = () => {
                   </span>
                 )}
               </p>
+              {/* Founder gate (punch item 3): the memo ladder is OPT-IN —
+                  default OFF on load, persisted; never rendered unrequested
+                  in client viewing. */}
               {ladder.length > 0 ? (
-                <div className="text-xs text-muted-foreground space-y-0.5 border-t border-border/40 pt-2">
-                  <p className="font-semibold text-foreground/80">Model-adjustment ladder <span className="text-amber-400">[model adj — not in books]</span></p>
-                  {(() => {
+                <div className="text-xs text-muted-foreground space-y-1 border-t border-border/40 pt-2">
+                  <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={memoOn}
+                      onChange={(e) => setMemoOn(e.target.checked)}
+                      className="accent-[hsl(var(--gold))]"
+                    />
+                    <span className="font-semibold text-foreground/80">
+                      Model-adjustment ladder <span className="text-amber-400">[model adj — not in books]</span>
+                    </span>
+                  </label>
+                  {!memoOn && (
+                    <p className="text-[10px] text-muted-foreground/70">
+                      Off by default for client viewing (founder gate) — tick to reconcile to the
+                      package's clean recurring EBITDA.
+                    </p>
+                  )}
+                  {memoOn && (() => {
                     let running = recCur.recEbitda;
                     const stepsOut = [
                       <p key="start" className="tabular-nums">As booked: {fmtSAR(recCur.recEbitda)}</p>,
@@ -399,7 +492,18 @@ export const PerformanceAnalysis = () => {
                         <p key={s.code} className="tabular-nums">{s.label}: {fmtDeltaSAR(s.amount)}</p>,
                       );
                     }
+                    const isPresetWin = win.startKey === AS_DELIVERED_WIN.startKey && win.endKey === AS_DELIVERED_WIN.endKey;
                     stepsOut.push(<p key="end" className="tabular-nums font-semibold text-foreground">Clean (model-adjusted): {fmtSAR(running)}</p>);
+                    stepsOut.push(
+                      <div key="ref" className="pt-1">
+                        <FrozenRefChip label="As delivered · 16-Jul freeze">
+                          Recurring EBITDA (clean) +{fmtSAR(DELIVERED_P3_CLEAN_SAR)}
+                          {isPresetWin && (
+                            <> · live re-computation {fmtSAR(running)} — post-freeze bookings {fmtDeltaSAR(running - DELIVERED_P3_CLEAN_SAR)}</>
+                          )}
+                        </FrozenRefChip>
+                      </div>,
+                    );
                     stepsOut.push(
                       <p key="fn" className="text-[10px] text-muted-foreground/70 pt-1">
                         Computed live — the warehouse has moved since the package's 12-Jun/16-Jul freeze
@@ -432,11 +536,11 @@ export const PerformanceAnalysis = () => {
             <>
               <Waterfall
                 steps={[
-                  { label: `Package (Validated, ${winLabel(AS_DELIVERED_WIN)})`, value: bridge.presetValidated.revenue, kind: "anchor" },
-                  { label: "Window roll", value: bridge.winValidated.revenue - bridge.presetValidated.revenue, kind: "delta" },
-                  { label: `Validated (${winLabelText})`, value: bridge.winValidated.revenue, kind: "anchor" },
-                  { label: "Credit notes", value: bridge.winStrict.revenue - bridge.winValidated.revenue, kind: "delta" },
-                  { label: `Strict (${winLabelText})`, value: bridge.winStrict.revenue, kind: "anchor" },
+                  { label: `Package (Validated, ${winLabel(AS_DELIVERED_WIN)})`, short: "Package", value: bridge.presetValidated.revenue, kind: "anchor" },
+                  { label: "Window roll", short: "Window", value: bridge.winValidated.revenue - bridge.presetValidated.revenue, kind: "delta" },
+                  { label: `Validated (${winLabelText})`, short: "Validated", value: bridge.winValidated.revenue, kind: "anchor" },
+                  { label: "Credit notes", short: "CN", value: bridge.winStrict.revenue - bridge.winValidated.revenue, kind: "delta" },
+                  { label: `Strict (${winLabelText})`, short: "Strict", value: bridge.winStrict.revenue, kind: "anchor" },
                 ]}
               />
               <p className="text-xs text-muted-foreground tabular-nums">
@@ -461,15 +565,28 @@ export const PerformanceAnalysis = () => {
         <Card className="p-5 space-y-2.5 border border-amber-500/30">
           <TileHeader
             title={`Credit-note anomaly — ${winLabelText}`}
-            hint="Customer credit notes net of VAT. Real business signal already flagged to the client — this is what explains the basis toggle. Drill: v_credit_note_audit (authenticated)."
+            hint="Customer credit notes net of VAT; ratio denominator = collections allocated to invoices (v_collections_monthly, register P5 definition). Real business signal already flagged to the client — this is what explains the basis toggle. Drill: v_credit_note_audit (authenticated)."
           />
           <div className="flex items-end gap-3 flex-wrap">
             <p className="text-3xl font-heading tracking-tight tabular-nums text-amber-400">{fmtSAR(cnCur)}</p>
             <YoYChip pct={pctChange(cnCur, cnPy)} positiveIsGood={false} />
           </div>
           <p className="text-xs text-muted-foreground tabular-nums">
-            PY ({pyLabelText}): {fmtSAR(cnPy)} · CN incidence {totCur.revenue + cnCur > 0 ? `${((cnCur / (basis === "VALIDATED" ? totCur.revenue : totCur.revenue + cnCur)) * 100).toFixed(1)}%` : "n/a"} of pre-CN revenue
+            PY ({pyLabelText}): {fmtSAR(cnPy)}
+            {pctChange(cnCur, cnPy) !== null && <> · net {fmtDeltaPct(pctChange(cnCur, cnPy)!)} YoY</>}
           </p>
+          {/* Spec P5: CN ÷ collections, BOTH periods, computed live (item 5). */}
+          {collCur !== null && collCur > 0 && collPy !== null && collPy > 0 ? (
+            <p className="text-xs text-muted-foreground tabular-nums">
+              CN ÷ collections: <strong className="text-amber-400">{fmtPct((cnCur / collCur) * 100)}</strong> ({winLabelText})
+              {" "}vs <strong className="text-foreground">{fmtPct((cnPy / collPy) * 100)}</strong> (PY {pyLabelText})
+              {" "}· collections {fmtSAR(collCur)} vs {fmtSAR(collPy)}
+            </p>
+          ) : (
+            <p className="text-[11px] text-muted-foreground/70">
+              CN/collections ratio pending — v_collections_monthly not reachable for this window.
+            </p>
+          )}
           <p className="text-xs text-muted-foreground">
             Validated basis shows revenue BEFORE these credit notes (as the package did); Strict basis
             nets them off. The anomaly is open with the client.
@@ -599,7 +716,24 @@ export const PerformanceAnalysis = () => {
                 <span className={`ml-1 font-semibold ${budgetStory.actualHistValidated.revenue >= budgetStory.hist.revenue ? "text-success" : "text-destructive"}`}>{fmtDeltaPct(pctChange(budgetStory.actualHistValidated.revenue, budgetStory.hist.revenue) ?? 0)}</span>
               </p>
               <p className="text-sm tabular-nums">EBITDA: {fmtSAR(budgetStory.actualHistValidated.ebitdaReported)} vs bud {fmtSAR(budgetStory.hist.ebitdaAll)}</p>
-              <p className="text-[11px] text-muted-foreground/80">DRIFT slip drives the total-revenue miss; recurring core near plan.</p>
+              {/* DATA-CONDITIONED (item 4): the DRIFT-slip attribution renders
+                  only when the DRIFT gap actually carries the total miss. */}
+              {(() => {
+                const totalGap = budgetStory.actualHistValidated.revenue - budgetStory.hist.revenue;
+                const driftGap = (budgetStory.recHist?.nonRecRevenue ?? 0) - budgetStory.drift;
+                const recGapPct = budgetStory.recHist ? pctChange(budgetStory.recHist.recRevenue, budgetStory.histRecBudget) : null;
+                if (totalGap < 0 && driftGap < 0 && Math.abs(driftGap) >= 0.5 * Math.abs(totalGap)) {
+                  return (
+                    <p className="text-[11px] text-muted-foreground/80 tabular-nums">
+                      DRIFT slip drives the total-revenue miss ({fmtSAR(driftGap)} of the {fmtSAR(totalGap)} gap);
+                      recurring core {recGapPct !== null ? (Math.abs(recGapPct) <= 10 ? `near plan (${fmtDeltaPct(recGapPct)})` : `${fmtDeltaPct(recGapPct)} vs plan`) : "—"}.
+                    </p>
+                  );
+                }
+                return recGapPct !== null ? (
+                  <p className="text-[11px] text-muted-foreground/80 tabular-nums">Recurring core {fmtDeltaPct(recGapPct)} vs plan.</p>
+                ) : null;
+              })()}
             </div>
             <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-1">
               <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
@@ -620,7 +754,10 @@ export const PerformanceAnalysis = () => {
               <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">FY{budgetStory.nextYear?.slice(2)} plan</p>
               <p className="text-sm tabular-nums">Revenue: {fmtOrDash(budgetStory.fy27?.revenue)}</p>
               <p className="text-sm tabular-nums">EBITDA: {fmtOrDash(budgetStory.fy27?.ebitdaAll)}</p>
-              <p className="text-[11px] text-muted-foreground/80">Self-financing plan — reported EBITDA turns structurally positive.</p>
+              {/* Conditioned (item 4): only claim the turn when planned EBITDA IS positive. */}
+              {budgetStory.fy27 && budgetStory.fy27.ebitdaAll > 0 && (
+                <p className="text-[11px] text-muted-foreground/80">Self-financing plan — planned EBITDA turns structurally positive.</p>
+              )}
             </div>
           </div>
         ) : (
@@ -640,7 +777,24 @@ export const PerformanceAnalysis = () => {
           </div>
         )}
         <p className="text-[11px] text-muted-foreground/80">
-          Jun-26 has no budget by design (historical window ends May-26; approved forward starts Jul-26).
+          {/* Coverage gap DERIVED from the loaded budget months (item 4) —
+              no hardcoded month list. */}
+          {(() => {
+            if (!budgetRows || budgetRows.length === 0) return null;
+            const covered = [...budgetMonthsSetLocal(budgetRows)].sort();
+            const missing: string[] = [];
+            let k = covered[0];
+            while (k <= covered[covered.length - 1]) {
+              if (!covered.includes(k)) missing.push(k);
+              k = shiftMonthKey(k, 1);
+            }
+            if (missing.length === 0) return null;
+            return (
+              <>No budget exists for {missing.map(monthKeyLabel).join(", ")} — by design: the historical
+              vintage ends {monthKeyLabel(shiftMonthKey(missing[0], -1))}, the approved forward budget
+              starts {monthKeyLabel(shiftMonthKey(missing[missing.length - 1], 1))}.{" "}</>
+            );
+          })()}
           Budget is net of VAT with no credit-note concept. Pre-blend vintages (V1 original, V2 revised)
           are storytelling only — never the default comparison.
         </p>

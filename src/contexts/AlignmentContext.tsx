@@ -20,12 +20,19 @@ interface AlignmentState {
   /** Last complete month (set by the data host once rows load). */
   lastComplete: string;
   setLastComplete: (k: string) => void;
+  /** Founder gate (spec §1.1 / punch item 3): the model-adjustment memo
+   * ladder is OPT-IN for client viewing — default OFF on load, persisted.
+   * One switch governs both the P&L View-B memo lines and the P3 tile
+   * ladder, so the memo layer is never half-visible. */
+  memoOn: boolean;
+  setMemoOn: (v: boolean) => void;
 }
 
 const Ctx = createContext<AlignmentState | null>(null);
 
 const BASIS_KEY = "clever.basis";
 const PRESET_KEY = "clever.windowPreset";
+const MEMO_KEY = "clever.memoLadder";
 
 export const AlignmentProvider = ({ children }: { children: ReactNode }) => {
   const [basis, setBasisState] = useState<Basis>(() => {
@@ -37,9 +44,15 @@ export const AlignmentProvider = ({ children }: { children: ReactNode }) => {
     return v || "TTM";
   });
   const [lastComplete, setLastComplete] = useState<string>("2026-06");
+  const [memoOn, setMemoOnState] = useState<boolean>(() => {
+    // Founder gate: memo ladder is opt-in — default OFF on load (§1.1).
+    const v = typeof localStorage !== "undefined" ? localStorage.getItem(MEMO_KEY) : null;
+    return v === "on";
+  });
 
   const setBasis = (b: Basis) => { setBasisState(b); try { localStorage.setItem(BASIS_KEY, b); } catch { /* private mode */ } };
   const setPreset = (p: WindowPresetId) => { setPresetState(p); try { localStorage.setItem(PRESET_KEY, p); } catch { /* private mode */ } };
+  const setMemoOn = (v: boolean) => { setMemoOnState(v); try { localStorage.setItem(MEMO_KEY, v ? "on" : "off"); } catch { /* private mode */ } };
 
   const value = useMemo<AlignmentState>(() => {
     const { win, name } = resolveWindow(preset, lastComplete);
@@ -48,8 +61,9 @@ export const AlignmentProvider = ({ children }: { children: ReactNode }) => {
       basis, setBasis, preset, setPreset, win, windowName: name, py,
       winLabelText: winLabel(win), pyLabelText: winLabel(py),
       lastComplete, setLastComplete,
+      memoOn, setMemoOn,
     };
-  }, [basis, preset, lastComplete]);
+  }, [basis, preset, lastComplete, memoOn]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 };

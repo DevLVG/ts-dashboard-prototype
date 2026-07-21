@@ -1,9 +1,9 @@
 // Global chrome — basis toggle, window preset picker, basis badge and the
 // warehouse-driven completeness banner (spec §1 global chrome + §1.5).
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, Scale, Lock } from "lucide-react";
+import { AlertTriangle, Scale, Lock, Archive, ChevronsRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlignment } from "@/contexts/AlignmentContext";
 import {
@@ -154,6 +154,66 @@ export const IncompleteMark = ({ flagged, className }: { flagged: boolean; class
       </TooltipTrigger>
       <TooltipContent side="top" className="text-xs">Month incomplete — costs not fully posted.</TooltipContent>
     </Tooltip>
+  );
+};
+
+// ---------------------------------------------------- frozen-reference chip
+
+/** Spec §0.3 / §5-A (punch item 6): a clearly-labeled STATIC citation of the
+ * delivered package — frozen figures that legitimately exist nowhere in the
+ * warehouse. Visually distinct from live figures: dashed border, archive
+ * icon, muted ink; the label always says "as delivered". */
+export const FrozenRefChip = ({ label, children }: { label: string; children: ReactNode }) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <span className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-muted-foreground/40 bg-muted/20 px-2 py-1 text-[11px] leading-snug text-muted-foreground cursor-help max-w-full">
+        <Archive className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+        <span className="font-semibold uppercase tracking-wider text-[9px] text-muted-foreground/80 shrink-0">{label}</span>
+        <span className="tabular-nums">{children}</span>
+      </span>
+    </TooltipTrigger>
+    <TooltipContent side="top" className="max-w-sm text-xs">
+      Static citation of the delivered package ({label.toLowerCase()}) — NOT a live warehouse
+      figure. The panel always computes live; this chip preserves what the client received.
+    </TooltipContent>
+  </Tooltip>
+);
+
+// ------------------------------------------------------------- scroll hint
+
+/** Horizontal-overflow affordance for wide tables: wraps an overflow-x-auto
+ * container and shows a "scroll →" pill + right-edge fade while the content
+ * actually overflows (recomputed on resize/content change). */
+export const ScrollHint = ({ children, className }: { children: ReactNode; className?: string }) => {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const [atEnd, setAtEnd] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      setOverflowing(el.scrollWidth > el.clientWidth + 2);
+      setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 2);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    el.addEventListener("scroll", measure, { passive: true });
+    const t = setTimeout(measure, 300); // post-paint (fonts/columns settle)
+    return () => { ro.disconnect(); el.removeEventListener("scroll", measure); clearTimeout(t); };
+  }, [children]);
+  return (
+    <div className="relative">
+      <div ref={ref} className={cn("overflow-x-auto", className)}>{children}</div>
+      {overflowing && !atEnd && (
+        <>
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-background/90 to-transparent" />
+          <div className="pointer-events-none absolute right-1 top-1 inline-flex items-center gap-0.5 rounded-full border border-border bg-background/95 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground shadow-sm">
+            scroll <ChevronsRight className="h-3 w-3" />
+          </div>
+        </>
+      )}
+    </div>
   );
 };
 

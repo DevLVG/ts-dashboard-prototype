@@ -42,6 +42,9 @@ import { ComparisonToggle } from "@/components/analysis/ComparisonToggle";
 import { PnLAnalysisTable } from "@/components/analysis/PnLAnalysisTable";
 import { AnalysisWaterfall } from "@/components/analysis/AnalysisWaterfall";
 import { AnalysisDrilldownDrawer } from "@/components/analysis/AnalysisDrilldownDrawer";
+import { useAlignment } from "@/contexts/AlignmentContext";
+import { BasisBadge, BasisToggle } from "@/components/chrome/AlignmentChrome";
+import { fmtSAR } from "@/lib/format";
 
 // ------------------------------------------------------- persisted UI state
 
@@ -126,8 +129,19 @@ const resolvePeriod = (sel: string, lastComplete: string): PeriodRange => {
 // ---------------------------------------------------------------- component
 
 export const EconomicAnalysis = () => {
-  const { data: leafRows, isLoading, isError, error } = usePnlLeafRows();
+  const { data: rawLeafRows, isLoading, isError, error } = usePnlLeafRows();
   const { data: budgetRows } = useBudgetMonthly();
+  // BASIS INHERITANCE (punch item 2, spec §1.1 drill contract): the Drill
+  // screen follows the GLOBAL basis toggle. Validated = credit-note rows
+  // excluded (with an on-screen count); Strict = included (they reduce
+  // revenue). One filter at data ingress — every aggregate, comparison
+  // window, waterfall bar and drawer figure downstream is basis-consistent,
+  // so cross-screen totals match the P&L Overview exactly.
+  const { basis } = useAlignment();
+  const leafRows = useMemo(
+    () => (basis === "VALIDATED" ? rawLeafRows?.filter((r) => r.source !== "credit_note") : rawLeafRows),
+    [rawLeafRows, basis],
+  );
 
   // Default period: AUTO = the last month with a COMPLETE close (derived from
   // the live rows) — a CFO must never land on the cost-less partial month.
@@ -214,6 +228,21 @@ export const EconomicAnalysis = () => {
       }),
     [leafRows, budgetRows, range.startKey, range.endKey, buCode, comps, view, pyRange.startKey, ppRange.startKey],
   );
+
+  // Credit-note slice inside the active window (from the UNfiltered rows) —
+  // drives the excluded-with-count / included note (spec §1.1, item 2).
+  const cnInRange = useMemo(() => {
+    let net = 0, docLines = 0;
+    for (const r of rawLeafRows ?? []) {
+      if (r.source !== "credit_note") continue;
+      const k = monthKey(r.period_month);
+      if (k < range.startKey || k > range.endKey) continue;
+      if (buCode === UNALLOCATED_BU ? r.bu !== null : buCode ? r.bu !== buCode : false) continue;
+      net += -r.amount_sar; // CN rows are negative revenue -> positive deduction
+      docLines += r.line_count;
+    }
+    return { net, docLines };
+  }, [rawLeafRows, range.startKey, range.endKey, buCode]);
 
   const compRangeLabels: Partial<Record<ComparisonKind, string>> = {
     PY: rangeLabel(pyRange.startKey, pyRange.endKey),
@@ -336,17 +365,39 @@ export const EconomicAnalysis = () => {
             <TabsTriggerPill value="management">Management — Adjusted</TabsTriggerPill>
           </TabsListPill>
         </Tabs>
+        <BasisToggle />
       </div>
 
       {/* Comparison-window transparency */}
       <p className="text-xs text-muted-foreground -mt-2">
         Period: <span className="font-medium text-foreground">{range.label}</span>
+        {" "}· basis <BasisBadge basis={basis} />
         {comps.includes("PY") && <> · Prev Year = {compRangeLabels.PY}</>}
         {comps.includes("PP") && <> · Prev Period = {compRangeLabels.PP}</>}
         {comps.includes("BUD") && !budgetInWindow && (
           <> · Budget starts {monthKeyLabel(BUDGET_START_KEY)} — no budget for this period (columns show n/a)</>
         )}
       </p>
+
+      {/* Basis honesty (item 2): state exactly what the active basis does to
+          the credit-note rows in THIS window — computed, never asserted. */}
+      {cnInRange.docLines > 0 && (
+        <p className="text-xs -mt-3">
+          {basis === "VALIDATED" ? (
+            <span className="text-muted-foreground">
+              Validated basis — <strong className="tabular-nums">{cnInRange.docLines}</strong> credit-note
+              line{cnInRange.docLines === 1 ? "" : "s"} ({fmtSAR(cnInRange.net)} net of VAT) excluded from
+              revenue in this period; switch to Strict to net them off.
+            </span>
+          ) : (
+            <span className="text-sky-300/90">
+              Strict basis — includes <strong className="tabular-nums">{cnInRange.docLines}</strong> credit-note
+              line{cnInRange.docLines === 1 ? "" : "s"} reducing revenue by {fmtSAR(cnInRange.net)} (net of VAT)
+              in this period.
+            </span>
+          )}
+        </p>
+      )}
 
       {/* Live status banners */}
       {!isSupabaseConfigured && (
@@ -411,7 +462,9 @@ export const EconomicAnalysis = () => {
           the Project Costs line for like-for-like comparison. Budget BASE from{" "}
           <span className="font-mono">v_budget_monthly</span> (approved 2026-07-16, Jul-2026 → Dec-2027).
           Prev Year = same window −12 months · Prev Period = the preceding window of equal length.
-          Known limits (not adjusted here): credit-note treatment follows the live views; Draft
+          Credit-note treatment follows the GLOBAL basis toggle (Validated = pre-CN, as the delivered
+          package; Strict = net of CN) — the same basis as the P&L Overview, so totals match across
+          screens. Known limits (not adjusted here): Draft
           invoices pending posting are excluded; bill items without a MoA tag are excluded; any
           residual unmapped JE slice stays inside recurring EBITDA until decision D378 lands.
           Cost-center pivot is not in R1 (facility sqm allocation data pending). The tool rolls

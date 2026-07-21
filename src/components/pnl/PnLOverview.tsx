@@ -20,7 +20,7 @@ import {
   ResponsiveContainer, ReferenceLine, Legend, Cell,
 } from "recharts";
 import { useAlignment } from "@/contexts/AlignmentContext";
-import { BasisBadge, BasisToggle, WindowPicker, CompletenessBanner, BudgetBasisFootnote, IncompleteMark } from "@/components/chrome/AlignmentChrome";
+import { BasisBadge, BasisToggle, WindowPicker, CompletenessBanner, BudgetBasisFootnote, IncompleteMark, ScrollHint } from "@/components/chrome/AlignmentChrome";
 import {
   useBasisRows, useRecurrence, useModelAdjustments, aggregatePL, aggregateRecurring,
   aggregateBudgetWindow, budgetMonthsSet, monthlySeries, deriveCompleteness,
@@ -62,18 +62,23 @@ const MatrixTable = ({
   budgetHeader: string;
   budgetNa: string | null; // non-null => whole budget column is n/a with this reason
 }) => (
-  <div className="overflow-x-auto">
-    <table className="w-full min-w-[860px] text-sm">
+  // Layout (punch item 7): the label column is STICKY so horizontal scrolling
+  // never strands the reader; labels wrap instead of forcing column blow-out
+  // (the old nowrap labels clipped the Δ-PY columns at 1440 in View B and left
+  // only the label column visible on first paint at 390); ScrollHint adds a
+  // visible affordance whenever the table still overflows.
+  <ScrollHint>
+    <table className="w-full min-w-[760px] text-sm">
       <thead>
         <tr className="border-b-2 border-border text-xs uppercase tracking-wider text-muted-foreground">
-          <th className="text-left py-2.5 pr-4 font-semibold">SAR</th>
-          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">Actual ({winText})</th>
-          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">{budgetHeader}</th>
-          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">Δ Bud</th>
-          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">Δ Bud %</th>
-          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">PY ({pyText})</th>
-          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">Δ PY</th>
-          <th className="text-right py-2.5 px-3 font-semibold whitespace-nowrap">Δ PY %</th>
+          <th className="text-left py-2.5 pr-3 font-semibold sticky left-0 z-10 bg-card">SAR</th>
+          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">Actual ({winText})</th>
+          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">{budgetHeader}</th>
+          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">Δ Bud</th>
+          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">Δ Bud %</th>
+          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">PY ({pyText})</th>
+          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">Δ PY</th>
+          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">Δ PY %</th>
         </tr>
       </thead>
       <tbody>
@@ -90,7 +95,7 @@ const MatrixTable = ({
                 r.topBorder ? "border-t-2 border-t-border" : "",
               ].join(" ")}
             >
-              <td className={`py-2 pr-4 whitespace-nowrap ${r.indent ? "pl-5 text-muted-foreground font-normal" : ""}`}>
+              <td className={`py-2 pr-3 sticky left-0 z-10 bg-card min-w-[140px] max-w-[46vw] md:min-w-[170px] md:max-w-[260px] ${r.indent ? "pl-5 text-muted-foreground font-normal" : ""}`}>
                 {r.label}
                 {r.pctOfRevenue !== null && r.pctOfRevenue !== undefined && (
                   <span className="ml-2 text-xs text-muted-foreground font-normal">({r.pctOfRevenue.toFixed(1)}%)</span>
@@ -101,8 +106,8 @@ const MatrixTable = ({
                   </span>
                 )}
               </td>
-              <td className="text-right py-2 px-3 tabular-nums whitespace-nowrap">{r.actual === null ? "—" : fmtSAR(r.actual)}</td>
-              <td className="text-right py-2 px-3 tabular-nums whitespace-nowrap text-muted-foreground">
+              <td className="text-right py-2 px-2 tabular-nums whitespace-nowrap">{r.actual === null ? "—" : fmtSAR(r.actual)}</td>
+              <td className="text-right py-2 px-2 tabular-nums whitespace-nowrap text-muted-foreground">
                 {budgetNa !== null || r.budget === null ? (
                   <Tooltip>
                     <TooltipTrigger asChild><span className="cursor-help">{budgetNa !== null ? "n/a" : "—"}</span></TooltipTrigger>
@@ -112,17 +117,17 @@ const MatrixTable = ({
                   </Tooltip>
                 ) : fmtSAR(r.budget)}
               </td>
-              <td className={`text-right py-2 px-3 tabular-nums whitespace-nowrap ${deltaColor(dBud)}`}>{dBud === null ? "—" : fmtDeltaSAR(dBud)}</td>
-              <td className={`text-right py-2 px-3 tabular-nums whitespace-nowrap ${deltaColor(dBud)}`}>{dBudPct === null ? "—" : fmtDeltaPct(dBudPct)}</td>
-              <td className="text-right py-2 px-3 tabular-nums whitespace-nowrap text-muted-foreground">{r.py === null ? "—" : fmtSAR(r.py)}</td>
-              <td className={`text-right py-2 px-3 tabular-nums whitespace-nowrap ${deltaColor(dPy)}`}>{dPy === null ? "—" : fmtDeltaSAR(dPy)}</td>
-              <td className={`text-right py-2 px-3 tabular-nums whitespace-nowrap ${deltaColor(dPy)}`}>{dPyPct === null ? "—" : fmtDeltaPct(dPyPct)}</td>
+              <td className={`text-right py-2 px-2 tabular-nums whitespace-nowrap ${deltaColor(dBud)}`}>{dBud === null ? "—" : fmtDeltaSAR(dBud)}</td>
+              <td className={`text-right py-2 px-2 tabular-nums whitespace-nowrap ${deltaColor(dBud)}`}>{dBudPct === null ? "—" : fmtDeltaPct(dBudPct)}</td>
+              <td className="text-right py-2 px-2 tabular-nums whitespace-nowrap text-muted-foreground">{r.py === null ? "—" : fmtSAR(r.py)}</td>
+              <td className={`text-right py-2 px-2 tabular-nums whitespace-nowrap ${deltaColor(dPy)}`}>{dPy === null ? "—" : fmtDeltaSAR(dPy)}</td>
+              <td className={`text-right py-2 px-2 tabular-nums whitespace-nowrap ${deltaColor(dPy)}`}>{dPyPct === null ? "—" : fmtDeltaPct(dPyPct)}</td>
             </tr>
           );
         })}
       </tbody>
     </table>
-  </div>
+  </ScrollHint>
 );
 
 // ------------------------------------------------------- monthly chart
@@ -186,14 +191,16 @@ const MonthlyVarianceChart = ({
 // ------------------------------------------------------------- the screen
 
 export const PnLOverview = () => {
-  const { basis, win, py, winLabelText, pyLabelText, windowName } = useAlignment();
+  // memoOn = the FOUNDER GATE on the model-adjustment memo layer (item 3):
+  // opt-in, default OFF on load, persisted; shared with the Performance P3
+  // ladder so the memo layer is never half-visible across screens.
+  const { basis, win, py, winLabelText, pyLabelText, windowName, memoOn, setMemoOn } = useAlignment();
   const { data: basisData, isLoading, isError, error } = useBasisRows();
   const { data: rec } = useRecurrence();
   const { data: budgetRows } = useBudgetMonthly();
   const { data: adjState } = useModelAdjustments();
   const [selectedBU, setSelectedBU] = useState("ALL");
   const [view, setView] = useState<"A" | "B">("A");
-  const [memoOn, setMemoOn] = useState(false);
 
   const rows = basisData?.rows;
   const bu = selectedBU === "ALL" ? undefined : selectedBU;
@@ -469,7 +476,8 @@ export const PnLOverview = () => {
           )}
           <p className="text-xs text-muted-foreground">
             Source: {basisData?.sourceObject ?? "…"} + v_budget_monthly (live warehouse). Drill to MoA
-            leaf and journal entries on the Analysis screen — drills inherit the active basis.
+            leaf on the Drill screen — the drill inherits the active basis (credit-note rows excluded
+            on Validated, netted off on Strict, with an on-screen count either way).
           </p>
         </div>
       </Card>

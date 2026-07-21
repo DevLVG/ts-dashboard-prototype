@@ -472,6 +472,49 @@ export const creditNotesMonthly = (rows: BasisRow[] | undefined): CreditNoteMont
 export const creditNotesInWin = (rows: BasisRow[] | undefined, w: Win): number =>
   creditNotesMonthly(rows).filter((m) => inWin(m.key, w)).reduce((s, m) => s + m.cnNet, 0);
 
+// ------------------------------------------------------------- collections
+
+/** v_collections_monthly (migration 032): customer collections per month =
+ * payment allocations to invoices (VAT-inclusive receipts). Denominator of
+ * the CN/collections ratio on the credit-note anomaly tile (spec §1.2 P5).
+ * Missing view degrades to { available: false } — the tile hides the ratio
+ * with a pending note instead of faking a number. */
+export interface CollectionsMonthRow { period_month: string; collections_sar: number }
+
+export const useCollectionsMonthly = () =>
+  useQuery({
+    queryKey: ["v_collections_monthly"],
+    queryFn: async (): Promise<{ available: boolean; rows: CollectionsMonthRow[] }> => {
+      const res = await fetchAllPages<CollectionsMonthRow>((from, to) =>
+        supabase!
+          .from("v_collections_monthly")
+          .select("period_month,collections_sar")
+          .order("period_month", { ascending: true })
+          .range(from, to),
+      );
+      return res === "missing" ? { available: false, rows: [] } : { available: true, rows: res };
+    },
+    staleTime: 10 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+    retry: false,
+  });
+
+export const collectionsInWin = (
+  rows: CollectionsMonthRow[] | undefined,
+  w: Win,
+): number | null => {
+  if (!rows || rows.length === 0) return null;
+  let any = false;
+  let sum = 0;
+  for (const r of rows) {
+    const k = monthKey(r.period_month);
+    if (!inWin(k, w)) continue;
+    any = true;
+    sum += r.collections_sar;
+  }
+  return any ? sum : null;
+};
+
 // -------------------------------------------------------- credit-note audit
 
 export interface CreditNoteAuditRow {

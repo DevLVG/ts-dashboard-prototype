@@ -11,6 +11,25 @@ import {
 } from "recharts";
 import { getVarianceHexColor } from "@/lib/varianceColors";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { fmtCompact } from "@/lib/format";
+
+/** Compact x-axis labels for narrow viewports (≤768px) — the full labels
+ * overlap at 390px with 9-11 bars (punch item 7). */
+const SHORT_LABELS: Record<string, string> = {
+  "Revenue": "Rev",
+  "COGS": "COGS",
+  "Gross Margin": "GM",
+  "OpEx": "OpEx",
+  "OpEx (underlying)": "OpEx",
+  "EBITDA Underlying": "EBITDA U.",
+  "Non-Recurring": "Non-rec",
+  "Recurring EBITDA": "Rec. EBITDA",
+  "Project Costs": "Proj.",
+  "EBITDA incl. PC": "incl. PC",
+  "D&A": "D&A",
+  "EBIT": "EBIT",
+};
 import {
   COMPARISON_LABELS,
   fmtSar,
@@ -51,6 +70,7 @@ const GOLD = "#c9b37e"; // neutral fallback when no comparison is available
 export const AnalysisWaterfall = ({
   lines, comps, view, periodLabel, scope, onDrill,
 }: AnalysisWaterfallProps) => {
+  const isMobile = useIsMobile();
   const byKey = new Map(lines.map((l) => [l.key, l]));
   const L = (k: string): AnalysisLine | undefined => byKey.get(k);
 
@@ -111,7 +131,8 @@ export const AnalysisWaterfall = ({
   });
 
   let cumulative = 0;
-  const items: WaterfallItem[] = seq.map(([key, label, type]) => {
+  const items: WaterfallItem[] = seq.map(([key, fullLabel, type]) => {
+    const label = isMobile ? (SHORT_LABELS[fullLabel] ?? fullLabel) : fullLabel;
     const src = key === "opex" ? synthetic(opexKeys) : {
       value: L(key)?.actual ?? 0,
       comps: Object.fromEntries(comps.map((c) => [c, L(key)?.comps[c] ?? null])),
@@ -159,9 +180,15 @@ export const AnalysisWaterfall = ({
     if (!it) return null;
     const xc = Number(x) + Number(width) / 2;
     const yc = Math.max(Number(y) - 8, 14);
+    // Mobile: compact value labels, ANCHORS/SUBTOTALS only — labeling every
+    // delta bar collides at 390px (item 7); deltas stay on the tooltip.
+    if (isMobile && it.type === "decrease") return null;
+    const txt = isMobile
+      ? fmtCompact(it.value)
+      : it.value < 0 ? `-${fmtSar(Math.abs(it.value))}` : fmtSar(it.value);
     return (
-      <text x={xc} y={yc} fill="hsl(36 25% 92%)" textAnchor="middle" fontSize={12} fontWeight={600} style={{ pointerEvents: "none" }}>
-        {it.value < 0 ? `-${fmtSar(Math.abs(it.value))}` : fmtSar(it.value)}
+      <text x={xc} y={yc} fill="hsl(36 25% 92%)" textAnchor="middle" fontSize={isMobile ? 9 : 12} fontWeight={600} style={{ pointerEvents: "none" }}>
+        {txt}
       </text>
     );
   };
@@ -186,11 +213,11 @@ export const AnalysisWaterfall = ({
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
           <XAxis
             dataKey="label"
-            angle={-30}
+            angle={isMobile ? -42 : -30}
             textAnchor="end"
-            height={70}
+            height={isMobile ? 56 : 70}
             stroke="hsl(var(--muted-foreground))"
-            fontSize={12}
+            fontSize={isMobile ? 9.5 : 12}
             interval={0}
           />
           <YAxis

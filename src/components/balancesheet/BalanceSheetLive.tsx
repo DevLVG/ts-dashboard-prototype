@@ -15,7 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Info, Scale, HardHat } from "lucide-react";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import { DataFreshnessNote } from "@/components/dashboard/DataFreshnessNote";
-import { BasisToggle } from "@/components/chrome/AlignmentChrome";
+import { BasisToggle, ScrollHint } from "@/components/chrome/AlignmentChrome";
 import {
   monthKey,
   monthKeyLabel,
@@ -95,7 +95,11 @@ const SectionCard = ({
 }) => (
   <div>
     <h4 className="font-heading text-lg tracking-wide mb-2 text-gold">{title.toUpperCase()}</h4>
-    <table className="w-full text-sm">
+    {/* Item 7: the 4-column section table overflows a 390px viewport — it
+        scrolls inside its own container (with a visible hint); the page body
+        never scrolls horizontally. */}
+    <ScrollHint>
+    <table className="w-full min-w-[430px] text-sm">
       <thead>
         <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
           <th className="text-left py-1 pr-2 font-semibold">SAR</th>
@@ -131,6 +135,7 @@ const SectionCard = ({
         </tr>
       </tbody>
     </table>
+    </ScrollHint>
   </div>
 );
 

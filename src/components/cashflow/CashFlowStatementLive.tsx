@@ -19,6 +19,7 @@ import {
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import { DataFreshnessNote } from "@/components/dashboard/DataFreshnessNote";
 import { BasisToggle } from "@/components/chrome/AlignmentChrome";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { monthKey, monthKeyLabel, shiftMonthKey } from "@/data/liveData";
 import {
   useCashflowMonthly, useWorkingCapitalMonthly, useBalanceSheet,
@@ -55,25 +56,38 @@ type WindowSize = 6 | 12 | 24;
 
 // -------------------------------------------------------------- waterfall
 
-const CashWalk = ({ steps }: { steps: { label: string; value: number; kind: "anchor" | "delta" }[] }) => {
+const CashWalk = ({ steps }: { steps: { label: string; short?: string; value: number; kind: "anchor" | "delta" }[] }) => {
+  const isMobile = useIsMobile();
   const data = useMemo(() => {
     let running = 0;
     return steps.map((s) => {
+      // Mobile (punch item 7): compact x labels — the full anchor labels
+      // ("Opening (1-Jan-26)") collide at 390px.
+      const label = isMobile && s.short ? s.short : s.label;
       if (s.kind === "anchor") {
         running = s.value;
-        return { label: s.label, base: Math.min(0, s.value), size: Math.abs(s.value), kind: "anchor" as const, raw: s.value };
+        return { label, base: Math.min(0, s.value), size: Math.abs(s.value), kind: "anchor" as const, raw: s.value };
       }
       const from = running;
       running += s.value;
-      return { label: s.label, base: Math.min(from, running), size: Math.abs(s.value), kind: s.value >= 0 ? ("up" as const) : ("down" as const), raw: s.value };
+      return { label, base: Math.min(from, running), size: Math.abs(s.value), kind: s.value >= 0 ? ("up" as const) : ("down" as const), raw: s.value };
     });
-  }, [steps]);
+  }, [steps, isMobile]);
   return (
-    <ResponsiveContainer width="100%" height={250}>
+    <ResponsiveContainer width="100%" height={isMobile ? 272 : 250}>
       <ComposedChart data={data} margin={{ top: 18, right: 8, bottom: 0, left: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-        <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} interval={0} />
-        <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={54} />
+        <XAxis
+          dataKey="label"
+          stroke="hsl(var(--muted-foreground))"
+          tick={{ fill: "hsl(var(--muted-foreground))", fontSize: isMobile ? 9.5 : 11 }}
+          tickLine={false}
+          interval={0}
+          angle={isMobile ? -32 : 0}
+          textAnchor={isMobile ? "end" : "middle"}
+          height={isMobile ? 50 : 30}
+        />
+        <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={isMobile ? 42 : 54} />
         <Tooltip
           content={({ active, payload, label }) => {
             if (!active || !payload || payload.length === 0) return null;
@@ -162,12 +176,12 @@ export const CashFlowStatementLive = () => {
     const fin = sum((r) => n(r.financing_cash_flow));
     const oth = sum((r) => n(r.other_cash_flow));
     return [
-      { label: `Opening (1-Jan-${latestYear.slice(2)})`, value: openingCash, kind: "anchor" as const },
-      { label: "Operating", value: op, kind: "delta" as const },
-      { label: "Investing", value: inv, kind: "delta" as const },
-      { label: "Financing", value: fin, kind: "delta" as const },
-      { label: "Other", value: oth, kind: "delta" as const },
-      { label: `Book cash (${lastCfKey ? monthKeyLabel(lastCfKey) : ""})`, value: openingCash + op + inv + fin + oth, kind: "anchor" as const },
+      { label: `Opening (1-Jan-${latestYear.slice(2)})`, short: "Opening", value: openingCash, kind: "anchor" as const },
+      { label: "Operating", short: "Op", value: op, kind: "delta" as const },
+      { label: "Investing", short: "Inv", value: inv, kind: "delta" as const },
+      { label: "Financing", short: "Fin", value: fin, kind: "delta" as const },
+      { label: "Other", short: "Other", value: oth, kind: "delta" as const },
+      { label: `Book cash (${lastCfKey ? monthKeyLabel(lastCfKey) : ""})`, short: "Book cash", value: openingCash + op + inv + fin + oth, kind: "anchor" as const },
     ];
   }, [rows, latestYear, openingCash, lastCfKey]);
 
@@ -277,8 +291,25 @@ export const CashFlowStatementLive = () => {
           <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Live bank &amp; cash position</p>
           <p className="text-2xl font-heading tracking-tight tabular-nums text-gold">{fmtOrDash(liveBankTotal)}</p>
           <p className="text-[11px] text-muted-foreground/80">
-            Σ bank_balances (Qoyod sync{lastSynced ? ` · ${lastSynced}` : ""}) — the canonical cash definition.
+            Σ bank_balances (Qoyod sync{lastSynced ? ` · ${lastSynced}` : ""}) — the canonical cash
+            definition, as booked / not bank-confirmed.
           </p>
+          {/* Coherence guard (punch item 8): the canonical position and the
+              statement's book cash must never diverge SILENTLY — any delta is
+              computed and shown, never a stale citation. */}
+          {liveBankTotal !== null && closingBookCash !== null && (
+            Math.abs(liveBankTotal - closingBookCash) < 0.5 ? (
+              <p className="text-[11px] text-muted-foreground/80">
+                Ties book cash at {lastCfKey ? monthKeyLabel(lastCfKey) : "close"} to the cent.
+              </p>
+            ) : (
+              <p className="text-[11px] text-amber-300/90 tabular-nums">
+                Δ vs book cash at {lastCfKey ? monthKeyLabel(lastCfKey) : "close"}:{" "}
+                {fmtDeltaSAR(liveBankTotal - closingBookCash)} — post-close cash movements (the bank
+                sync is daily; the statement is as-at month end).
+              </p>
+            )
+          )}
         </Card>
         <Card className="p-4 space-y-1">
           <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Shareholder funding (cumulative)</p>
@@ -498,6 +529,15 @@ export const CashFlowStatementLive = () => {
               </tr>
             </tbody>
           </table>
+          {/* Punch item 8: explain negative receivables WHEN they occur —
+              conditioned on the data, never asserted. */}
+          {wcRows.slice(-windowSize).some((r) => n(r.receivables) < -0.5) && (
+            <p className="mt-3 text-xs text-amber-300/90">
+              Receivables print negative in some months: the customer credit notes back-loaded to the
+              ledger on 21-Jul-2026 are booked against AR, and as booked they exceed the open invoice
+              balance — see the AR note on the Balance Sheet for the underlying position.
+            </p>
+          )}
         </Card>
       )}
     </div>

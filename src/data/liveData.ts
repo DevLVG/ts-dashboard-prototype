@@ -135,6 +135,10 @@ export interface PnlLeafRow {
   leaf: string | null;
   /** NULL on 'Unmapped' rows (JE lines on accounts pending D378 mapping). */
   moa_code: string | null;
+  /** invoice | bill | journal | credit_note (migration 026) — lets the Drill
+   * screen inherit the global basis toggle: Validated excludes credit_note
+   * rows, Strict includes them (spec §1.1 drill contract). */
+  source: string;
   amount_sar: number; // signed: revenue +, costs -
   line_count: number;
 }
@@ -149,7 +153,7 @@ export const fetchPnlLeafRows = async (): Promise<PnlLeafRow[]> => {
   for (let from = 0; ; from += LEAF_PAGE_SIZE) {
     const { data, error } = await supabase
       .from("pnl_management")
-      .select("period_month,section,bu,cluster,leaf,moa_code,amount_sar,line_count")
+      .select("period_month,section,bu,cluster,leaf,moa_code,source,amount_sar,line_count")
       .order("period_month", { ascending: true })
       .order("moa_code", { ascending: true })
       .range(from, from + LEAF_PAGE_SIZE - 1);

@@ -148,3 +148,60 @@ export const useBalanceSheet = () =>
     refetchInterval: (query) =>
       query.state.data && !query.state.data.available ? 60_000 : false,
   });
+
+// -------------------------------------------- alignment additions 2026-07-21
+
+/** Live bank & cash balances (Qoyod sync) — the canonical cash position is
+ * the SUM of these accounts; every anchor renders from data, no literals. */
+export interface BankBalanceRow {
+  qoyod_account_code: string;
+  qoyod_account_name: string;
+  current_balance: number;
+  last_synced: string;
+}
+
+export const useBankBalances = () =>
+  useQuery({
+    queryKey: ["bank_balances"],
+    queryFn: async (): Promise<BankBalanceRow[]> => {
+      if (!supabase) throw new Error("Supabase is not configured");
+      const { data, error } = await supabase.from("bank_balances").select("*").limit(200);
+      if (error) throw toFriendlyError(error);
+      return (data ?? []) as BankBalanceRow[];
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+  });
+
+/** v_cashflow_budget_comparison — actual vs budget CF per month. NOTE the
+ * documented caveat: before the forward budget window the "operating budget"
+ * is budget EBITDA used as an operating-CF proxy (no CF-* budget lines exist
+ * historically) — the UI labels the series accordingly. */
+export interface CashflowBudgetRow {
+  period_month: string;
+  operating_actual: number | null;
+  operating_budget: number | null;
+  investing_actual: number | null;
+  investing_budget: number | null;
+  financing_actual: number | null;
+  financing_budget: number | null;
+  net_actual: number | null;
+  net_budget: number | null;
+}
+
+export const useCashflowBudgetComparison = () =>
+  useQuery({
+    queryKey: ["v_cashflow_budget_comparison"],
+    queryFn: async (): Promise<CashflowBudgetRow[]> => {
+      if (!supabase) throw new Error("Supabase is not configured");
+      const { data, error } = await supabase
+        .from("v_cashflow_budget_comparison")
+        .select("*")
+        .order("period_month", { ascending: true })
+        .limit(1000);
+      if (error) throw toFriendlyError(error);
+      return (data ?? []) as CashflowBudgetRow[];
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+  });

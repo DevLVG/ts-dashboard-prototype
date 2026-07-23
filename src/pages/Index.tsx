@@ -11,6 +11,7 @@ import { PnLOverview } from "@/components/pnl/PnLOverview";
 import { PerformanceAnalysis } from "@/components/performance/PerformanceAnalysis";
 import { EconomicAnalysis } from "@/components/analysis/EconomicAnalysis";
 import { CashFlowStatementLive } from "@/components/cashflow/CashFlowStatementLive";
+import { TreasuryCash } from "@/components/treasury/TreasuryCash";
 import { BalanceSheetLive } from "@/components/balancesheet/BalanceSheetLive";
 import { PageType } from "@/types/dashboard";
 import { useAlignment } from "@/contexts/AlignmentContext";
@@ -31,7 +32,7 @@ const Index = () => {
 
   const getCurrentPageFromPath = (): PageType => {
     const path = location.pathname.slice(1);
-    if (path === "overview" || path === "performance" || path === "cash" || path === "balance" || path === "analysis") {
+    if (path === "overview" || path === "performance" || path === "cash" || path === "treasury" || path === "balance" || path === "analysis") {
       return path as PageType;
     }
     return "overview";
@@ -46,6 +47,8 @@ const Index = () => {
         return <PerformanceAnalysis />;
       case "cash":
         return <CashFlowStatementLive />;
+      case "treasury":
+        return <TreasuryCash />;
       case "balance":
         return <BalanceSheetLive />;
       case "analysis":

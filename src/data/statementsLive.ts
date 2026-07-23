@@ -205,3 +205,102 @@ export const useCashflowBudgetComparison = () =>
     staleTime: 5 * 60 * 1000,
     enabled: isSupabaseConfigured,
   });
+
+// ------------------------------------------------------ AR / AP aging (v2)
+//
+// Residual-aware aging snapshots, "as of today" (the views bucket on
+// CURRENT_DATE − due_date, so there is no month selector — they always show
+// the current open book). Contract = migration 025 (ar_aging_v2 / ap_aging_v2):
+// residual_amount is the Qoyod-native due_amount (net of payments AND applied
+// credit notes), falling back to the status rule where due_amount is unsynced.
+// Buckets: 'current' | '1-30' | '31-60' | '61-90' | '>90'.
+// Both views are GRANTed to `authenticated` only — a signed-in session is
+// required, same posture as the statement views.
+
+export type AgingBucket = "current" | "1-30" | "31-60" | "61-90" | ">90";
+
+/** Canonical bucket order — oldest last (used by the UI to render in sequence). */
+export const AGING_BUCKET_ORDER: AgingBucket[] = ["current", "1-30", "31-60", "61-90", ">90"];
+
+export interface ArAgingRow {
+  customer_id: number | null;
+  customer_name: string | null;
+  qoyod_invoice_id: number | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  due_date: string | null;
+  status: string | null;
+  total_amount: number | null;
+  paid_amount: number | null;
+  residual_amount: number | null;
+  days_overdue: number | null;
+  aging_bucket: AgingBucket;
+}
+
+export interface ApAgingRow {
+  vendor_qoyod_id: number | null;
+  vendor_name: string | null;
+  qoyod_bill_id: number | null;
+  bill_number: string | null;
+  bill_date: string | null;
+  due_date: string | null;
+  status: string | null;
+  total_amount: number | null;
+  paid_amount: number | null;
+  residual_amount: number | null;
+  days_overdue: number | null;
+  aging_bucket: AgingBucket;
+}
+
+export interface AgingResult<T> {
+  /** False while the view has not been created/granted yet (graceful placeholder). */
+  available: boolean;
+  rows: T[];
+}
+
+const AGING_PAGE_SIZE = 1000;
+
+/** Generic paginated fetch for the aging views, with the same missing-view
+ * degradation as the balance sheet (returns { available:false } instead of
+ * throwing when the relation is absent). */
+const fetchAging = async <T>(view: string): Promise<AgingResult<T>> => {
+  if (!supabase) throw new Error("Supabase is not configured");
+  const all: T[] = [];
+  for (let from = 0; ; from += AGING_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from(view)
+      .select("*")
+      .order("residual_amount", { ascending: false })
+      .range(from, from + AGING_PAGE_SIZE - 1);
+    if (error) {
+      if (isMissingViewError(error)) return { available: false, rows: [] };
+      throw toFriendlyError(error);
+    }
+    const page = (data ?? []) as T[];
+    all.push(...page);
+    if (page.length < AGING_PAGE_SIZE) break;
+  }
+  return { available: true, rows: all };
+};
+
+export const useArAging = () =>
+  useQuery({
+    queryKey: ["ar_aging_v2"],
+    queryFn: () => fetchAging<ArAgingRow>("ar_aging_v2"),
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data && !query.state.data.available ? 60_000 : false,
+  });
+
+export const useApAging = () =>
+  useQuery({
+    queryKey: ["ap_aging_v2"],
+    queryFn: () => fetchAging<ApAgingRow>("ap_aging_v2"),
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data && !query.state.data.available ? 60_000 : false,
+  });

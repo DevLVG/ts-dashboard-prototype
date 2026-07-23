@@ -33,6 +33,7 @@ const App = () => {
                 <Route path="/overview" element={<Index />} />
                 <Route path="/performance" element={<Index />} />
                 <Route path="/cash" element={<Index />} />
+                <Route path="/treasury" element={<Index />} />
                 <Route path="/balance" element={<Index />} />
                 <Route path="/analysis" element={<Index />} />
                 {/* Legacy routes from the pre-alignment IA */}

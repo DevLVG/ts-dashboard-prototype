@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, TrendingUp, Banknote, Scale, ListTree, LogOut } from "lucide-react";
+import { LayoutDashboard, TrendingUp, Banknote, Wallet, Scale, ListTree, LogOut } from "lucide-react";
 import { PageType } from "@/types/dashboard";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,6 +16,7 @@ export const DashboardNav = ({ currentPage }: DashboardNavProps) => {
     { id: "overview" as PageType, label: "P&L Overview", icon: LayoutDashboard, path: "/overview" },
     { id: "performance" as PageType, label: "Performance", icon: TrendingUp, path: "/performance" },
     { id: "cash" as PageType, label: "Cash Flow", icon: Banknote, path: "/cash" },
+    { id: "treasury" as PageType, label: "Treasury", icon: Wallet, path: "/treasury" },
     { id: "balance" as PageType, label: "Balance Sheet", icon: Scale, path: "/balance" },
     { id: "analysis" as PageType, label: "Drill", icon: ListTree, path: "/analysis" },
   ];

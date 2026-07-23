@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Info, Scale, HardHat } from "lucide-react";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import { DataFreshnessNote } from "@/components/dashboard/DataFreshnessNote";
+import { ExportButton } from "@/components/dashboard/ExportButton";
 import { BasisToggle, ScrollHint } from "@/components/chrome/AlignmentChrome";
 import {
   monthKey,
@@ -28,6 +29,7 @@ import {
 } from "@/data/liveData";
 import { useBalanceSheet, type BalanceSheetRow } from "@/data/statementsLive";
 import { fmtSAR } from "@/lib/format";
+import { buildBalanceSheetExport, exportStatementCsv } from "@/lib/exportStatements";
 
 // Negative-zero guard: rounding a tiny negative must render "0", never "(0)".
 const fmt = (v: number) => fmtSAR(Math.abs(v) < 0.5 ? 0 : v);
@@ -212,6 +214,40 @@ export const BalanceSheetLive = () => {
   const checkDelta = assets.total - (liabilities.total + equity.total);
   const isBalanced = Math.abs(checkDelta) < 1;
 
+  // Audit-ready export: every line + subsection/section totals + PM/PY
+  // comparatives + the balance check, stamped with as-at, source and asOf.
+  const handleExport = () => {
+    if (!activeMonth) return;
+    exportStatementCsv(
+      buildBalanceSheetExport({
+        sections: [
+          { title: "Assets", data: assets },
+          { title: "Liabilities", data: liabilities },
+          { title: "Equity", data: equity },
+        ],
+        asAtLabel: endOfMonthLabel(activeMonth),
+        pmLabel: pmKey ? monthKeyLabel(pmKey) : "—",
+        pyLabel: pyKey ? monthKeyLabel(pyKey) : "—",
+        checkDelta,
+        isBalanced,
+        meta: {
+          entity: "Trio Sporting Club",
+          statement: `Balance Sheet — as at ${endOfMonthLabel(activeMonth)}`,
+          period: `As at ${endOfMonthLabel(activeMonth)} (as booked)`,
+          basis: "n/a — the balance sheet is post credit-notes by nature (the basis toggle applies to the P&L only)",
+          source: "Supabase · v_balance_sheet_monthly (Qoyod-certified warehouse, migration 023)",
+          dataAsOf: `${monthKeyLabel(lastClosed)} close complete`,
+        },
+        notes: [
+          "Book cash is as booked — not yet bank-confirmed.",
+          "Receivables are net of the customer credit notes back-loaded to the ledger on 2026-07-21.",
+          "Lines marked [ADJ] are management adjustments.",
+          "No budget column — no balance-sheet budget exists (n/a, not zero).",
+        ],
+      }),
+    );
+  };
+
   if (!isLoading && !isError && data && !data.available) {
     return (
       <div className="space-y-6">
@@ -255,6 +291,7 @@ export const BalanceSheetLive = () => {
               </SelectContent>
             </Select>
           )}
+          {months.length > 0 && <ExportButton onClick={handleExport} />}
         </div>
       </div>
 

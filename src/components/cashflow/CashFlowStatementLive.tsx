@@ -18,6 +18,7 @@ import {
 } from "recharts";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import { DataFreshnessNote } from "@/components/dashboard/DataFreshnessNote";
+import { ExportButton } from "@/components/dashboard/ExportButton";
 import { BasisToggle } from "@/components/chrome/AlignmentChrome";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { monthKey, monthKeyLabel, shiftMonthKey } from "@/data/liveData";
@@ -27,6 +28,7 @@ import {
 } from "@/data/statementsLive";
 import { useBudgetMonthly } from "@/data/liveData";
 import { fmtSAR, fmtDeltaSAR, fmtCompact, fmtOrDash } from "@/lib/format";
+import { buildCashFlowExport, exportStatementCsv } from "@/lib/exportStatements";
 
 const n = (v: number | null | undefined): number => v ?? 0;
 const fmt = (v: number) => (v === 0 ? "—" : fmtSAR(v));
@@ -251,6 +253,34 @@ export const CashFlowStatementLive = () => {
     );
   };
 
+  // Audit-ready export: the monthly CF statement (indirect) + book cash +
+  // working-capital block for the visible window, stamped with source & asOf.
+  const handleExport = () => {
+    if (windowRows.length === 0) return;
+    exportStatementCsv(
+      buildCashFlowExport({
+        windowRows,
+        lines: LINES,
+        bookCashByMonth,
+        wcRows,
+        windowSize,
+        meta: {
+          entity: "Trio Sporting Club",
+          statement: "Cash Flow Statement (indirect) — monthly",
+          period: `Last ${windowSize} months${lastCfKey ? ` to ${monthKeyLabel(lastCfKey)}` : ""}`,
+          basis: "n/a — cash flows are basis-independent (the basis toggle applies to the P&L only)",
+          source: "Supabase · v_cashflow_statement_monthly + v_working_capital_monthly (Qoyod-certified warehouse)",
+          dataAsOf: lastCfKey ? `${monthKeyLabel(lastCfKey)} (latest cash-flow month)` : undefined,
+        },
+        notes: [
+          "Indirect method: Operating = operating result + working-capital change + D&A add-back.",
+          "Financing splits equity injections from intercompany movements.",
+          "Book cash = balance-sheet cash & bank lines at month end (as booked, not bank-confirmed); reconciles with bs_cash_movement by construction.",
+        ],
+      }),
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -268,6 +298,7 @@ export const CashFlowStatementLive = () => {
               <SelectItem value="24">Last 24 months</SelectItem>
             </SelectContent>
           </Select>
+          <ExportButton onClick={handleExport} />
         </div>
       </div>
 

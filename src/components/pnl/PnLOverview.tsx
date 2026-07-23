@@ -24,10 +24,12 @@ import { BasisBadge, BasisToggle, WindowPicker, CompletenessBanner, BudgetBasisF
 import {
   useBasisRows, useRecurrence, useModelAdjustments, aggregatePL, aggregateRecurring,
   aggregateBudgetWindow, budgetMonthsSet, monthlySeries, deriveCompleteness,
-  adjustmentLadder, factMonths, winLabel, type PLAgg, type Win,
+  adjustmentLadder, factMonths, winLabel, BASIS_LABELS, type PLAgg, type Win,
 } from "@/data/alignment";
 import { useBudgetMonthly, LIVE_BU_LABELS, monthKeyLabel, shiftMonthKey } from "@/data/liveData";
 import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtCompact, pctChange, comparePct } from "@/lib/format";
+import { ExportButton } from "@/components/dashboard/ExportButton";
+import { buildPnlExport, exportStatementCsv } from "@/lib/exportStatements";
 
 // ---------------------------------------------------------------- helpers
 
@@ -194,7 +196,7 @@ export const PnLOverview = () => {
   // memoOn = the FOUNDER GATE on the model-adjustment memo layer (item 3):
   // opt-in, default OFF on load, persisted; shared with the Performance P3
   // ladder so the memo layer is never half-visible across screens.
-  const { basis, win, py, winLabelText, pyLabelText, windowName, memoOn, setMemoOn } = useAlignment();
+  const { basis, win, py, winLabelText, pyLabelText, windowName, memoOn, setMemoOn, lastComplete } = useAlignment();
   const { data: basisData, isLoading, isError, error } = useBasisRows();
   const { data: rec } = useRecurrence();
   const { data: budgetRows } = useBudgetMonthly();
@@ -342,6 +344,35 @@ export const PnLOverview = () => {
     });
   }, [rows, basis, chartWin, bu, budgetRows, budMonths]);
 
+  // Audit-ready export of the CURRENTLY displayed matrix (view A or B), stamped
+  // with window, basis, structure, BU, live source object and data-as-of.
+  const handleExport = () => {
+    const displayRows = view === "A" ? viewARows : (viewBRows ?? []);
+    const notes: string[] = [];
+    const flagged = [...flaggedKeys].some((k) => k >= win.startKey && k <= win.endKey);
+    if (displayRows.length === 0) notes.push("Management (validated) view is pending the recurrence dimension — no rows to export yet.");
+    if (flagged) notes.push("Window includes months with partial or missing cost postings — see the completeness banner in the cockpit.");
+    if (coverageNote) notes.push(coverageNote);
+    if (budgetNa) notes.push(budgetNa);
+    notes.push("Signed storage: revenue positive, costs negative; a positive delta is favourable. PY = the same window shifted -12 months, same basis and perimeter.");
+    exportStatementCsv(
+      buildPnlExport({
+        displayRows,
+        meta: {
+          entity: "Trio Sporting Club",
+          statement: `Profit & Loss — ${windowName}`,
+          period: `${windowName} · Actual ${winLabelText} vs PY ${pyLabelText}`,
+          basis: BASIS_LABELS[basis],
+          structure: view === "A" ? "As booked (IFRS)" : "Management (validated)",
+          businessUnit: selectedBU === "ALL" ? "All Company" : `${LIVE_BU_LABELS[selectedBU] ?? selectedBU} (${selectedBU})`,
+          source: `Supabase · ${basisData?.sourceObject ?? "pnl_management"} + v_budget_monthly (Qoyod-certified warehouse)`,
+          dataAsOf: `${monthKeyLabel(lastComplete)} close complete`,
+        },
+        notes,
+      }),
+    );
+  };
+
   if (isError) {
     return (
       <Card className="p-6">
@@ -377,6 +408,7 @@ export const PnLOverview = () => {
             Model-adjustment memo lines
           </label>
         )}
+        <ExportButton className="ml-auto" onClick={handleExport} />
       </div>
 
       <CompletenessBanner rows={rows} />

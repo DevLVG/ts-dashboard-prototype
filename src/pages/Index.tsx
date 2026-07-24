@@ -13,6 +13,7 @@ import { EconomicAnalysis } from "@/components/analysis/EconomicAnalysis";
 import { CashFlowStatementLive } from "@/components/cashflow/CashFlowStatementLive";
 import { TreasuryCash } from "@/components/treasury/TreasuryCash";
 import { CeoApprovalPanel } from "@/components/payments/CeoApprovalPanel";
+import { PaymentPriorityPanel } from "@/components/payments/PaymentPriorityPanel";
 import { BalanceSheetLive } from "@/components/balancesheet/BalanceSheetLive";
 import { PageType } from "@/types/dashboard";
 import { useAlignment } from "@/contexts/AlignmentContext";
@@ -33,7 +34,7 @@ const Index = () => {
 
   const getCurrentPageFromPath = (): PageType => {
     const path = location.pathname.slice(1);
-    if (path === "overview" || path === "performance" || path === "cash" || path === "treasury" || path === "payments" || path === "balance" || path === "analysis") {
+    if (path === "overview" || path === "performance" || path === "cash" || path === "treasury" || path === "payments" || path === "payment-priority" || path === "balance" || path === "analysis") {
       return path as PageType;
     }
     return "overview";
@@ -52,6 +53,8 @@ const Index = () => {
         return <TreasuryCash />;
       case "payments":
         return <CeoApprovalPanel />;
+      case "payment-priority":
+        return <PaymentPriorityPanel />;
       case "balance":
         return <BalanceSheetLive />;
       case "analysis":

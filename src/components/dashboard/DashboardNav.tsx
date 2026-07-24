@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, TrendingUp, Banknote, Wallet, Stamp, Scale, ListTree, LogOut } from "lucide-react";
+import { LayoutDashboard, TrendingUp, Banknote, Wallet, Stamp, Scale, ListTree, LogOut, ArrowUpDown } from "lucide-react";
 import { PageType } from "@/types/dashboard";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -18,6 +18,7 @@ export const DashboardNav = ({ currentPage }: DashboardNavProps) => {
     { id: "cash" as PageType, label: "Cash Flow", icon: Banknote, path: "/cash" },
     { id: "treasury" as PageType, label: "Treasury", icon: Wallet, path: "/treasury" },
     { id: "payments" as PageType, label: "Approvals", icon: Stamp, path: "/payments" },
+    { id: "payment-priority" as PageType, label: "Payment Priority", icon: ArrowUpDown, path: "/payment-priority" },
     { id: "balance" as PageType, label: "Balance Sheet", icon: Scale, path: "/balance" },
     { id: "analysis" as PageType, label: "Drill", icon: ListTree, path: "/analysis" },
   ];

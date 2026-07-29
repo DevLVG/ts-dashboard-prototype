@@ -5,22 +5,30 @@
 // each screen via AlignmentContext; the shell derives the last complete
 // month from the live fact rows and feeds it to the context.
 import { useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, Navigate } from "react-router-dom";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
 import { PnLOverview } from "@/components/pnl/PnLOverview";
 import { PerformanceAnalysis } from "@/components/performance/PerformanceAnalysis";
 import { EconomicAnalysis } from "@/components/analysis/EconomicAnalysis";
 import { CashFlowStatementLive } from "@/components/cashflow/CashFlowStatementLive";
-import { TreasuryCash } from "@/components/treasury/TreasuryCash";
+import { TreasuryWorkspace } from "@/components/treasury/TreasuryWorkspace";
 import { CeoApprovalPanel } from "@/components/payments/CeoApprovalPanel";
 import { BalanceSheetLive } from "@/components/balancesheet/BalanceSheetLive";
+import { CatalogAdmin } from "@/components/catalog/CatalogAdmin";
+import { MediaAdmin } from "@/components/media/MediaAdmin";
+import { SiteCopyAdmin } from "@/components/site-copy/SiteCopyAdmin";
+import { CompetitionsAdmin } from "@/components/competitions/CompetitionsAdmin";
 import { PageType } from "@/types/dashboard";
 import { useAlignment } from "@/contexts/AlignmentContext";
 import { useBasisRows, lastCompleteFromBasis } from "@/data/alignment";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
+import { useAuth } from "@/contexts/AuthContext";
+import { resolveRole, canAccessPage, landingPageFor } from "@/lib/roles";
 
 const Index = () => {
   const location = useLocation();
+  const { session } = useAuth();
+  const role = resolveRole(session?.user?.email);
   const { setLastComplete } = useAlignment();
   const { data: basisData } = useBasisRows();
 
@@ -33,7 +41,7 @@ const Index = () => {
 
   const getCurrentPageFromPath = (): PageType => {
     const path = location.pathname.slice(1);
-    if (path === "overview" || path === "performance" || path === "cash" || path === "treasury" || path === "payments" || path === "balance" || path === "analysis") {
+    if (path === "overview" || path === "performance" || path === "cash" || path === "treasury" || path === "payments" || path === "balance" || path === "analysis" || path === "catalog" || path === "media" || path === "copy" || path === "competitions") {
       return path as PageType;
     }
     return "overview";
@@ -49,7 +57,7 @@ const Index = () => {
       case "cash":
         return <CashFlowStatementLive />;
       case "treasury":
-        return <TreasuryCash />;
+        return <TreasuryWorkspace />;
       case "payments":
         return <CeoApprovalPanel />;
       case "balance":
@@ -57,10 +65,25 @@ const Index = () => {
       case "analysis":
         // R1 economic-analysis drill tool (leaf → cluster → CoA → JE).
         return <EconomicAnalysis />;
+      case "catalog":
+        return <CatalogAdmin />;
+      case "media":
+        return <MediaAdmin />;
+      case "copy":
+        return <SiteCopyAdmin />;
+      case "competitions":
+        return <CompetitionsAdmin />;
       default:
         return <PnLOverview />;
     }
   };
+
+  // Role-based ROUTE gate (nav gating lives in DashboardNav). A signed-in
+  // user who is not entitled to `currentPage` is bounced to their role's
+  // landing page — this runs for every /route since they all render <Index/>.
+  if (!canAccessPage(role, currentPage)) {
+    return <Navigate to={`/${landingPageFor(role)}`} replace />;
+  }
 
   return (
     <div className="min-h-screen bg-background">

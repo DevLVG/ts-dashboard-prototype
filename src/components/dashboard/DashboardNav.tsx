@@ -1,8 +1,9 @@
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, TrendingUp, Banknote, Wallet, Stamp, Scale, ListTree, LogOut } from "lucide-react";
+import { LayoutDashboard, TrendingUp, Banknote, Wallet, Stamp, Scale, ListTree, LogOut, Package, Image, Languages, Trophy } from "lucide-react";
 import { PageType } from "@/types/dashboard";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
+import { resolveRole, canAccessPage, ROLE_LABELS } from "@/lib/roles";
 import tsLogo from "@/assets/ts-logo.png";
 
 interface DashboardNavProps {
@@ -12,7 +13,8 @@ interface DashboardNavProps {
 // Four aligned screens (Dashboard-Alignment spec §1) + the R1 drill tool.
 export const DashboardNav = ({ currentPage }: DashboardNavProps) => {
   const { session, signOut } = useAuth();
-  const pages = [
+  const role = resolveRole(session?.user?.email);
+  const allPages = [
     { id: "overview" as PageType, label: "P&L Overview", icon: LayoutDashboard, path: "/overview" },
     { id: "performance" as PageType, label: "Performance", icon: TrendingUp, path: "/performance" },
     { id: "cash" as PageType, label: "Cash Flow", icon: Banknote, path: "/cash" },
@@ -20,7 +22,16 @@ export const DashboardNav = ({ currentPage }: DashboardNavProps) => {
     { id: "payments" as PageType, label: "Approvals", icon: Stamp, path: "/payments" },
     { id: "balance" as PageType, label: "Balance Sheet", icon: Scale, path: "/balance" },
     { id: "analysis" as PageType, label: "Drill", icon: ListTree, path: "/analysis" },
+    { id: "catalog" as PageType, label: "Catalogue", icon: Package, path: "/catalog" },
+    { id: "media" as PageType, label: "Media", icon: Image, path: "/media" },
+    { id: "copy" as PageType, label: "Site Copy", icon: Languages, path: "/copy" },
+    { id: "competitions" as PageType, label: "Competitions", icon: Trophy, path: "/competitions" },
   ];
+  // Role map — proposed, to confirm (src/lib/roles.ts). Nav items are
+  // filtered to what the signed-in role may access; the route guard in
+  // Index.tsx enforces the same list, so a hidden item is never reachable
+  // by typing the URL either.
+  const pages = allPages.filter((page) => canAccessPage(role, page.id));
   return (
     <nav className="border-b bg-card shadow-sm backdrop-blur-sm sticky top-0 z-50 animate-fade-in">
       <div className="container mx-auto px-4">
@@ -47,8 +58,11 @@ export const DashboardNav = ({ currentPage }: DashboardNavProps) => {
             ))}
             <div className="ml-3 flex items-center gap-2 border-l border-border pl-3">
               {session?.user?.email && (
-                <span className="hidden lg:inline text-xs text-muted-foreground max-w-[180px] truncate" title={session.user.email}>
-                  {session.user.email}
+                <span className="hidden lg:flex items-center gap-1.5 text-xs text-muted-foreground max-w-[220px]" title={session.user.email}>
+                  <span className="truncate">{session.user.email}</span>
+                  <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border border-gold/40 bg-gold/10 text-gold">
+                    {ROLE_LABELS[role]}
+                  </span>
                 </span>
               )}
               <Button

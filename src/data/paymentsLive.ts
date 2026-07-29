@@ -117,6 +117,48 @@ export const usePaymentDecisionLog = () =>
       query.state.data && !query.state.data.available ? 60_000 : false,
   });
 
+// ---------------------------------------------------- payment priority (score)
+//
+// v_ready_to_pay.score (034) is a hard NULL — the §B.1 weights were
+// unconfirmed at the time. Migration 050 turns those weights into editable
+// DATA (payment_priority_config) and computes a real, live-reranking
+// priority_score in v_payment_priority. It is still is_draft (score_is_draft)
+// until Arwa/Marcello confirm in-tool, so the panel joins it in ALONGSIDE
+// v_ready_to_pay and badges it "Proposed — to confirm" rather than presenting
+// it as settled ranking logic.
+
+export interface PaymentPriorityRow {
+  qoyod_bill_id: number | null;
+  vendor_qoyod_id: number | null;
+  payee: string | null;
+  bill_number: string | null;
+  due_date: string | null;
+  amount: number | null;
+  days_overdue: number | null;
+  aging_bucket: AgingBucket;
+  tier: number | null;
+  is_critical: boolean | null;
+  tier_confirmed: boolean | null;
+  score_is_draft: boolean | null;
+  tier_component: number | null;
+  overdue_component: number | null;
+  amount_component: number | null;
+  due_soon_component: number | null;
+  priority_score: number | null;
+  risk_if_delayed: string | null;
+}
+
+export const usePaymentPriority = () =>
+  useQuery({
+    queryKey: ["v_payment_priority"],
+    queryFn: () => fetchAll<PaymentPriorityRow>("v_payment_priority", { column: "priority_score", ascending: false }),
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data && !query.state.data.available ? 60_000 : false,
+  });
+
 // -------------------------------------------------- tier presentation helper
 
 export const TIER_META: Record<number, { label: string; short: string; tone: string }> = {

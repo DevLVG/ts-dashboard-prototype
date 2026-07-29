@@ -29,11 +29,12 @@ import {
   ShieldAlert, HardHat, Wallet, ListChecks, History, AlertTriangle, Info,
 } from "lucide-react";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
+import { ProposedBadge } from "@/components/dashboard/ProposedBadge";
 import { ScrollHint } from "@/components/chrome/AlignmentChrome";
 import { fmtSAR } from "@/lib/format";
 import {
-  useReadyToPay, usePaymentDecisionLog, TIER_META,
-  type ReadyToPayRow, type PaymentDecisionLogRow,
+  useReadyToPay, usePaymentDecisionLog, usePaymentPriority, TIER_META,
+  type ReadyToPayRow, type PaymentDecisionLogRow, type PaymentPriorityRow,
 } from "@/data/paymentsLive";
 
 const n = (v: number | null | undefined): number => v ?? 0;
@@ -104,9 +105,19 @@ const NotAvailable = () => (
 export const CeoApprovalPanel = () => {
   const ready = useReadyToPay();
   const log = usePaymentDecisionLog();
+  const priority = usePaymentPriority();
 
   const rows = useMemo<ReadyToPayRow[]>(() => (ready.data?.available ? ready.data.rows : []), [ready.data]);
   const persistedLog = useMemo<PaymentDecisionLogRow[]>(() => (log.data?.available ? log.data.rows : []), [log.data]);
+
+  // Score join (migration 050, v_payment_priority) — keyed by qoyod_bill_id.
+  // v_ready_to_pay.score itself is a hard NULL (034); this is the live,
+  // editable-weight ranking that supersedes it, still draft until confirmed.
+  const scoreByBill = useMemo(() => {
+    const m = new Map<number, PaymentPriorityRow>();
+    if (priority.data?.available) for (const p of priority.data.rows) if (p.qoyod_bill_id != null) m.set(p.qoyod_bill_id, p);
+    return m;
+  }, [priority.data]);
 
   // In-session decision ledger (write-back happens on go-live; see file header).
   const [session, setSession] = useState<SessionDecision[]>([]);
@@ -227,15 +238,27 @@ export const CeoApprovalPanel = () => {
             <DataSourceBadge source="live" />
             <span className="text-xs text-muted-foreground">Supabase · v_ready_to_pay · SAR</span>
           </div>
-          <p className="text-sm text-muted-foreground mb-4 inline-flex items-center gap-1.5">
+          <p className="text-sm text-muted-foreground mb-4 inline-flex items-center gap-1.5 flex-wrap">
             Ranked by tier, then by how overdue each bill is.
-            <span title="Within-tier score is off until the §B.1 weights are confirmed; ordering uses the deadline signal only.">
+            <span title="Within-tier ordering uses the deadline signal; the Score column (§B.1) is a live-editable draft ranking, not yet confirmed.">
               <Info className="h-3.5 w-3.5 text-gold/80 cursor-help" />
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              Tier &amp; score <ProposedBadge detail="§B.1 within-tier scoring weights." />
             </span>
           </p>
 
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-gold/70" />
+            <span>
+              Cash guardrail (§B.4) — projected balance after the run flags if it would drop below the
+              minimum cash buffer. <strong className="text-foreground">Buffer value: to be set by Trio</strong> —
+              no default is invented here. <ProposedBadge className="ml-1" detail="§B.4 / Decisions needed #12." />
+            </span>
+          </div>
+
           <ScrollHint>
-            <table className="w-full min-w-[860px] text-sm">
+            <table className="w-full min-w-[940px] text-sm">
               <thead>
                 <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
                   <th className="text-left py-1 pr-2 font-semibold">Payee</th>
@@ -243,6 +266,7 @@ export const CeoApprovalPanel = () => {
                   <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Amount SAR</th>
                   <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Due / overdue</th>
                   <th className="text-left py-1 px-2 font-semibold">Tier</th>
+                  <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Score</th>
                   <th className="text-left py-1 px-2 font-semibold">Rec.</th>
                   <th className="text-right py-1 pl-2 font-semibold">CEO decision</th>
                 </tr>
@@ -275,6 +299,12 @@ export const CeoApprovalPanel = () => {
                         {r.tier_confirmed === false && (
                           <span className="text-[10px] text-muted-foreground"> (default)</span>
                         )}
+                      </td>
+                      <td className="py-2 px-2 text-right tabular-nums whitespace-nowrap">
+                        {(() => {
+                          const p = r.qoyod_bill_id != null ? scoreByBill.get(r.qoyod_bill_id) : undefined;
+                          return p?.priority_score != null ? p.priority_score.toFixed(2) : "—";
+                        })()}
                       </td>
                       <td className="py-2 px-2 whitespace-nowrap text-xs text-muted-foreground">
                         {r.recommended_action === "PAY_NOW" ? "Pay now" : r.recommended_action === "HOLD" ? "Hold" : "Schedule"}

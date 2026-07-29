@@ -197,6 +197,8 @@ const CurrentBook = () => {
 
 // -------------------------------------------------------------- legacy pool
 
+const LEGACY_PAGE_SIZE = 50;
+
 const LegacyPool = () => {
   const legacy = useLegacyReceivables();
   const rows = useMemo<LegacyReceivableRow[]>(() => (legacy.data?.available ? legacy.data.rows : []), [legacy.data]);
@@ -207,6 +209,18 @@ const LegacyPool = () => {
     for (const r of rows) { billed += n(r.legacy_billed_total); unpaidPerQoyod += n(r.legacy_unpaid_per_qoyod); }
     return { billed, unpaidPerQoyod, debtors: rows.length };
   }, [rows]);
+
+  // 1,000+ debtors is a real worksheet, not a dashboard tile — search + a
+  // sane default page size keep it usable instead of rendering every row
+  // (measured: unpaginated this was a 34,000px page).
+  const [search, setSearch] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => (r.customer_name ?? "").toLowerCase().includes(q));
+  }, [rows, search]);
+  const visibleRows = showAll ? filteredRows : filteredRows.slice(0, LEGACY_PAGE_SIZE);
 
   return (
     <div className="space-y-6">
@@ -282,6 +296,20 @@ const LegacyPool = () => {
               For the future recover-vs-write-off decision. Collectibility is left blank — no automated rating
               exists; Marcello + Arwa rate per debtor when the reconciliation work happens.
             </p>
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setShowAll(false); }}
+                placeholder="Search debtor name…"
+                className="h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <span className="text-xs text-muted-foreground">
+                Showing {visibleRows.length} of {filteredRows.length}
+                {filteredRows.length !== rows.length ? ` (filtered from ${rows.length})` : ""} debtors, sorted by
+                historical billed total.
+              </span>
+            </div>
             <ScrollHint>
               <table className="w-full min-w-[720px] text-sm">
                 <thead>
@@ -296,7 +324,7 @@ const LegacyPool = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {visibleRows.map((r) => (
                     <tr key={String(r.customer_id ?? r.customer_name)} className="border-b border-border/10">
                       <td className="py-1.5 pr-2 max-w-[220px] truncate" title={r.customer_name ?? ""}>{r.customer_name ?? "—"}</td>
                       <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">{fmt(n(r.legacy_billed_total))}</td>
@@ -314,6 +342,17 @@ const LegacyPool = () => {
                 </tbody>
               </table>
             </ScrollHint>
+            {!showAll && filteredRows.length > LEGACY_PAGE_SIZE && (
+              <div className="mt-4 text-center">
+                <button
+                  type="button"
+                  onClick={() => setShowAll(true)}
+                  className="text-sm text-gold hover:text-gold/80 underline underline-offset-4"
+                >
+                  Show all {filteredRows.length} debtors
+                </button>
+              </div>
+            )}
           </Card>
         </>
       )}

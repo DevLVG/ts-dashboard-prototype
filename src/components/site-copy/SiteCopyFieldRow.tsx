@@ -68,6 +68,9 @@ export const SiteCopyFieldRow = ({ row, actor }: Props) => {
           </label>
         </div>
       </div>
+      {needsReview && row.notes && (
+        <p className="text-[11px] text-amber-600 bg-amber-500/10 rounded px-2 py-1">{row.notes}</p>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         <div className="relative">
           <span className="absolute -top-2 left-2 bg-card px-1 text-[10px] text-muted-foreground">EN</span>
@@ -88,7 +91,7 @@ export const SiteCopyFieldRow = ({ row, actor }: Props) => {
             value={ar}
             onChange={(e) => setAr(e.target.value)}
             onBlur={() => commit("ar", ar, row.ar)}
-            placeholder="No Arabic yet — flows in via Reem's certified file"
+            placeholder="No Arabic yet — type or paste the certified translation"
             dir="rtl"
             rows={ar.length > 120 ? 4 : 2}
             className="text-sm resize-y"

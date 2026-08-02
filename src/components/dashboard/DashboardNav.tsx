@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, TrendingUp, Banknote, Wallet, Stamp, Scale, ListTree, LogOut, Package, Image, Languages, Trophy } from "lucide-react";
+import { LayoutDashboard, TrendingUp, Banknote, Wallet, Stamp, Scale, ListTree, LogOut, Package, Image, Languages, Trophy, Users } from "lucide-react";
 import { PageType } from "@/types/dashboard";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -26,6 +26,7 @@ export const DashboardNav = ({ currentPage }: DashboardNavProps) => {
     { id: "media" as PageType, label: "Media", icon: Image, path: "/media" },
     { id: "copy" as PageType, label: "Site Copy", icon: Languages, path: "/copy" },
     { id: "competitions" as PageType, label: "Competitions", icon: Trophy, path: "/competitions" },
+    { id: "instructors" as PageType, label: "Instructors", icon: Users, path: "/instructors" },
   ];
   // Role map — proposed, to confirm (src/lib/roles.ts). Nav items are
   // filtered to what the signed-in role may access; the route guard in

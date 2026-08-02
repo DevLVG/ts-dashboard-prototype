@@ -51,6 +51,7 @@ const App = () => {
                 <Route path="/media" element={<Index />} />
                 <Route path="/copy" element={<Index />} />
                 <Route path="/competitions" element={<Index />} />
+                <Route path="/instructors" element={<Index />} />
                 {/* Legacy routes from the pre-alignment IA */}
                 <Route path="/ratios" element={<Navigate to="/overview" replace />} />
                 <Route path="/statements" element={<Navigate to="/overview" replace />} />

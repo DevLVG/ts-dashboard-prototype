@@ -32,7 +32,7 @@ export const resolveRole = (email?: string | null): Role => {
   return "unknown";
 };
 
-const CMS_PAGES: PageType[] = ["catalog", "media", "copy", "competitions"];
+const CMS_PAGES: PageType[] = ["catalog", "media", "copy", "competitions", "instructors"];
 const ALL_PAGES: PageType[] = [
   "overview", "performance", "cash", "treasury", "payments", "balance", "analysis",
   ...CMS_PAGES,

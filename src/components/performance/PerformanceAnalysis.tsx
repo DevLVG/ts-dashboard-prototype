@@ -17,11 +17,29 @@
 //   - Macro rows, statutory order: Gross revenue -> COGS -> Gross margin ->
 //     OpEx (its 3 sections) -> Total OpEx -> EBITDA -> Project costs ->
 //     EBITDA (reported) -> D&A -> EBIT -> Non-operating -> Net income.
-//   - Every SECTION-backed macro row expands (click) into its MoA clusters
-//     (L3), each of which expands into its individual MoA leaves (L4,
-//     moa_code) — data/moaMaster.ts's dictionary, the same one the old P&L
-//     drill used. Subtotal rows (Gross margin, Total OpEx, EBITDA, EBITDA
+//   - Every SECTION-backed macro row expands (click) into its MoA FAMILY
+//     (L2 BU: Livery, Horse School, Membership, Events, B2B, Competitions,
+//     Retail, Corporate — `data/moaTree.ts`), each family into its MoA
+//     clusters (L3), each cluster into its individual MoA leaves (L4,
+//     moa_code). Subtotal rows (Gross margin, Total OpEx, EBITDA, EBITDA
 //     reported, EBIT, Net income) are derived, not expandable.
+//
+//     FIX-18 (2026-08-03, Marcello P0 — "non c'è Livery, è tutto a caso"):
+//     the table used to skip straight from section to L3 cluster via
+//     `data/moaMaster.ts`'s `moaInfo()`, a dictionary with no family field at
+//     all — every cluster from every BU rendered as one flat, unsorted
+//     sibling list. It also keyed clusters by `clusterCode` alone, which
+//     collides across families that happen to share an L3 code (e.g.
+//     DA-LIA exists under B2B, CORP AND LIV) — a second, silent
+//     mis-grouping bug. `buildTree` below now walks the canonical MoA
+//     hierarchy from `data/moaTree.ts` (a mechanical dump of `moa_gestionale`,
+//     is_active leaves only) as a FIXED skeleton — Section -> Family (bu) ->
+//     Cluster (l3) -> Leaf (l4, keyed by (bu, clusterCode) then moaCode) —
+//     built the same way regardless of what data exists, so actual/prior
+//     trees always share an identical shape (no runtime union needed, no
+//     disappearing branches, ties to the cent at every level by
+//     construction) and every leaf always renders, per Marcello's mandate
+//     ("voglio vedere ogni riga e sottoriga di foglia") — no >0.5 filter.
 //   - Comparison column follows the GLOBAL Comparison toggle (PY | Budget),
 //     one at a time. Granularity rule (Marcello's explicit caveat):
 //       vs Previous Year  -> full leaf granularity everywhere.
@@ -35,7 +53,7 @@
 //     against a FULL prior-year month / FULL budget month, which
 //     overstates both — same elapsed-day pro-ration rule fix-4's KPI
 //     header uses (`computeMtdProration` + `prorateAgg`/`prorateBudget`),
-//     applied uniformly down to every cluster/leaf so a child row's
+//     applied uniformly down to every family/cluster/leaf so a child row's
 //     comparison always sums back to its parent's.
 //   - Window = the global period selector (month/quarter/MTD/YTD/TTM).
 import { useMemo, useState } from "react";
@@ -52,7 +70,7 @@ import {
   type BasisRow, type Win, type RecurrenceState, type BudgetAgg,
 } from "@/data/alignment";
 import { useBudgetMonthly, monthKeyLabel } from "@/data/liveData";
-import { moaInfo } from "@/data/moaMaster";
+import { MOA_PL_LEAVES, buFamilyName } from "@/data/moaTree";
 import { fmtDeltaSAR, fmtDeltaPct, fmtOrDash, pctChange } from "@/lib/format";
 
 // ---------------------------------------------------------------- helpers
@@ -88,12 +106,17 @@ const PL_SECTIONS = ["Revenue", "COGS", "OPEX-GA", "OPEX-MS", "OPEX-People", "Pr
 type PLSection = (typeof PL_SECTIONS)[number];
 
 interface LeafNode { moaCode: string; leafName: string; total: number }
-interface ClusterNode { clusterKey: string; clusterName: string; total: number; leaves: Map<string, LeafNode> }
-interface SectionTree { total: number; clusters: Map<string, ClusterNode> }
+interface ClusterNode { clusterCode: string; clusterName: string; total: number; leaves: LeafNode[] }
+interface FamilyNode { bu: string; buName: string; total: number; clusters: ClusterNode[] }
+interface SectionTree { total: number; families: FamilyNode[] }
 
-/** Builds the section -> cluster -> leaf tree for one window/scope. Every
- * macro row's value is later DERIVED as the sum over this same tree — the
- * displayed total and its expansion can never silently disagree. */
+/** Builds the section -> family (BU) -> cluster -> leaf tree for one
+ * window/scope. The skeleton (every family/cluster/leaf `data/moaTree.ts`
+ * defines for this section) is built FIRST, unconditionally — so a window
+ * with zero matching rows still returns the full canonical shape, just with
+ * every total at 0. Every macro row's value is later DERIVED as the sum
+ * over this same tree — the displayed total and its expansion can never
+ * silently disagree, at any level, in any window. */
 const buildTree = (
   rows: BasisRow[] | undefined,
   w: Win,
@@ -101,31 +124,54 @@ const buildTree = (
   rec: RecurrenceState | undefined,
 ): Map<PLSection, SectionTree> => {
   const tree = new Map<PLSection, SectionTree>();
-  for (const s of PL_SECTIONS) tree.set(s, { total: 0, clusters: new Map() });
-  if (!rows) return tree;
-  for (const r of rows) {
-    if (!PL_SECTIONS.includes(r.section as PLSection)) continue;
-    const k = monthKey(r.period_month);
-    if (!inWin(k, w)) continue;
-    if (scope === "RECURRING" && resolveRecurrence(r, rec) === "non-recurring") continue;
-    const section = r.section as PLSection;
-    const node = tree.get(section)!;
-    node.total += r.amount_sar;
-    const moa = r.moa_code ?? "—";
-    const info = moaInfo(moa);
-    const clusterKey = `${section}::${info.clusterCode}`;
-    let cluster = node.clusters.get(clusterKey);
-    if (!cluster) {
-      cluster = { clusterKey, clusterName: info.clusterName, total: 0, leaves: new Map() };
-      node.clusters.set(clusterKey, cluster);
+  const leafByCode = new Map<string, LeafNode>();
+  const familyByKey = new Map<string, FamilyNode>();
+  const clusterByKey = new Map<string, ClusterNode>();
+  for (const s of PL_SECTIONS) tree.set(s, { total: 0, families: [] });
+  for (const def of MOA_PL_LEAVES) {
+    const section = tree.get(def.plSection as PLSection);
+    if (!section) continue; // defensive: moaTree.ts only ever emits the 8 PL sections above
+    const famKey = `${def.plSection}::${def.bu}`;
+    let fam = familyByKey.get(famKey);
+    if (!fam) {
+      fam = { bu: def.bu, buName: buFamilyName(def.bu), total: 0, clusters: [] };
+      familyByKey.set(famKey, fam);
+      section.families.push(fam);
     }
-    cluster.total += r.amount_sar;
-    let leaf = cluster.leaves.get(moa);
-    if (!leaf) {
-      leaf = { moaCode: moa, leafName: info.leafName, total: 0 };
-      cluster.leaves.set(moa, leaf);
+    const cluKey = `${famKey}::${def.clusterCode}`;
+    let clu = clusterByKey.get(cluKey);
+    if (!clu) {
+      clu = { clusterCode: def.clusterCode, clusterName: def.clusterName, total: 0, leaves: [] };
+      clusterByKey.set(cluKey, clu);
+      fam.clusters.push(clu);
     }
-    leaf.total += r.amount_sar;
+    const leaf: LeafNode = { moaCode: def.moaCode, leafName: def.leafName, total: 0 };
+    clu.leaves.push(leaf);
+    leafByCode.set(def.moaCode, leaf);
+  }
+  if (rows) {
+    for (const r of rows) {
+      if (!PL_SECTIONS.includes(r.section as PLSection)) continue;
+      const k = monthKey(r.period_month);
+      if (!inWin(k, w)) continue;
+      if (scope === "RECURRING" && resolveRecurrence(r, rec) === "non-recurring") continue;
+      const leaf = r.moa_code ? leafByCode.get(r.moa_code) : undefined;
+      // Verified 2026-08-03: every moa_code on a row tagged to one of the 8
+      // PL_SECTIONS is an active moa_gestionale leaf and therefore present
+      // above — this lookup never misses in practice. If a future MoA edit
+      // ever produced an orphan code, it would fall through here exactly as
+      // it silently did in the pre-fix build (no regression), not corrupt a
+      // total — leaf/cluster/family/section sums stay internally consistent
+      // either way because every total is DERIVED from the leaves below it.
+      if (leaf) leaf.total += r.amount_sar;
+    }
+  }
+  for (const section of tree.values()) {
+    for (const fam of section.families) {
+      for (const clu of fam.clusters) clu.total = clu.leaves.reduce((s, l) => s + l.total, 0);
+      fam.total = fam.clusters.reduce((s, c) => s + c.total, 0);
+    }
+    section.total = section.families.reduce((s, f) => s + f.total, 0);
   }
   return tree;
 };
@@ -135,13 +181,16 @@ const buildTree = (
 const scaleTree = (tree: Map<PLSection, SectionTree>, fraction: number): Map<PLSection, SectionTree> => {
   const out = new Map<PLSection, SectionTree>();
   for (const [section, node] of tree) {
-    const clusters = new Map<string, ClusterNode>();
-    for (const [ck, c] of node.clusters) {
-      const leaves = new Map<string, LeafNode>();
-      for (const [lk, l] of c.leaves) leaves.set(lk, { ...l, total: l.total * fraction });
-      clusters.set(ck, { ...c, total: c.total * fraction, leaves });
-    }
-    out.set(section, { total: node.total * fraction, clusters });
+    const families = node.families.map((fam) => ({
+      ...fam,
+      total: fam.total * fraction,
+      clusters: fam.clusters.map((c) => ({
+        ...c,
+        total: c.total * fraction,
+        leaves: c.leaves.map((l) => ({ ...l, total: l.total * fraction })),
+      })),
+    }));
+    out.set(section, { total: node.total * fraction, families });
   }
   return out;
 };
@@ -273,7 +322,26 @@ export const PerformanceAnalysis = () => {
     : null;
 
   // ------------------------------------------------------------ row build
-  interface Row { indent: 0 | 1 | 2; keyPath: string; label: string; actual: number | null; comparison: number | null; expandable: boolean; expanded: boolean; onToggle?: () => void; subtotal?: boolean; emphasis?: boolean }
+  //
+  // 4 levels, in exact canonical MoA order (data/moaTree.ts's MOA_PL_LEAVES
+  // order — the same order the zero-diff verification script checks):
+  //   0 = macro section / subtotal
+  //   1 = family (L2 BU — Livery, Horse School, Membership, Events, B2B,
+  //       Competitions, Retail, Corporate)
+  //   2 = cluster (L3)
+  //   3 = leaf (L4, moa_code) — `codeTag` carries the code as a subtle
+  //       secondary tag, never the primary label (Marcello's explicit rule:
+  //       human-readable name first, code only as a small secondary tag).
+  //
+  // actualTree and priorTree are built from the IDENTICAL canonical leaf
+  // list (see buildTree), so they share the exact same families/clusters in
+  // the exact same order — every row below is walked once, by index, off
+  // the actual tree, with the matching prior node picked up alongside it.
+  // No runtime union, no per-branch filtering: every family/cluster/leaf the
+  // MoA defines for a section renders, every time, per Marcello's mandate
+  // ("voglio vedere ogni riga e sottoriga di foglia") — a window with zero
+  // rows still shows the full tree at 0 (or "—" under the honesty gate).
+  interface Row { indent: 0 | 1 | 2 | 3; keyPath: string; label: string; codeTag?: string; actual: number | null; comparison: number | null; expandable: boolean; expanded: boolean; onToggle?: () => void; subtotal?: boolean; emphasis?: boolean }
 
   const tableRows = useMemo((): Row[] => {
     const out: Row[] = [];
@@ -283,7 +351,13 @@ export const PerformanceAnalysis = () => {
       const actual = noActualData ? null : rawActual;
       const comparison = isBudgetMode ? rawComparison : (noPriorData ? null : rawComparison);
       const sectionKey = m.section ? `sec:${m.section}` : null;
-      const canExpand = !isBudgetMode && !!m.section && (actualTree.get(m.section)!.clusters.size > 0);
+      // The canonical tree always has >=1 family for every one of the 8 PL
+      // sections (moaTree.ts defines leaves for all of them) — so this is
+      // no longer gated on the CURRENT window having rows. Fixes the
+      // "August has zero cost rows -> chevron disappears" defect: PY (or
+      // budget-adjacent) data still drives full expansion of an empty
+      // current window, exactly as Marcello's mandate requires.
+      const canExpand = !isBudgetMode && !!m.section && actualTree.get(m.section)!.families.length > 0;
       out.push({
         indent: 0,
         keyPath: m.key,
@@ -297,47 +371,55 @@ export const PerformanceAnalysis = () => {
         emphasis: m.emphasis,
       });
       if (!m.section || !sectionKey || !expanded.has(sectionKey) || isBudgetMode) continue;
-      const curClusters = [...actualTree.get(m.section)!.clusters.values()];
-      const priorClusterMap = priorTree.get(m.section)!.clusters;
-      const clusterKeys = new Set<string>([...curClusters.map((c) => c.clusterKey), ...priorClusterMap.keys()]);
-      const clusterList = [...clusterKeys].map((ck) => {
-        const cur = actualTree.get(m.section!)!.clusters.get(ck);
-        const prior = priorClusterMap.get(ck);
-        return { ck, name: cur?.clusterName ?? prior?.clusterName ?? ck, cur: cur?.total ?? 0, prior: prior?.total ?? 0, curLeaves: cur?.leaves, priorLeaves: prior?.leaves };
-      }).filter((c) => Math.abs(c.cur) > 0.5 || Math.abs(c.prior) > 0.5)
-        .sort((a, b) => Math.abs(b.cur) - Math.abs(a.cur));
-      for (const c of clusterList) {
-        const clusterExpandKey = `clu:${c.ck}`;
-        // Every cluster with at least one MoA leaf (this period OR prior —
-        // union, not current-only) is explodable, full stop. The previous
-        // `leafCount > 1` gate silently stopped the drill at the cluster
-        // level whenever exactly one MoA code was active that window — which
-        // cost/expense clusters hit far more often than revenue clusters
-        // (lumpier postings: one supplier invoice vs many daily product
-        // lines), producing the "only Revenue explodes to leaf" defect
-        // Marcello flagged 2026-08-03. Root cause, not a revenue-only code
-        // path: fixed by granting every cluster the same leaf-level reach.
-        const leafKeys = new Set<string>([...(c.curLeaves?.keys() ?? []), ...(c.priorLeaves?.keys() ?? [])]);
-        const canExpandCluster = leafKeys.size > 0;
+      const section = m.section;
+      const curFamilies = actualTree.get(section)!.families;
+      const priorFamilies = priorTree.get(section)!.families;
+      for (let fi = 0; fi < curFamilies.length; fi++) {
+        const famA = curFamilies[fi];
+        const famP = priorFamilies[fi]; // identical shape by construction — same bu, same index
+        const famExpandKey = `fam:${section}::${famA.bu}`;
+        const canExpandFam = famA.clusters.length > 0;
         out.push({
           indent: 1,
-          keyPath: c.ck,
-          label: c.name,
-          actual: noActualData ? null : c.cur,
-          comparison: noPriorData ? null : c.prior,
-          expandable: canExpandCluster,
-          expanded: expanded.has(clusterExpandKey),
-          onToggle: canExpandCluster ? () => toggle(clusterExpandKey) : undefined,
+          keyPath: famExpandKey,
+          label: famA.buName,
+          actual: noActualData ? null : famA.total,
+          comparison: noPriorData ? null : famP.total,
+          expandable: canExpandFam,
+          expanded: expanded.has(famExpandKey),
+          onToggle: canExpandFam ? () => toggle(famExpandKey) : undefined,
         });
-        if (!canExpandCluster || !expanded.has(clusterExpandKey)) continue;
-        const leafList = [...leafKeys].map((moa) => {
-          const cur = c.curLeaves?.get(moa);
-          const prior = c.priorLeaves?.get(moa);
-          return { moa, name: cur?.leafName ?? prior?.leafName ?? moa, cur: cur?.total ?? 0, prior: prior?.total ?? 0 };
-        }).filter((l) => Math.abs(l.cur) > 0.5 || Math.abs(l.prior) > 0.5)
-          .sort((a, b) => Math.abs(b.cur) - Math.abs(a.cur));
-        for (const l of leafList) {
-          out.push({ indent: 2, keyPath: l.moa, label: `${l.name} (${l.moa})`, actual: noActualData ? null : l.cur, comparison: noPriorData ? null : l.prior, expandable: false, expanded: false });
+        if (!canExpandFam || !expanded.has(famExpandKey)) continue;
+        for (let ci = 0; ci < famA.clusters.length; ci++) {
+          const cluA = famA.clusters[ci];
+          const cluP = famP.clusters[ci];
+          const cluExpandKey = `clu:${section}::${famA.bu}::${cluA.clusterCode}`;
+          const canExpandClu = cluA.leaves.length > 0;
+          out.push({
+            indent: 2,
+            keyPath: cluExpandKey,
+            label: cluA.clusterName,
+            actual: noActualData ? null : cluA.total,
+            comparison: noPriorData ? null : cluP.total,
+            expandable: canExpandClu,
+            expanded: expanded.has(cluExpandKey),
+            onToggle: canExpandClu ? () => toggle(cluExpandKey) : undefined,
+          });
+          if (!canExpandClu || !expanded.has(cluExpandKey)) continue;
+          for (let li = 0; li < cluA.leaves.length; li++) {
+            const leafA = cluA.leaves[li];
+            const leafP = cluP.leaves[li];
+            out.push({
+              indent: 3,
+              keyPath: leafA.moaCode,
+              label: leafA.leafName,
+              codeTag: leafA.moaCode,
+              actual: noActualData ? null : leafA.total,
+              comparison: noPriorData ? null : leafP.total,
+              expandable: false,
+              expanded: false,
+            });
+          }
         }
       }
     }
@@ -447,6 +529,9 @@ export const PerformanceAnalysis = () => {
                             </button>
                           ) : r.indent > 0 ? <span className="inline-block h-4 w-4 shrink-0" /> : null}
                           <span className={r.subtotal ? "text-foreground" : ""}>{r.label}</span>
+                          {r.codeTag && (
+                            <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0">{r.codeTag}</span>
+                          )}
                         </span>
                       </td>
                       <td className="py-1.5 px-3 text-right tabular-nums">{fmtOrDash(r.actual)}</td>

@@ -69,14 +69,18 @@ const valueSizeClass = (formatted: string): string => {
   return "text-xl md:text-2xl";
 };
 
-const KpiCircle = ({ metric, comparisonLabel, mtdProrated }: {
+const KpiCircle = ({ metric, comparisonLabel, mtdProrated, windowName }: {
   metric: KpiHeaderMetric;
   comparisonLabel: string;
   mtdProrated: boolean;
+  windowName: string;
 }) => {
-  const tone = toneOf(metric.deltaAbs);
+  const tone = metric.actual === null ? "na" : toneOf(metric.deltaAbs);
   const Icon = TONE_ICON[tone];
-  const valueStr = fmtSAR(metric.actual);
+  // Absent ≠ zero (2026-08-03 add-on): a fully unfed window (e.g. a future
+  // calendar quarter picked from the always-visible Q1-Q4 list) renders "—",
+  // never a fabricated 0 with a meaningless delta.
+  const valueStr = metric.actual === null ? "—" : fmtSAR(metric.actual);
 
   return (
     <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm animate-fade-in">
@@ -90,11 +94,15 @@ const KpiCircle = ({ metric, comparisonLabel, mtdProrated }: {
           TONE_RING[tone],
         )}
         role="img"
-        aria-label={`${metric.label}: ${valueStr} SAR${
-          metric.comparison !== null
-            ? `, ${fmtDeltaSAR(metric.deltaAbs ?? 0)} SAR (${metric.deltaPct !== null ? fmtDeltaPct(metric.deltaPct) : "n/a"}) ${comparisonLabel.toLowerCase()}`
-            : `, no ${comparisonLabel.toLowerCase()} comparison available`
-        }`}
+        aria-label={
+          metric.actual === null
+            ? `${metric.label}: no data posted yet for ${windowName}`
+            : `${metric.label}: ${valueStr} SAR${
+                metric.comparison !== null
+                  ? `, ${fmtDeltaSAR(metric.deltaAbs ?? 0)} SAR (${metric.deltaPct !== null ? fmtDeltaPct(metric.deltaPct) : "n/a"}) ${comparisonLabel.toLowerCase()}`
+                  : `, no ${comparisonLabel.toLowerCase()} comparison available`
+              }`
+        }
       >
         <div className="flex flex-col items-center px-2 text-center">
           <p className={cn("font-heading tracking-tight leading-none", valueSizeClass(valueStr))}>{valueStr}</p>
@@ -103,7 +111,19 @@ const KpiCircle = ({ metric, comparisonLabel, mtdProrated }: {
       </div>
 
       <div className="flex flex-col items-center gap-0.5 min-h-[2.75rem] justify-center">
-        {metric.comparison === null ? (
+        {metric.actual === null ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex items-center gap-1 text-sm font-semibold text-muted-foreground cursor-help">
+                <Minus className="h-3.5 w-3.5" aria-hidden />
+                —
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs text-xs">
+              No data posted yet for {windowName}.
+            </TooltipContent>
+          </Tooltip>
+        ) : metric.comparison === null ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="inline-flex items-center gap-1 text-sm font-semibold text-muted-foreground cursor-help">
@@ -124,7 +144,7 @@ const KpiCircle = ({ metric, comparisonLabel, mtdProrated }: {
         )}
         <p className="text-[11px] text-muted-foreground text-center">
           vs {comparisonLabel}
-          {mtdProrated && metric.comparison !== null ? " (pro-rated)" : ""}
+          {mtdProrated && metric.actual !== null && metric.comparison !== null ? " (pro-rated)" : ""}
         </p>
       </div>
     </div>
@@ -132,7 +152,7 @@ const KpiCircle = ({ metric, comparisonLabel, mtdProrated }: {
 };
 
 export const KpiCircles = ({ className }: { className?: string }) => {
-  const { metrics, isLoading, isError, comparisonLabel, mtdProrated } = useKpiHeaderData();
+  const { metrics, isLoading, isError, comparisonLabel, mtdProrated, windowName, noActualData } = useKpiHeaderData();
 
   if (isError) {
     return (
@@ -143,18 +163,25 @@ export const KpiCircles = ({ className }: { className?: string }) => {
   }
 
   return (
-    <div className={cn("grid grid-cols-1 sm:grid-cols-3 gap-4", className)}>
-      {isLoading && metrics.length === 0
-        ? [0, 1, 2].map((i) => (
-            <div key={i} className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-5">
-              <div className="h-3 w-24 rounded bg-muted animate-pulse" />
-              <div className="h-36 w-36 md:h-40 md:w-40 rounded-full bg-muted animate-pulse" />
-              <div className="h-3 w-20 rounded bg-muted animate-pulse" />
-            </div>
-          ))
-        : metrics.map((m) => (
-            <KpiCircle key={m.key} metric={m} comparisonLabel={comparisonLabel} mtdProrated={mtdProrated} />
-          ))}
+    <div className={cn("space-y-2", className)}>
+      {!isLoading && noActualData && (
+        <p className="text-[11px] text-muted-foreground/80">
+          No data posted yet for {windowName} — figures below show "—" until this period is fed.
+        </p>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {isLoading && metrics.length === 0
+          ? [0, 1, 2].map((i) => (
+              <div key={i} className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-5">
+                <div className="h-3 w-24 rounded bg-muted animate-pulse" />
+                <div className="h-36 w-36 md:h-40 md:w-40 rounded-full bg-muted animate-pulse" />
+                <div className="h-3 w-20 rounded bg-muted animate-pulse" />
+              </div>
+            ))
+          : metrics.map((m) => (
+              <KpiCircle key={m.key} metric={m} comparisonLabel={comparisonLabel} mtdProrated={mtdProrated} windowName={windowName} />
+            ))}
+      </div>
     </div>
   );
 };

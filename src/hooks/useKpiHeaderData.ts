@@ -20,9 +20,9 @@ import { useAlignment, type ComparisonMode } from "@/contexts/AlignmentContext";
 import {
   useBasisRows, useRecurrence, aggregatePL, aggregateRecurring,
   aggregateBudgetWindow, computeMtdProration, prorateAgg, prorateRecurring,
-  prorateBudget,
+  prorateBudget, type Win,
 } from "@/data/alignment";
-import { useBudgetMonthly } from "@/data/liveData";
+import { useBudgetMonthly, monthKey } from "@/data/liveData";
 import { pctChange } from "@/lib/format";
 
 export type KpiKey = "revenue" | "grossMargin" | "ebitda";
@@ -30,12 +30,15 @@ export type KpiKey = "revenue" | "grossMargin" | "ebitda";
 export interface KpiHeaderMetric {
   key: KpiKey;
   label: string;
-  /** The window's actual value on the active scope (SAR, signed). */
-  actual: number;
+  /** The window's actual value on the active scope (SAR, signed) — null when
+   * the window is entirely unfed (e.g. a future/not-yet-posted quarter):
+   * "absent ≠ zero" (same rule Cash Flow's `useCashFlowPageData` already
+   * applies), never a fabricated 0 with a meaningless +/-100% delta. */
+  actual: number | null;
   /** The active comparison's value (PY or Budget, whichever the global
    * toggle selects) — null when it genuinely doesn't exist for this window
-   * (e.g. Budget for Jun-26, or a recurring-scope split budget doesn't
-   * carry), never a fabricated zero. */
+   * (e.g. Budget for Jun-26, a recurring-scope split budget doesn't carry,
+   * or the PY window itself is entirely unfed), never a fabricated zero. */
   comparison: number | null;
   /** Plain-language reason `comparison` is null — undefined when it exists. */
   comparisonUnavailableReason?: string;
@@ -55,6 +58,12 @@ export interface KpiHeaderData {
   /** True when the active window is Month-to-date — Budget/PY are pro-rated
    * to elapsed calendar days, same rule as the P&L matrix (never the Actual). */
   mtdProrated: boolean;
+  /** True when the selected window has ZERO warehouse fact rows at all (e.g.
+   * a future calendar quarter picked from the always-visible Q1-Q4 list
+   * before it's fed) — every metric's `actual` is null in this case. Exposed
+   * so consuming components (circles, histogram) can show one shared honest
+   * empty-state note instead of three silent per-metric dashes. */
+  noActualData: boolean;
 }
 
 /** Budget non-recurring project lines (Leveredge mandate / F&F campaigns) —
@@ -64,24 +73,47 @@ export interface KpiHeaderData {
  * comparison consistent with the table below it. */
 const isBudgetNonRecLine = (moa: string): boolean => moa.startsWith("GA-NRP") || moa === "MS-FFC";
 
+/** Distinct months, within a window, that have at least one warehouse fact
+ * row (any section) — zero means the window is entirely unfed (e.g. a
+ * future/not-yet-posted calendar quarter picked from the always-visible
+ * Q1-Q4 list). Mirrors the "absent ≠ zero" `monthsCovered` guard
+ * `useCashFlowPageData` already applies on Cash Flow; added here 2026-08-03
+ * after Marcello flagged a fabricated 0/+100% delta on an unfed quarter.
+ * Kept LOCAL to this hook rather than added to `aggregatePL` in
+ * `data/alignment.ts` — that file is owned by fix-10-selector this round —
+ * so this reads the same `rows`/`win` the hook already has with zero change
+ * to the shared data layer. */
+const monthsCoveredInWin = (rows: { period_month: string }[] | undefined, w: Win): number => {
+  if (!rows) return 0;
+  const covered = new Set<string>();
+  for (const r of rows) {
+    const k = monthKey(r.period_month);
+    if (k >= w.startKey && k <= w.endKey) covered.add(k);
+  }
+  return covered.size;
+};
+
 const buildMetric = (
   key: KpiKey,
   label: string,
-  actual: number,
-  py: number,
+  actual: number | null,
+  py: number | null,
   budget: number | null,
   comparisonMode: ComparisonMode,
   budgetNaReason?: string,
+  pyNaReason?: string,
 ): KpiHeaderMetric => {
   const comparison = comparisonMode === "BUDGET" ? budget : py;
-  const deltaAbs = comparison === null ? null : actual - comparison;
-  const deltaPct = comparison === null ? null : pctChange(actual, comparison);
+  const deltaAbs = actual === null || comparison === null ? null : actual - comparison;
+  const deltaPct = actual === null || comparison === null ? null : pctChange(actual, comparison);
   return {
     key,
     label,
     actual,
     comparison,
-    comparisonUnavailableReason: comparisonMode === "BUDGET" && comparison === null ? budgetNaReason : undefined,
+    comparisonUnavailableReason: comparison === null
+      ? (comparisonMode === "BUDGET" ? budgetNaReason : pyNaReason)
+      : undefined,
     deltaAbs,
     deltaPct,
   };
@@ -97,6 +129,11 @@ export const useKpiHeaderData = (): KpiHeaderData => {
   const basis = "STRICT" as const; // pinned everywhere — see AlignmentContext
 
   const mtdPro = useMemo(() => (preset === "MTD" ? computeMtdProration(todayKey) : null), [preset, todayKey]);
+
+  // Empty-window honesty gates (2026-08-03 add-on) — see `monthsCoveredInWin`.
+  const noActualData = useMemo(() => monthsCoveredInWin(rows, win) === 0, [rows, win]);
+  const noPriorData = useMemo(() => monthsCoveredInWin(rows, py) === 0, [rows, py]);
+  const pyNaReason = noPriorData ? `No previous-year data posted yet for ${windowName}.` : undefined;
 
   const actual = useMemo(() => aggregatePL(rows, basis, win), [rows, win]);
   const priorRaw = useMemo(() => aggregatePL(rows, basis, py), [rows, py]);
@@ -147,17 +184,17 @@ export const useKpiHeaderData = (): KpiHeaderData => {
   const metrics: KpiHeaderMetric[] = useMemo(() => {
     if (scope === "RECURRING" && recActual) {
       return [
-        buildMetric("revenue", "Revenue", recActual.recRevenue, recPrior?.recRevenue ?? 0, recBudgetRevenue, comparisonMode, budgetNaReason),
-        buildMetric("grossMargin", "Gross Margin", recActual.recGrossProfit, recPrior?.recGrossProfit ?? 0, null, comparisonMode, "Budget COGS is not split by recurrence."),
-        buildMetric("ebitda", "EBITDA (reported)", recActual.reportedEbitda, recPrior?.reportedEbitda ?? 0, null, comparisonMode, EBITDA_REPORTED_BUDGET_NA),
+        buildMetric("revenue", "Revenue", noActualData ? null : recActual.recRevenue, noPriorData ? null : (recPrior?.recRevenue ?? 0), recBudgetRevenue, comparisonMode, budgetNaReason, pyNaReason),
+        buildMetric("grossMargin", "Gross Margin", noActualData ? null : recActual.recGrossProfit, noPriorData ? null : (recPrior?.recGrossProfit ?? 0), null, comparisonMode, "Budget COGS is not split by recurrence.", pyNaReason),
+        buildMetric("ebitda", "EBITDA (reported)", noActualData ? null : recActual.reportedEbitda, noPriorData ? null : (recPrior?.reportedEbitda ?? 0), null, comparisonMode, EBITDA_REPORTED_BUDGET_NA, pyNaReason),
       ];
     }
     return [
-      buildMetric("revenue", "Revenue", actual.revenue, prior.revenue, budget?.revenue ?? null, comparisonMode, budgetNaReason),
-      buildMetric("grossMargin", "Gross Margin", actual.grossMargin, prior.grossMargin, budget ? budget.revenue + budget.cogs : null, comparisonMode, budgetNaReason),
-      buildMetric("ebitda", "EBITDA (reported)", actual.ebitdaReported, prior.ebitdaReported, null, comparisonMode, EBITDA_REPORTED_BUDGET_NA),
+      buildMetric("revenue", "Revenue", noActualData ? null : actual.revenue, noPriorData ? null : prior.revenue, budget?.revenue ?? null, comparisonMode, budgetNaReason, pyNaReason),
+      buildMetric("grossMargin", "Gross Margin", noActualData ? null : actual.grossMargin, noPriorData ? null : prior.grossMargin, budget ? budget.revenue + budget.cogs : null, comparisonMode, budgetNaReason, pyNaReason),
+      buildMetric("ebitda", "EBITDA (reported)", noActualData ? null : actual.ebitdaReported, noPriorData ? null : prior.ebitdaReported, null, comparisonMode, EBITDA_REPORTED_BUDGET_NA, pyNaReason),
     ];
-  }, [scope, recActual, recPrior, recBudgetRevenue, actual, prior, budget, comparisonMode, budgetNaReason, EBITDA_REPORTED_BUDGET_NA]);
+  }, [scope, recActual, recPrior, recBudgetRevenue, actual, prior, budget, comparisonMode, budgetNaReason, pyNaReason, EBITDA_REPORTED_BUDGET_NA, noActualData, noPriorData]);
 
   return {
     isLoading: rowsLoading || budgetLoading,
@@ -168,5 +205,6 @@ export const useKpiHeaderData = (): KpiHeaderData => {
     windowName,
     winLabelText,
     mtdProrated: mtdPro !== null,
+    noActualData,
   };
 };

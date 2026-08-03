@@ -120,14 +120,16 @@ const HistogramTooltip = ({ active, payload }: { active?: boolean; payload?: Arr
   );
 };
 
-const KpiBarGroup = ({ metric, comparisonLabel, mtdProrated }: {
+const KpiBarGroup = ({ metric, comparisonLabel, mtdProrated, windowName }: {
   metric: KpiHeaderMetric;
   comparisonLabel: string;
   mtdProrated: boolean;
+  windowName: string;
 }) => {
   const tone = toneOf(metric.deltaAbs);
   const Icon = TONE_ICON[tone];
   const data: BarDatum[] = useMemo(() => {
+    if (metric.actual === null) return [];
     const out: BarDatum[] = [{ name: "This period", value: metric.actual, kind: "current" }];
     if (metric.comparison !== null) out.push({ name: comparisonLabel, value: metric.comparison, kind: "comparison" });
     return out;
@@ -141,6 +143,13 @@ const KpiBarGroup = ({ metric, comparisonLabel, mtdProrated }: {
   // that IS the domain extreme fills the plot edge-to-edge, leaving no room
   // for its own direct value label (which sits just past the bar's tip) and
   // colliding with the category-axis text below it.
+  //
+  // Both `useMemo` hooks above/below run UNCONDITIONALLY on every render —
+  // the empty-window early return sits AFTER them (Rules of Hooks: a hook
+  // can never be skipped based on a condition). `data` is already `[]` for
+  // an unfed window, and the `lo === hi` guard below degrades that
+  // gracefully to `[-1, 1]` — the computed `domain` is simply unused in that
+  // branch's JSX.
   const domain = useMemo((): [number, number] => {
     const values = data.map((d) => d.value);
     const lo = Math.min(0, ...values);
@@ -149,6 +158,25 @@ const KpiBarGroup = ({ metric, comparisonLabel, mtdProrated }: {
     const pad = (hi - lo) * 0.2;
     return [lo - pad, hi + pad];
   }, [data]);
+
+  // Absent ≠ zero (2026-08-03 add-on): a fully unfed window (e.g. a future
+  // calendar quarter) has no honest bar to draw at all — a 0-height "This
+  // period" bar would misrepresent "no data" as "measured zero" (dataviz
+  // anti-pattern). Same card shell/height as the populated state, so the grid
+  // doesn't jump, with a plain empty-state message instead of an axis.
+  if (metric.actual === null) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">{metric.label}</p>
+        </div>
+        <div className="h-[192px] flex items-center justify-center text-center px-4">
+          <p className="text-xs text-muted-foreground">No data posted yet for {windowName}.</p>
+        </div>
+        <p className="text-[11px] text-muted-foreground text-center min-h-[1rem]"> </p>
+      </div>
+    );
+  }
 
   const summary = `${metric.label} — this period ${fmtSAR(metric.actual)} SAR vs ${comparisonLabel} ${
     metric.comparison === null ? "not available" : `${fmtSAR(metric.comparison)} SAR`
@@ -199,7 +227,7 @@ const KpiBarGroup = ({ metric, comparisonLabel, mtdProrated }: {
 };
 
 export const ComparisonHistogram = ({ className }: { className?: string }) => {
-  const { metrics, isLoading, isError, comparisonLabel, mtdProrated } = useKpiHeaderData();
+  const { metrics, isLoading, isError, comparisonLabel, mtdProrated, windowName } = useKpiHeaderData();
 
   if (isError) {
     return <p className={cn("text-sm text-destructive", className)}>Could not load the comparison figures.</p>;
@@ -228,7 +256,7 @@ export const ComparisonHistogram = ({ className }: { className?: string }) => {
         {isLoading && metrics.length === 0
           ? [0, 1, 2].map((i) => <div key={i} className="h-[236px] rounded-xl border border-border bg-card animate-pulse" />)
           : metrics.map((m) => (
-              <KpiBarGroup key={m.key} metric={m} comparisonLabel={comparisonLabel} mtdProrated={mtdProrated} />
+              <KpiBarGroup key={m.key} metric={m} comparisonLabel={comparisonLabel} mtdProrated={mtdProrated} windowName={windowName} />
             ))}
       </div>
     </div>

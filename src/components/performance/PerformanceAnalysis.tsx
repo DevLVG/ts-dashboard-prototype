@@ -53,7 +53,7 @@ import {
 } from "@/data/alignment";
 import { useBudgetMonthly, monthKeyLabel } from "@/data/liveData";
 import { moaInfo } from "@/data/moaMaster";
-import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtOrDash, pctChange } from "@/lib/format";
+import { fmtDeltaSAR, fmtDeltaPct, fmtOrDash, pctChange } from "@/lib/format";
 
 // ---------------------------------------------------------------- helpers
 
@@ -65,6 +65,24 @@ const isBudgetNonRecLine = (moa: string): boolean => moa.startsWith("GA-NRP") ||
 
 const monthKey = (date: string): string => date.slice(0, 7);
 const inWin = (k: string, w: Win): boolean => k >= w.startKey && k <= w.endKey;
+
+/** Distinct months, within a window, with at least one warehouse fact row
+ * (any section) — zero means the window is entirely unfed (e.g. a future
+ * calendar quarter picked from the always-visible Q1-Q4 list, before it's
+ * fed). "Absent ≠ zero" (the same rule Cash Flow's `useCashFlowPageData`
+ * already applies): every macro/subtotal row for such a window must render
+ * "—", never a fabricated 0 with a meaningless +/-100% delta. Added
+ * 2026-08-03 (Marcello, live review) — kept local here rather than added to
+ * `aggregatePL`/`data/alignment.ts`, which fix-10-selector owns this round. */
+const monthsCoveredInWin = (rows: BasisRow[] | undefined, w: Win): number => {
+  if (!rows) return 0;
+  const covered = new Set<string>();
+  for (const r of rows) {
+    const k = monthKey(r.period_month);
+    if (inWin(k, w)) covered.add(k);
+  }
+  return covered.size;
+};
 
 const PL_SECTIONS = ["Revenue", "COGS", "OPEX-GA", "OPEX-MS", "OPEX-People", "Project-Costs", "D&A", "NON-OP"] as const;
 type PLSection = (typeof PL_SECTIONS)[number];
@@ -243,14 +261,27 @@ export const PerformanceAnalysis = () => {
 
   const hasAnyData = rows && rows.length > 0;
 
+  // Empty-window honesty gates (2026-08-03 add-on) — a fully unfed window
+  // (typically a future calendar quarter) makes EVERY macro/subtotal row's
+  // actual (and, symmetrically, a fully unfed PY window's comparison) render
+  // "—" instead of the fabricated 0 `buildTree`/`deriveSubtotals` naturally
+  // produce for a window with zero matching rows.
+  const noActualData = useMemo(() => monthsCoveredInWin(rows, win) === 0, [rows, win]);
+  const noPriorData = useMemo(() => monthsCoveredInWin(rows, py) === 0, [rows, py]);
+  const noDataNote = noActualData
+    ? `No data posted yet for ${windowName} — every line below shows "—" until this period is fed.`
+    : null;
+
   // ------------------------------------------------------------ row build
-  interface Row { indent: 0 | 1 | 2; keyPath: string; label: string; actual: number; comparison: number | null; expandable: boolean; expanded: boolean; onToggle?: () => void; subtotal?: boolean; emphasis?: boolean }
+  interface Row { indent: 0 | 1 | 2; keyPath: string; label: string; actual: number | null; comparison: number | null; expandable: boolean; expanded: boolean; onToggle?: () => void; subtotal?: boolean; emphasis?: boolean }
 
   const tableRows = useMemo((): Row[] => {
     const out: Row[] = [];
     for (const m of MACRO_ROWS) {
-      const actual = macroValue(m.key, actualTree, actualSub);
-      const comparison = isBudgetMode ? budgetValueFor(m.key, budgetAgg) : macroValue(m.key, priorTree, priorSub);
+      const rawActual = macroValue(m.key, actualTree, actualSub);
+      const rawComparison = isBudgetMode ? budgetValueFor(m.key, budgetAgg) : macroValue(m.key, priorTree, priorSub);
+      const actual = noActualData ? null : rawActual;
+      const comparison = isBudgetMode ? rawComparison : (noPriorData ? null : rawComparison);
       const sectionKey = m.section ? `sec:${m.section}` : null;
       const canExpand = !isBudgetMode && !!m.section && (actualTree.get(m.section)!.clusters.size > 0);
       out.push({
@@ -292,8 +323,8 @@ export const PerformanceAnalysis = () => {
           indent: 1,
           keyPath: c.ck,
           label: c.name,
-          actual: c.cur,
-          comparison: c.prior,
+          actual: noActualData ? null : c.cur,
+          comparison: noPriorData ? null : c.prior,
           expandable: canExpandCluster,
           expanded: expanded.has(clusterExpandKey),
           onToggle: canExpandCluster ? () => toggle(clusterExpandKey) : undefined,
@@ -306,12 +337,12 @@ export const PerformanceAnalysis = () => {
         }).filter((l) => Math.abs(l.cur) > 0.5 || Math.abs(l.prior) > 0.5)
           .sort((a, b) => Math.abs(b.cur) - Math.abs(a.cur));
         for (const l of leafList) {
-          out.push({ indent: 2, keyPath: l.moa, label: `${l.name} (${l.moa})`, actual: l.cur, comparison: l.prior, expandable: false, expanded: false });
+          out.push({ indent: 2, keyPath: l.moa, label: `${l.name} (${l.moa})`, actual: noActualData ? null : l.cur, comparison: noPriorData ? null : l.prior, expandable: false, expanded: false });
         }
       }
     }
     return out;
-  }, [actualTree, priorTree, actualSub, priorSub, expanded, isBudgetMode, budgetAgg]);
+  }, [actualTree, priorTree, actualSub, priorSub, expanded, isBudgetMode, budgetAgg, noActualData, noPriorData]);
 
   return (
     <div className="space-y-5">
@@ -369,6 +400,9 @@ export const PerformanceAnalysis = () => {
           )}
         </div>
 
+        {noDataNote && (
+          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">{noDataNote}</p>
+        )}
         {budgetNaNote && (
           <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">{budgetNaNote}</p>
         )}
@@ -397,8 +431,8 @@ export const PerformanceAnalysis = () => {
               </thead>
               <tbody>
                 {tableRows.map((r) => {
-                  const deltaAbs = r.comparison === null ? null : r.actual - r.comparison;
-                  const deltaPct = r.comparison === null ? null : pctChange(r.actual, r.comparison);
+                  const deltaAbs = r.actual === null || r.comparison === null ? null : r.actual - r.comparison;
+                  const deltaPct = r.actual === null || r.comparison === null ? null : pctChange(r.actual, r.comparison);
                   const good = deltaAbs === null ? null : deltaAbs >= 0;
                   return (
                     <tr
@@ -415,7 +449,7 @@ export const PerformanceAnalysis = () => {
                           <span className={r.subtotal ? "text-foreground" : ""}>{r.label}</span>
                         </span>
                       </td>
-                      <td className="py-1.5 px-3 text-right tabular-nums">{fmtSAR(r.actual)}</td>
+                      <td className="py-1.5 px-3 text-right tabular-nums">{fmtOrDash(r.actual)}</td>
                       <td className="py-1.5 px-3 text-right tabular-nums text-muted-foreground">{fmtOrDash(r.comparison)}</td>
                       <td className={`py-1.5 px-3 text-right tabular-nums ${good === null ? "text-muted-foreground" : good ? "text-success" : "text-destructive"}`}>
                         {deltaAbs === null ? "—" : fmtDeltaSAR(deltaAbs)}

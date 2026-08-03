@@ -10,7 +10,7 @@
 //   → budget story (P8) → multi-year clean series (P9).
 // Every figure arrives via queries — the traceability gate (§5.D) forbids any
 // golden number as a literal in this bundle.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
@@ -20,7 +20,7 @@ import {
   ResponsiveContainer, ReferenceLine, Legend, Cell, LabelList,
 } from "recharts";
 import { useAlignment } from "@/contexts/AlignmentContext";
-import { BasisBadge, BasisToggle, WindowPicker, CompletenessBanner, FrozenRefChip } from "@/components/chrome/AlignmentChrome";
+import { BasisBadge, BasisToggle, WindowPicker, CompletenessBanner, FrozenRefChip, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
 import {
   useBasisRows, useRecurrence, useModelAdjustments, useCreditNoteAudit,
   useCollectionsMonthly, collectionsInWin,
@@ -69,12 +69,28 @@ const TileHeader = ({ title, basis, hint }: { title: string; basis?: Basis; hint
   </div>
 );
 
-const PendingRecurrence = () => (
-  <p className="text-sm text-muted-foreground py-4">
-    Recurring view pending recurrence dimension — activates automatically once
-    dim_recurrence is live in the warehouse.
-  </p>
-);
+// Bug fix (2026-08-03, Marcello live review — defect 1): this used to render
+// the same "pending dim_recurrence" copy unconditionally, even when the
+// recurrence probe (useRecurrence) had actually FAILED with a real error
+// (permission/network/etc.) — the error was swallowed, so the tile always
+// blamed a missing warehouse object even when the object was live and the
+// real cause was something else entirely. Now it reports the real reason.
+const PendingRecurrence = ({ error }: { error?: unknown }) => {
+  if (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return (
+      <p className="text-sm text-destructive/90 py-4">
+        Recurring view unavailable — the recurrence probe failed: {msg}
+      </p>
+    );
+  }
+  return (
+    <p className="text-sm text-muted-foreground py-4">
+      Recurring view pending recurrence dimension — activates automatically once
+      dim_recurrence is live in the warehouse.
+    </p>
+  );
+};
 
 const DataStateFootnote = () => (
   <p className="text-[11px] leading-snug text-muted-foreground/80 mt-2">
@@ -161,14 +177,25 @@ const Waterfall = ({ steps, height = 260 }: { steps: WaterfallStep[]; height?: n
 // --------------------------------------------------------------- screen
 
 export const PerformanceAnalysis = () => {
-  const { basis, win, py, winLabelText, pyLabelText, windowName, lastComplete, memoOn, setMemoOn } = useAlignment();
-  const { data: basisData, isLoading } = useBasisRows();
-  const { data: rec } = useRecurrence();
+  const { basis, win, py, winLabelText, pyLabelText, windowName, lastComplete, memoOn, setMemoOn, includesOpenMonths } = useAlignment();
+  const { data: basisData, isLoading, error: basisError } = useBasisRows();
+  const { data: rec, error: recError } = useRecurrence();
   const { data: budgetRows } = useBudgetMonthly();
   const { data: adjState } = useModelAdjustments();
   const { data: collState } = useCollectionsMonthly();
   const [cnDrillOpen, setCnDrillOpen] = useState(false);
   const cnAudit = useCreditNoteAudit(cnDrillOpen);
+
+  // Bug fix (defect 1): the recurrence + basis probes used to fail silently
+  // (retry: false, no surfaced error) — any real failure looked identical to
+  // "warehouse object not live yet". Log the ACTUAL error to the console so
+  // it is diagnosable, instead of only ever showing the generic pending copy.
+  useEffect(() => {
+    if (recError) console.error("[PerformanceAnalysis] useRecurrence failed:", recError);
+  }, [recError]);
+  useEffect(() => {
+    if (basisError) console.error("[PerformanceAnalysis] useBasisRows failed:", basisError);
+  }, [basisError]);
 
   const rows = basisData?.rows;
   const recLive = recurrenceIsLive(rows, rec);
@@ -343,10 +370,25 @@ export const PerformanceAnalysis = () => {
         <span className="text-xs text-muted-foreground">
           Window: <strong className="text-foreground">{windowName}</strong> · PY = {pyLabelText} (same window −12 months)
         </span>
+        {/* Spec §0.3 honesty rule (defect 2): any window reaching into a month
+            that hasn't closed yet must say so — revenue is live, costs may be
+            partial. Was built in the chrome layer but never wired onto this
+            screen; wired here, in the Performance-specific bundle only. */}
+        <OpenMonthsBadge />
       </div>
 
       <CompletenessBanner rows={rows} />
       {isLoading && <p className="text-sm text-muted-foreground">Loading live warehouse rows…</p>}
+      {/* Bug fix (stuck-loading complaint): previously a failed basis-rows
+          fetch just made the loading line vanish with nothing in its place —
+          indistinguishable from "still loading" at a glance, and the rest of
+          the screen stayed blank with no explanation. Now a real fetch error
+          says so explicitly. */}
+      {basisError && !isLoading && (
+        <p className="text-sm text-destructive/90">
+          Could not load warehouse rows — {basisError instanceof Error ? basisError.message : String(basisError)}
+        </p>
+      )}
 
       {/* ---------- headline row: P1 · P2 · P3 ---------- */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -357,7 +399,7 @@ export const PerformanceAnalysis = () => {
             basis={basis}
             hint="Validated DRIFT perimeter from the recurrence dimension (dim_recurrence). PY = same window −12 months, same basis, same perimeter."
           />
-          {!recLive || !recCur ? <PendingRecurrence /> : (
+          {!recLive || !recCur ? <PendingRecurrence error={recError} /> : (
             <>
               <div className="flex items-end gap-3 flex-wrap">
                 <p className="text-4xl font-heading tracking-tight tabular-nums">{fmtSAR(recCur.recRevenue)}</p>
@@ -416,6 +458,14 @@ export const PerformanceAnalysis = () => {
         {/* P2 — Total revenue YoY */}
         <Card className="p-5 space-y-2.5">
           <TileHeader title={`Total revenue — ${winLabelText}`} basis={basis} />
+          {/* Defect 2 (spec §0.3): the window can legitimately include months
+              that haven't closed yet — revenue is live and correct, costs may
+              still be partial. Flag it right on the figure, not just globally. */}
+          {includesOpenMonths && (
+            <div>
+              <OpenMonthsBadge />
+            </div>
+          )}
           <div className="flex items-end gap-3 flex-wrap">
             <p className="text-4xl font-heading tracking-tight tabular-nums">{fmtSAR(totCur.revenue)}</p>
             <YoYChip pct={totYoY} />
@@ -444,7 +494,7 @@ export const PerformanceAnalysis = () => {
             basis={basis}
             hint="As-booked recurring EBITDA (recurring revenue + recurring direct costs + recurring OpEx). The model-adjusted 'clean' ladder renders only when the model-adjustment memo layer is loaded (founder decision gate)."
           />
-          {!recLive || !recCur ? <PendingRecurrence /> : (
+          {!recLive || !recCur ? <PendingRecurrence error={recError} /> : (
             <>
               <div className="flex items-end gap-3 flex-wrap">
                 <p className={`text-4xl font-heading tracking-tight tabular-nums ${recCur.recEbitda >= 0 ? "text-success" : "text-destructive"}`}>
@@ -532,7 +582,14 @@ export const PerformanceAnalysis = () => {
             title="Basis & window bridge — revenue"
             hint="From the delivered package figure (Validated basis, As-delivered window) to the certified Strict figure for the selected window. Terms computed live from the fact rows — nothing typed in."
           />
-          {bridge && (
+          {/* Bug fix (defect 3): this rendered NOTHING but the header — an
+              empty box — whenever `bridge` was null, which is true for the
+              ENTIRE first paint (rows haven't arrived yet) and would stay
+              true forever on a genuine fetch failure, with no way to tell
+              the two apart. Now every state says something. */}
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground py-4">Loading warehouse rows…</p>
+          ) : bridge ? (
             <>
               <Waterfall
                 steps={[
@@ -558,6 +615,10 @@ export const PerformanceAnalysis = () => {
                 {" → "}<strong className="text-foreground">{fmtSAR(bridge.winStrict.ebitda5)} (Strict)</strong>
               </p>
             </>
+          ) : (
+            <p className="text-sm text-muted-foreground py-4">
+              {basisError ? "Could not load the warehouse rows this bridge needs." : "No data for this window."}
+            </p>
           )}
         </Card>
 
@@ -610,7 +671,7 @@ export const PerformanceAnalysis = () => {
             basis={basis}
             hint="Recurring perimeter per the model's own recurrence tags (dim_recurrence) — Competitions follows the tagged recurring total, resolving the deck's dual convention to one number."
           />
-          {!buTable ? <PendingRecurrence /> : (
+          {!buTable ? <PendingRecurrence error={recError} /> : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm min-w-[420px]">
                 <thead>
@@ -659,7 +720,7 @@ export const PerformanceAnalysis = () => {
             basis={basis}
             hint="Fiscal year starts June: Q1=Jun-Aug · Q2=Sep-Nov · Q3=Dec-Feb · Q4=Mar-May (package convention)."
           />
-          {!quarters ? <PendingRecurrence /> : (
+          {!quarters ? <PendingRecurrence error={recError} /> : (
             <>
               <ResponsiveContainer width="100%" height={210}>
                 <ComposedChart data={quarters} margin={{ top: 14, right: 8, bottom: 0, left: 4 }}>
@@ -807,31 +868,44 @@ export const PerformanceAnalysis = () => {
           basis={basis}
           hint="Yearly series computed live from the fact rows on the active basis. * = partial year (through the last closed month)."
         />
-        <ResponsiveContainer width="100%" height={240}>
-          <ComposedChart data={multiYear} margin={{ top: 14, right: 8, bottom: 0, left: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-            <XAxis dataKey="year" stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} tickLine={false} />
-            <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={54} />
-            <RTooltip
-              content={({ active, payload, label }) => {
-                if (!active || !payload || payload.length === 0) return null;
-                const rev = payload.find((p) => p.dataKey === "revenue")?.value as number | undefined;
-                const eb = payload.find((p) => p.dataKey === "ebitda")?.value as number | undefined;
-                return (
-                  <div className="chart-tooltip">
-                    <p className="chart-tooltip-title">{label}</p>
-                    <p className="chart-tooltip-content chart-tooltip-actual">{recLive ? "Recurring revenue" : "Revenue"}: {rev !== undefined ? fmtSAR(rev) : "—"}</p>
-                    <p className="chart-tooltip-content chart-tooltip-budget">EBITDA (5-section): {eb !== undefined ? fmtSAR(eb) : "—"}</p>
-                  </div>
-                );
-              }}
-            />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeOpacity={0.5} />
-            <Bar dataKey="revenue" name={recLive ? "Recurring revenue" : "Revenue"} fill="hsl(var(--gold) / 0.85)" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={48} />
-            <Line dataKey="ebitda" name="EBITDA (5-section)" stroke="hsl(195 75% 55%)" strokeWidth={2.5} dot={{ r: 3.5, fill: "hsl(195 75% 55%)", strokeWidth: 0 }} isAnimationActive={false} />
-          </ComposedChart>
-        </ResponsiveContainer>
+        {/* Bug fix (defect 3): with no rows loaded yet (or a genuinely empty
+            series) `multiYear` is `[]`, which used to render the full chart
+            shell — axes, legend, empty plot — with nothing to look at and no
+            explanation. Now loading/empty are both said in words; the chart
+            itself renders only once there is something to show. */}
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground py-4">Loading warehouse rows…</p>
+        ) : multiYear.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4">
+            {basisError ? "Could not load the warehouse rows this series needs." : "No data for this window."}
+          </p>
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <ComposedChart data={multiYear} margin={{ top: 14, right: 8, bottom: 0, left: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
+              <XAxis dataKey="year" stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} tickLine={false} />
+              <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={54} />
+              <RTooltip
+                content={({ active, payload, label }) => {
+                  if (!active || !payload || payload.length === 0) return null;
+                  const rev = payload.find((p) => p.dataKey === "revenue")?.value as number | undefined;
+                  const eb = payload.find((p) => p.dataKey === "ebitda")?.value as number | undefined;
+                  return (
+                    <div className="chart-tooltip">
+                      <p className="chart-tooltip-title">{label}</p>
+                      <p className="chart-tooltip-content chart-tooltip-actual">{recLive ? "Recurring revenue" : "Revenue"}: {rev !== undefined ? fmtSAR(rev) : "—"}</p>
+                      <p className="chart-tooltip-content chart-tooltip-budget">EBITDA (5-section): {eb !== undefined ? fmtSAR(eb) : "—"}</p>
+                    </div>
+                  );
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeOpacity={0.5} />
+              <Bar dataKey="revenue" name={recLive ? "Recurring revenue" : "Revenue"} fill="hsl(var(--gold) / 0.85)" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={48} />
+              <Line dataKey="ebitda" name="EBITDA (5-section)" stroke="hsl(195 75% 55%)" strokeWidth={2.5} dot={{ r: 3.5, fill: "hsl(195 75% 55%)", strokeWidth: 0 }} isAnimationActive={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
       </Card>
 
       {/* ---------- CN audit drill ---------- */}

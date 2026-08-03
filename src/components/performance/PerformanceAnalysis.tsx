@@ -277,8 +277,17 @@ export const PerformanceAnalysis = () => {
         .sort((a, b) => Math.abs(b.cur) - Math.abs(a.cur));
       for (const c of clusterList) {
         const clusterExpandKey = `clu:${c.ck}`;
-        const leafCount = c.curLeaves?.size ?? 0;
-        const canExpandCluster = leafCount > 1;
+        // Every cluster with at least one MoA leaf (this period OR prior —
+        // union, not current-only) is explodable, full stop. The previous
+        // `leafCount > 1` gate silently stopped the drill at the cluster
+        // level whenever exactly one MoA code was active that window — which
+        // cost/expense clusters hit far more often than revenue clusters
+        // (lumpier postings: one supplier invoice vs many daily product
+        // lines), producing the "only Revenue explodes to leaf" defect
+        // Marcello flagged 2026-08-03. Root cause, not a revenue-only code
+        // path: fixed by granting every cluster the same leaf-level reach.
+        const leafKeys = new Set<string>([...(c.curLeaves?.keys() ?? []), ...(c.priorLeaves?.keys() ?? [])]);
+        const canExpandCluster = leafKeys.size > 0;
         out.push({
           indent: 1,
           keyPath: c.ck,
@@ -290,7 +299,6 @@ export const PerformanceAnalysis = () => {
           onToggle: canExpandCluster ? () => toggle(clusterExpandKey) : undefined,
         });
         if (!canExpandCluster || !expanded.has(clusterExpandKey)) continue;
-        const leafKeys = new Set<string>([...(c.curLeaves?.keys() ?? []), ...(c.priorLeaves?.keys() ?? [])]);
         const leafList = [...leafKeys].map((moa) => {
           const cur = c.curLeaves?.get(moa);
           const prior = c.priorLeaves?.get(moa);

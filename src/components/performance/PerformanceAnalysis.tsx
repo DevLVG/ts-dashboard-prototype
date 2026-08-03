@@ -44,6 +44,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ChevronRight, ChevronDown, Info } from "lucide-react";
 import { useAlignment } from "@/contexts/AlignmentContext";
 import { WindowPicker, ComparisonToggle, ScopeToggle, OpenMonthsBadge, CompletenessBanner, StrictBasisNote } from "@/components/chrome/AlignmentChrome";
+import { KpiCircles } from "@/components/overview/KpiCircles";
+import { ComparisonHistogram } from "@/components/overview/ComparisonHistogram";
 import {
   useBasisRows, useRecurrence, resolveRecurrence, aggregateBudgetWindow,
   computeMtdProration, prorateBudget, factMonths,
@@ -331,11 +333,12 @@ export const PerformanceAnalysis = () => {
       {recError && <p className="text-xs text-destructive/70">Recurrence data unavailable — {recError instanceof Error ? recError.message : String(recError)} (Only Recurring scope may be incomplete.)</p>}
 
       {/* ---------- KPI circles + comparison histogram ---------- */}
-      {/* MOUNT POINT (squad fix-4-kpi): <KpiCircles /> + <ComparisonHistogram />
-          go here once pushed — both read useKpiHeaderData(), which already
-          reads this same window/comparison/scope, so they'll tie to the
-          table below with zero extra wiring. Not yet available at the time
-          of this commit (2026-08-03); pull-rebase and mount when they land. */}
+      {/* fix-4-kpi, commit 91ce209 — both components are standalone (read
+          useKpiHeaderData() internally, no props), so they tie to whatever
+          window/comparison/scope the table below is showing with zero extra
+          wiring from this page. */}
+      <KpiCircles />
+      <ComparisonHistogram />
 
       {/* ---------- the P&L table ---------- */}
       <Card className="p-5 space-y-3">

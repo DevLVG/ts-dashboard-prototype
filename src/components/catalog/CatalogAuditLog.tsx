@@ -1,10 +1,12 @@
-// Audit trail panel — who/when/field/old/new for every Catalogue CMS edit.
+// Audit trail table — who/when/field/old/new for every Catalogue CMS edit.
 // Reads pricing_master_snap_audit directly (migration 039). Every row here
 // was written atomically by the same DB function that made the edit
 // (catalog_update_field / catalog_create_product / catalog_delete_product)
 // — there is no code path that can write a catalogue change without one.
-import { History } from "lucide-react";
-import { Card } from "@/components/ui/card";
+//
+// CEO live-review 2026-08-03: tucked away inside CatalogHistoryPanel
+// (collapsed by default) instead of always-on on the working surface — this
+// component is now just the table content, no card/heading of its own.
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { useCatalogAudit } from "@/data/catalogLive";
 
@@ -12,15 +14,7 @@ export const CatalogAuditLog = () => {
   const { data, isLoading, isError } = useCatalogAudit(100);
 
   return (
-    <Card className="p-6 shadow-sm">
-      <div className="flex items-center gap-2 mb-1">
-        <History className="h-4 w-4 text-gold" />
-        <h3 className="text-xl font-heading tracking-wide">AUDIT TRAIL</h3>
-      </div>
-      <p className="text-sm text-muted-foreground mb-4">
-        Every edit made in this panel — who, when, which field, old value, new value. Append-only.
-      </p>
-
+    <>
       {isError ? (
         <p className="text-sm text-destructive">Could not load the audit trail.</p>
       ) : isLoading ? (
@@ -61,6 +55,6 @@ export const CatalogAuditLog = () => {
           </Table>
         </div>
       )}
-    </Card>
+    </>
   );
 };

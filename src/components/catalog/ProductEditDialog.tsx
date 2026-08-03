@@ -1,9 +1,15 @@
 // Product edit / create dialog — Catalogue CMS.
-// Plain, robust, staff-usable: one form, one Save button, no jargon.
-// Every field change on Save is written via catalog_update_field (or
-// catalog_create_product for a new SKU) — the audit row is guaranteed by
-// the DB function itself (migration 039), never assembled here.
-import { useEffect, useState } from "react";
+// Plain, robust, staff-usable: one form, autosave, no jargon.
+//
+// CEO live-review 2026-08-03 ("saving must be unambiguous"): every field
+// change on an existing product now autosaves (debounced) via
+// catalog_update_field — the audit row is guaranteed by the DB function
+// itself (migration 039), never assembled here. A new product is still
+// created by one explicit "Create product" click (the one confirmation
+// step that makes sense before a row exists to autosave against); the form
+// itself is autosaved as a local draft from the first keystroke so an
+// accidental close never loses it. No silent saves, no silent losses.
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,15 +19,19 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { Loader2, ImagePlus, Trash2, AlertTriangle } from "lucide-react";
+import { Loader2, ImagePlus, Trash2, AlertTriangle, CheckCircle2, XCircle, FileClock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 import {
-  type CatalogProduct, DERIVED_PRICE_SKUS,
+  type CatalogProduct, type EditableField, DERIVED_PRICE_SKUS,
   useUpdateCatalogField, useCreateCatalogProduct, useDeleteCatalogProduct, uploadCatalogImage,
 } from "@/data/catalogLive";
 
 const STATUS_OPTIONS = ["Active", "DoNotAdvertise", "Planned", "Reserved"] as const;
 const BU_OPTIONS = ["HSE", "LIV", "MEM", "RET", "TEST"] as const;
+const AUTOSAVE_DEBOUNCE_MS = 700;
+const DRAFT_DEBOUNCE_MS = 500;
+const NEW_PRODUCT_DRAFT_KEY = "trio_catalog_new_product_draft_v1";
 
 interface Props {
   open: boolean;
@@ -29,6 +39,36 @@ interface Props {
   product: CatalogProduct | null; // null = "new product" mode
   actor: string;
 }
+
+type SaveChipState =
+  | { kind: "idle" }
+  | { kind: "saving" }
+  | { kind: "saved"; at: Date }
+  | { kind: "error"; message: string; retry: () => void }
+  | { kind: "draft"; at: Date };
+
+interface DraftShape {
+  sku: string; buCode: string; name: string; description: string; category: string;
+  subcategory: string; price: string; priceNotes: string; status: string; membersOnly: boolean;
+}
+
+const loadDraft = (): DraftShape | null => {
+  try {
+    const raw = localStorage.getItem(NEW_PRODUCT_DRAFT_KEY);
+    return raw ? (JSON.parse(raw) as DraftShape) : null;
+  } catch {
+    return null;
+  }
+};
+const saveDraft = (d: DraftShape) => {
+  try { localStorage.setItem(NEW_PRODUCT_DRAFT_KEY, JSON.stringify(d)); } catch { /* best-effort */ }
+};
+const clearDraft = () => {
+  try { localStorage.removeItem(NEW_PRODUCT_DRAFT_KEY); } catch { /* best-effort */ }
+};
+const isDraftEmpty = (d: DraftShape) =>
+  !d.sku.trim() && !d.name.trim() && !d.description.trim() && !d.category.trim() &&
+  !d.subcategory.trim() && !d.price.trim() && !d.priceNotes.trim();
 
 export const ProductEditDialog = ({ open, onOpenChange, product, actor }: Props) => {
   const isNew = product === null;
@@ -50,8 +90,19 @@ export const ProductEditDialog = ({ open, onOpenChange, product, actor }: Props)
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [chip, setChip] = useState<SaveChipState>({ kind: "idle" });
+  const [hasRestoredDraft, setHasRestoredDraft] = useState(false);
+
+  // last DB-committed value per field, seeded from the loaded product —
+  // lets autosave diff against reality instead of re-sending unchanged
+  // fields, and gives Retry something to resend.
+  const committedRef = useRef<Partial<Record<EditableField, string>>>({});
+  const timersRef = useRef<Partial<Record<EditableField, ReturnType<typeof setTimeout>>>>({});
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingCountRef = useRef(0);
 
   useEffect(() => {
     if (!open) return;
@@ -68,104 +119,171 @@ export const ProductEditDialog = ({ open, onOpenChange, product, actor }: Props)
       setMembersOnly(product.members_only);
       setImageUrl(product.image_url);
       setImagePreview(product.image_url);
+      committedRef.current = {
+        service_name: product.service_name ?? "",
+        description: product.description ?? "",
+        category: product.category ?? "",
+        subcategory: product.subcategory ?? "",
+        price_sar: product.price_sar != null ? String(product.price_sar) : "",
+        price_notes: product.price_notes ?? "",
+        status: product.status,
+        members_only: String(product.members_only),
+        image_url: product.image_url ?? "",
+      };
+      setChip({ kind: "idle" });
     } else {
-      setSku(""); setBuCode("HSE"); setName(""); setDescription("");
-      setCategory(""); setSubcategory(""); setPrice(""); setPriceNotes("");
-      setStatus("Active"); setMembersOnly(false); setImageUrl(null); setImagePreview(null);
+      const draft = loadDraft();
+      if (draft) {
+        setSku(draft.sku); setBuCode(draft.buCode); setName(draft.name); setDescription(draft.description);
+        setCategory(draft.category); setSubcategory(draft.subcategory); setPrice(draft.price);
+        setPriceNotes(draft.priceNotes); setStatus(draft.status); setMembersOnly(draft.membersOnly);
+        setHasRestoredDraft(!isDraftEmpty(draft));
+        setChip(!isDraftEmpty(draft) ? { kind: "draft", at: new Date() } : { kind: "idle" });
+      } else {
+        setSku(""); setBuCode("HSE"); setName(""); setDescription("");
+        setCategory(""); setSubcategory(""); setPrice(""); setPriceNotes("");
+        setStatus("Active"); setMembersOnly(false);
+        setHasRestoredDraft(false);
+        setChip({ kind: "idle" });
+      }
+      setImageUrl(null); setImagePreview(null);
     }
     setImageFile(null);
     setConfirmDelete(false);
+    setNameError(null);
+    pendingCountRef.current = 0;
   }, [open, product]);
 
+  // ---------------------------------------------------------- new-product draft autosave
+  useEffect(() => {
+    if (!isNew || !open) return;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      const d: DraftShape = { sku, buCode, name, description, category, subcategory, price, priceNotes, status, membersOnly };
+      if (isDraftEmpty(d)) { clearDraft(); return; }
+      saveDraft(d);
+      setChip({ kind: "draft", at: new Date() });
+    }, DRAFT_DEBOUNCE_MS);
+    return () => { if (draftTimerRef.current) clearTimeout(draftTimerRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew, open, sku, buCode, name, description, category, subcategory, price, priceNotes, status, membersOnly]);
+
+  // ---------------------------------------------------------- edit-mode autosave
   const isDerivedPrice = product ? Object.prototype.hasOwnProperty.call(DERIVED_PRICE_SKUS, product.sku) : false;
+
+  const commitField = async (field: EditableField, value: string): Promise<boolean> => {
+    if (!product) return true;
+    if (committedRef.current[field] === value) return true;
+    pendingCountRef.current += 1;
+    setChip({ kind: "saving" });
+    try {
+      await updateField.mutateAsync({ sku: product.sku, field, value, actor });
+      committedRef.current[field] = value;
+      pendingCountRef.current -= 1;
+      if (pendingCountRef.current <= 0) { pendingCountRef.current = 0; setChip({ kind: "saved", at: new Date() }); }
+      return true;
+    } catch (err) {
+      pendingCountRef.current = Math.max(0, pendingCountRef.current - 1);
+      setChip({ kind: "error", message: (err as Error).message, retry: () => { void commitField(field, value); } });
+      return false;
+    }
+  };
+
+  const scheduleAutosave = (field: EditableField, value: string, immediate = false) => {
+    if (!product) return; // new-product mode: handled by the draft effect above
+    if (timersRef.current[field]) clearTimeout(timersRef.current[field]);
+    if (immediate) { void commitField(field, value); return; }
+    timersRef.current[field] = setTimeout(() => void commitField(field, value), AUTOSAVE_DEBOUNCE_MS);
+  };
+
+  const flushAllPending = async () => {
+    Object.values(timersRef.current).forEach((t) => t && clearTimeout(t));
+    timersRef.current = {};
+    if (!product) return true;
+    const checks: Array<[EditableField, string]> = [
+      ["service_name", name.trim()],
+      ["description", description.trim()],
+      ["category", category.trim()],
+      ["subcategory", subcategory.trim()],
+      ["price_notes", priceNotes.trim()],
+      ["status", status],
+      ["members_only", String(membersOnly)],
+    ];
+    if (!isDerivedPrice) checks.push(["price_sar", price.trim()]);
+    let ok = true;
+    for (const [field, value] of checks) {
+      if (committedRef.current[field] !== value && !(field === "service_name" && !value)) {
+        const success = await commitField(field, value);
+        if (!success) ok = false;
+      }
+    }
+    return ok;
+  };
+
+  const onNameChange = (v: string) => {
+    setName(v);
+    if (!product) return;
+    if (!v.trim()) { setNameError("Name is required"); return; }
+    setNameError(null);
+    scheduleAutosave("service_name", v.trim());
+  };
 
   const onPickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
     setImageFile(f);
-    setImagePreview(URL.createObjectURL(f));
+    const preview = URL.createObjectURL(f);
+    setImagePreview(preview);
+    if (product) {
+      (async () => {
+        setChip({ kind: "saving" });
+        try {
+          const url = await uploadCatalogImage(product.sku, f);
+          setImageUrl(url);
+          await commitField("image_url", url);
+        } catch (err) {
+          setChip({ kind: "error", message: (err as Error).message, retry: () => onPickImage(e) });
+        }
+      })();
+    }
   };
 
-  const handleSave = async () => {
-    if (!name.trim()) {
-      toast({ variant: "destructive", title: "Name is required" });
-      return;
-    }
-    setSaving(true);
+  const handleCreate = async () => {
+    if (!name.trim()) { setNameError("Name is required"); toast({ variant: "destructive", title: "Name is required" }); return; }
+    if (!sku.trim()) { toast({ variant: "destructive", title: "SKU is required" }); return; }
+    setCreating(true);
     try {
-      let finalImageUrl = imageUrl;
-      const targetSku = isNew ? sku.trim() : product!.sku;
+      let finalImageUrl: string | null = null;
+      if (imageFile) finalImageUrl = await uploadCatalogImage(sku.trim(), imageFile);
 
-      if (imageFile) {
-        if (!targetSku) {
-          toast({ variant: "destructive", title: "Enter a SKU before uploading an image" });
-          setSaving(false);
-          return;
-        }
-        finalImageUrl = await uploadCatalogImage(targetSku, imageFile);
+      await createProduct.mutateAsync({
+        sku: sku.trim(),
+        bu_code: buCode,
+        service_name: name.trim(),
+        description: description.trim(),
+        price_sar: price.trim() === "" ? null : Number(price),
+        category: category.trim() || undefined,
+        subcategory: subcategory.trim() || undefined,
+        status,
+        members_only: membersOnly,
+        actor,
+      });
+      if (finalImageUrl) {
+        await updateField.mutateAsync({ sku: sku.trim(), field: "image_url", value: finalImageUrl, actor });
       }
-
-      if (isNew) {
-        if (!sku.trim()) {
-          toast({ variant: "destructive", title: "SKU is required" });
-          setSaving(false);
-          return;
-        }
-        await createProduct.mutateAsync({
-          sku: sku.trim(),
-          bu_code: buCode,
-          service_name: name.trim(),
-          description: description.trim(),
-          price_sar: price.trim() === "" ? null : Number(price),
-          category: category.trim() || undefined,
-          subcategory: subcategory.trim() || undefined,
-          status,
-          members_only: membersOnly,
-          actor,
-        });
-        if (finalImageUrl) {
-          await updateField.mutateAsync({ sku: sku.trim(), field: "image_url", value: finalImageUrl, actor });
-        }
-        toast({ title: `Created ${sku.trim()}` });
-      } else {
-        const p = product!;
-        const edits: Array<{ field: Parameters<typeof updateField.mutateAsync>[0]["field"]; value: string }> = [];
-        if (name.trim() !== (p.service_name ?? "")) edits.push({ field: "service_name", value: name.trim() });
-        if (description.trim() !== (p.description ?? "")) edits.push({ field: "description", value: description.trim() });
-        if (category.trim() !== (p.category ?? "")) edits.push({ field: "category", value: category.trim() });
-        if (subcategory.trim() !== (p.subcategory ?? "")) edits.push({ field: "subcategory", value: subcategory.trim() });
-        if (!isDerivedPrice) {
-          const newPriceStr = price.trim() === "" ? "" : String(Number(price));
-          const oldPriceStr = p.price_sar != null ? String(p.price_sar) : "";
-          if (newPriceStr !== oldPriceStr) edits.push({ field: "price_sar", value: newPriceStr });
-        }
-        if (priceNotes.trim() !== (p.price_notes ?? "")) edits.push({ field: "price_notes", value: priceNotes.trim() });
-        if (status !== p.status) edits.push({ field: "status", value: status });
-        if (membersOnly !== p.members_only) edits.push({ field: "members_only", value: String(membersOnly) });
-        if (finalImageUrl && finalImageUrl !== (p.image_url ?? null)) edits.push({ field: "image_url", value: finalImageUrl });
-
-        if (edits.length === 0) {
-          toast({ title: "Nothing changed" });
-          setSaving(false);
-          onOpenChange(false);
-          return;
-        }
-        for (const e of edits) {
-          await updateField.mutateAsync({ sku: p.sku, field: e.field, value: e.value, actor });
-        }
-        toast({ title: `Saved ${edits.length} change${edits.length > 1 ? "s" : ""} to ${p.sku}` });
-      }
+      clearDraft();
+      toast({ title: `Created ${sku.trim()}`, description: "Now syncing to Shopify automatically." });
       onOpenChange(false);
     } catch (err) {
-      toast({ variant: "destructive", title: "Save failed", description: (err as Error).message });
+      toast({ variant: "destructive", title: "Create failed", description: (err as Error).message });
     } finally {
-      setSaving(false);
+      setCreating(false);
     }
   };
 
   const handleDelete = async () => {
     if (!product) return;
-    setSaving(true);
+    setCreating(true);
     try {
       await deleteProduct.mutateAsync({ sku: product.sku, actor, reason: "removed via Catalogue CMS" });
       toast({ title: `Deleted ${product.sku}` });
@@ -173,68 +291,111 @@ export const ProductEditDialog = ({ open, onOpenChange, product, actor }: Props)
     } catch (err) {
       toast({ variant: "destructive", title: "Delete failed", description: (err as Error).message });
     } finally {
-      setSaving(false);
+      setCreating(false);
     }
   };
 
+  const attemptClose = async () => {
+    if (isNew) { onOpenChange(false); return; } // draft already autosaved locally, nothing to lose
+    const ok = await flushAllPending();
+    if (!ok) return; // stay open — chip shows the error + Retry, see below
+    onOpenChange(false);
+  };
+
+  // Browser-level guard: don't let a tab close / reload eat an in-flight or
+  // failed autosave silently.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      if (chip.kind === "saving" || chip.kind === "error") {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [open, chip.kind]);
+
   return (
-    <Dialog open={open} onOpenChange={(o) => !saving && onOpenChange(o)}>
-      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+    <Dialog open={open} onOpenChange={(o) => { if (!o) { void attemptClose(); } else { onOpenChange(o); } }}>
+      <DialogContent
+        className="max-w-xl max-h-[90vh] overflow-y-auto"
+        onInteractOutside={(e) => { if (!isNew && (chip.kind === "saving" || chip.kind === "error")) e.preventDefault(); }}
+        onEscapeKeyDown={(e) => { if (!isNew && (chip.kind === "saving" || chip.kind === "error")) e.preventDefault(); }}
+      >
         <DialogHeader>
-          <DialogTitle>{isNew ? "New product" : `Edit ${product?.sku}`}</DialogTitle>
+          <div className="flex items-center justify-between gap-3 pr-6">
+            <DialogTitle>{isNew ? "New product" : `Edit ${product?.sku}`}</DialogTitle>
+            <SaveChip chip={chip} />
+          </div>
           <DialogDescription>
             {isNew
-              ? "Create a new catalogue entry. It stays here until you Sync to Shopify."
-              : "Changes save here first. Nothing reaches Shopify until you run Sync to Shopify."}
+              ? "Fields autosave here as a local draft while you type. Click Create product to add it to the catalogue and start syncing it to Shopify."
+              : "Every change autosaves here, then syncs to Shopify automatically within a few seconds — no button to press."}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           {isNew && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="sku">SKU</Label>
-                <Input id="sku" value={sku} onChange={(e) => setSku(e.target.value.toUpperCase())}
-                  placeholder="e.g. RET-TCK-999" className="mt-1" />
+            <>
+              {hasRestoredDraft && (
+                <div className="rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-xs flex items-center gap-2">
+                  <FileClock className="h-3.5 w-3.5 shrink-0 text-sky-400" />
+                  Resumed your unsaved draft from last time.
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="sku">SKU</Label>
+                  <Input id="sku" value={sku} onChange={(e) => setSku(e.target.value.toUpperCase())}
+                    placeholder="e.g. RET-TCK-999" className="mt-1" />
+                </div>
+                <div>
+                  <Label htmlFor="bu">Business unit</Label>
+                  <Select value={buCode} onValueChange={setBuCode}>
+                    <SelectTrigger id="bu" className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {BU_OPTIONS.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div>
-                <Label htmlFor="bu">Business unit</Label>
-                <Select value={buCode} onValueChange={setBuCode}>
-                  <SelectTrigger id="bu" className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {BU_OPTIONS.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            </>
           )}
 
           <div>
             <Label htmlFor="name">Name</Label>
-            <Input id="name" value={name} onChange={(e) => setName(e.target.value)} className="mt-1" />
+            <Input id="name" value={name} onChange={(e) => onNameChange(e.target.value)} className="mt-1" />
+            {nameError && <p className="text-[11px] text-destructive mt-1">{nameError}</p>}
           </div>
 
           <div>
             <Label htmlFor="description">Description</Label>
-            <Textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)}
+            <Textarea id="description" value={description}
+              onChange={(e) => { setDescription(e.target.value); scheduleAutosave("description", e.target.value.trim()); }}
               rows={3} className="mt-1" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="category">Category</Label>
-              <Input id="category" value={category} onChange={(e) => setCategory(e.target.value)} className="mt-1" />
+              <Input id="category" value={category}
+                onChange={(e) => { setCategory(e.target.value); scheduleAutosave("category", e.target.value.trim()); }}
+                className="mt-1" />
             </div>
             <div>
               <Label htmlFor="subcategory">Subcategory</Label>
-              <Input id="subcategory" value={subcategory} onChange={(e) => setSubcategory(e.target.value)} className="mt-1" />
+              <Input id="subcategory" value={subcategory}
+                onChange={(e) => { setSubcategory(e.target.value); scheduleAutosave("subcategory", e.target.value.trim()); }}
+                className="mt-1" />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="price">Price (SAR)</Label>
-              <Input id="price" type="number" value={price} onChange={(e) => setPrice(e.target.value)}
+              <Input id="price" type="number" value={price}
+                onChange={(e) => { setPrice(e.target.value); scheduleAutosave("price_sar", e.target.value.trim()); }}
                 disabled={isDerivedPrice} className="mt-1" />
               {isDerivedPrice && (
                 <p className="text-[11px] text-muted-foreground mt-1 flex items-start gap-1">
@@ -242,10 +403,15 @@ export const ProductEditDialog = ({ open, onOpenChange, product, actor }: Props)
                   Derived: {DERIVED_PRICE_SKUS[product!.sku]}. Edit the base lesson price instead.
                 </p>
               )}
+              {!isDerivedPrice && !isNew && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Price changes still need CEO approval before they reach Shopify — see the price-approval banner above the table.
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="status">Status</Label>
-              <Select value={status} onValueChange={setStatus}>
+              <Select value={status} onValueChange={(v) => { setStatus(v); scheduleAutosave("status", v, true); }}>
                 <SelectTrigger id="status" className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {STATUS_OPTIONS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
@@ -256,7 +422,9 @@ export const ProductEditDialog = ({ open, onOpenChange, product, actor }: Props)
 
           <div>
             <Label htmlFor="priceNotes">Price notes (optional)</Label>
-            <Input id="priceNotes" value={priceNotes} onChange={(e) => setPriceNotes(e.target.value)} className="mt-1" />
+            <Input id="priceNotes" value={priceNotes}
+              onChange={(e) => { setPriceNotes(e.target.value); scheduleAutosave("price_notes", e.target.value.trim()); }}
+              className="mt-1" />
           </div>
 
           <div className="flex items-center justify-between rounded-md border p-3">
@@ -264,7 +432,8 @@ export const ProductEditDialog = ({ open, onOpenChange, product, actor }: Props)
               <Label htmlFor="membersOnly">Members only</Label>
               <p className="text-[11px] text-muted-foreground">Membership-access rule — only members can see/book this.</p>
             </div>
-            <Switch id="membersOnly" checked={membersOnly} onCheckedChange={setMembersOnly} />
+            <Switch id="membersOnly" checked={membersOnly}
+              onCheckedChange={(c) => { setMembersOnly(c); scheduleAutosave("members_only", String(c), true); }} />
           </div>
 
           <div>
@@ -278,9 +447,13 @@ export const ProductEditDialog = ({ open, onOpenChange, product, actor }: Props)
                 )}
               </div>
               <div className="flex-1">
-                <Input type="file" accept="image/*" onChange={onPickImage} />
+                <Input type="file" accept="image/*" onChange={onPickImage} disabled={isNew && !sku.trim()} />
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  Uploaded to Supabase Storage. Synced to Shopify on the next Sync to Shopify run.
+                  {isNew
+                    ? sku.trim()
+                      ? "Uploads once you click Create product."
+                      : "Enter a SKU first."
+                    : "Uploaded to Supabase Storage, then synced to Shopify automatically."}
                 </p>
               </div>
             </div>
@@ -292,24 +465,73 @@ export const ProductEditDialog = ({ open, onOpenChange, product, actor }: Props)
             confirmDelete ? (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-destructive">Delete {product?.sku}?</span>
-                <Button variant="destructive" size="sm" onClick={handleDelete} disabled={saving}>Confirm delete</Button>
+                <Button variant="destructive" size="sm" onClick={handleDelete} disabled={creating}>Confirm delete</Button>
                 <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>Cancel</Button>
               </div>
             ) : (
-              <Button variant="ghost" size="sm" className="text-destructive gap-1.5" onClick={() => setConfirmDelete(true)} disabled={saving}>
+              <Button variant="ghost" size="sm" className="text-destructive gap-1.5" onClick={() => setConfirmDelete(true)} disabled={creating}>
                 <Trash2 className="h-3.5 w-3.5" /> Delete
               </Button>
             )
           )}
           <div className="flex gap-2 ml-auto">
-            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving} className="gap-1.5">
-              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {isNew ? "Create" : "Save"}
-            </Button>
+            {isNew ? (
+              <>
+                <Button variant="ghost" onClick={() => onOpenChange(false)}>Close (draft kept)</Button>
+                <Button onClick={handleCreate} disabled={creating} className="gap-1.5">
+                  {creating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Create product
+                </Button>
+              </>
+            ) : (
+              <Button onClick={() => void attemptClose()} disabled={chip.kind === "saving"} className="gap-1.5">
+                {chip.kind === "saving" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Done
+              </Button>
+            )}
           </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+};
+
+const SaveChip = ({ chip }: { chip: SaveChipState }) => {
+  const fmt = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  switch (chip.kind) {
+    case "saving":
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
+        </span>
+      );
+    case "saved":
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs text-emerald-500 shrink-0">
+          <CheckCircle2 className="h-3.5 w-3.5" /> Saved ✓ {fmt(chip.at)}
+        </span>
+      );
+    case "draft":
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs text-sky-400 shrink-0">
+          <FileClock className="h-3.5 w-3.5" /> Draft saved {fmt(chip.at)}
+        </span>
+      );
+    case "error":
+      return (
+        <button
+          type="button"
+          onClick={chip.retry}
+          className={cn(
+            "inline-flex items-center gap-1.5 text-xs text-destructive shrink-0 underline decoration-dotted",
+            "hover:text-destructive/80",
+          )}
+          title={chip.message}
+        >
+          <XCircle className="h-3.5 w-3.5" /> Error — retry
+        </button>
+      );
+    default:
+      return null;
+  }
 };

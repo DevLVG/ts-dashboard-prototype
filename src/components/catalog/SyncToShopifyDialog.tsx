@@ -1,12 +1,18 @@
-// "Sync to Shopify" — dry-run first, explicit confirm to execute.
+// Price-change approval dialog — dry-run first, explicit confirm to execute.
 // One-way middleware -> Shopify. Reuses/extends sync_catalog_to_shopify.py
 // via the local catalog_sync_api.py wrapper (see src/data/catalogLive.ts).
 //
-// SAFETY RAIL (non-negotiable, per build brief): the Shopify store is LIVE
-// and selling. Price changes are a CEO-approval category — every price row
-// in the diff is flagged, and Execute is blocked (server-side, via
+// CEO live-review 2026-08-03: every OTHER catalogue change now syncs to
+// Shopify automatically (scheduleCatalogAutoSync in catalogLive.ts) — this
+// dialog's only remaining job is the price-approval exception below.
+//
+// SAFETY RAIL (non-negotiable, per build brief + Leveredge Category-B
+// financial-commitment policy): the Shopify store is LIVE and selling.
+// Price changes are a CEO-approval category — every price row in the diff
+// is flagged, and Execute is blocked (server-side, via
 // --block-price-changes) unless the staff member explicitly ticks the
-// "price changes approved" box for THIS run.
+// "price changes approved" box for THIS run. The automatic sync path never
+// sets this flag to false.
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -65,16 +71,16 @@ export const SyncToShopifyDialog = ({ open, onOpenChange }: Props) => {
     <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset(); }}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Sync to Shopify</DialogTitle>
+          <DialogTitle>Approve price changes to Shopify</DialogTitle>
           <DialogDescription>
-            One-way: middleware → Shopify only. Nothing is ever pulled back from Shopify edits.
-            Always review the dry-run diff before confirming.
+            Every other catalogue change now syncs to Shopify automatically. Price changes are the one exception —
+            they need your approval before they reach the live store. Always review the dry-run diff before confirming.
           </DialogDescription>
         </DialogHeader>
 
         {!isSyncApiConfigured && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-            Sync API is not configured (VITE_CATALOG_SYNC_API_TOKEN missing) — Sync to Shopify cannot run from this
+            Sync API is not configured (VITE_CATALOG_SYNC_API_TOKEN missing) — sync cannot run from this
             environment.
           </div>
         )}

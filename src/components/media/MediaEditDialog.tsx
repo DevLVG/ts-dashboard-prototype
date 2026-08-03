@@ -4,6 +4,13 @@
 // the audit row is guaranteed by the DB function itself (migration 057),
 // never assembled here. "Replace file" uploads to Supabase Storage
 // (bucket site-media) first — see mediaLive.ts header comment for why.
+//
+// CEO live-review 2026-08-03 (mandate extension, then Marcello-approved
+// auto-sync extension): added the same "Saving… / Saved ✓ / Error — retry"
+// chip used across the Cockpit, next to the dialog title (still one
+// explicit Save button, same batched-diff commit). A successful save now
+// also auto-triggers the theme sync for this asset — see the per-tile sync
+// status badge in MediaAdmin.tsx (scheduleMediaAutoSync in mediaLive.ts).
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +27,7 @@ import {
   type SiteMediaAsset, STORAGE_BACKEND_LABEL,
   useUpdateMediaField, useDeleteMediaAsset, uploadSiteMediaFile,
 } from "@/data/mediaLive";
+import { SaveStatusChip, type SaveStatusKind } from "@/components/chrome/SaveStatusChip";
 
 interface Props {
   open: boolean;
@@ -46,6 +54,7 @@ export const MediaEditDialog = ({ open, onOpenChange, asset, actor }: Props) => 
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [chip, setChip] = useState<{ kind: SaveStatusKind; at?: Date; error?: string }>({ kind: "idle" });
 
   useEffect(() => {
     if (!open || !asset) return;
@@ -55,6 +64,7 @@ export const MediaEditDialog = ({ open, onOpenChange, asset, actor }: Props) => 
     setPreview(asset.asset_url);
     setFile(null);
     setConfirmDelete(false);
+    setChip({ kind: "idle" });
   }, [open, asset]);
 
   if (!asset) return null;
@@ -68,6 +78,7 @@ export const MediaEditDialog = ({ open, onOpenChange, asset, actor }: Props) => 
 
   const handleSave = async () => {
     setSaving(true);
+    setChip({ kind: "saving" });
     try {
       const edits: Array<{ field: Parameters<typeof updateField.mutateAsync>[0]["field"]; value: string }> = [];
 
@@ -86,6 +97,7 @@ export const MediaEditDialog = ({ open, onOpenChange, asset, actor }: Props) => 
       if (edits.length === 0) {
         toast({ title: "Nothing changed" });
         setSaving(false);
+        setChip({ kind: "idle" });
         onOpenChange(false);
         return;
       }
@@ -96,9 +108,12 @@ export const MediaEditDialog = ({ open, onOpenChange, asset, actor }: Props) => 
         title: `Saved ${edits.length} change${edits.length > 1 ? "s" : ""} to ${asset.media_key}`,
         description: file ? "Uploaded to Supabase Storage. Run the theme sync to publish it live." : undefined,
       });
+      setChip({ kind: "saved", at: new Date() });
       onOpenChange(false);
     } catch (err) {
-      toast({ variant: "destructive", title: "Save failed", description: (err as Error).message });
+      const message = (err as Error).message;
+      toast({ variant: "destructive", title: "Save failed", description: message });
+      setChip({ kind: "error", error: message });
     } finally {
       setSaving(false);
     }
@@ -121,7 +136,12 @@ export const MediaEditDialog = ({ open, onOpenChange, asset, actor }: Props) => 
     <Dialog open={open} onOpenChange={(o) => !saving && onOpenChange(o)}>
       <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit {asset.media_key}</DialogTitle>
+          <div className="flex items-center justify-between gap-3 pr-6">
+            <DialogTitle>Edit {asset.media_key}</DialogTitle>
+            {chip.kind !== "idle" && (
+              <SaveStatusChip state={chip.kind} savedAt={chip.at} errorMessage={chip.error} onRetry={handleSave} />
+            )}
+          </div>
           <DialogDescription>
             Changes save here first. The live site picks them up at the next theme sync run.
           </DialogDescription>

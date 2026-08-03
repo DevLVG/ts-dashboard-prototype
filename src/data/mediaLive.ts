@@ -154,9 +154,12 @@ export const useUpdateMediaField = () => {
       if (error) throw toFriendlyError(error);
       return data as SiteMediaAsset;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["site_media"] });
       qc.invalidateQueries({ queryKey: ["site_media_audit"] });
+      // CEO live-review 2026-08-03 (Marcello approved): every saved change
+      // now auto-triggers the theme sync too — see scheduleMediaAutoSync.
+      scheduleMediaAutoSync(qc, data.media_key, data.page);
     },
   });
 };
@@ -256,3 +259,141 @@ export const uploadSiteMediaFile = async (
 
   return { url: data.publicUrl, width, height, bytes: file.size };
 };
+
+// ------------------------------------------------- automatic theme sync
+// CEO live-review 2026-08-03 ("Marcello approved"): every saved Media
+// Library change now auto-triggers the SAME theme sync the (removed)
+// manual button would have called — see media_sync_api.py (new file, built
+// to the exact catalog_sync_api.py / copy_sync_api.py pattern; there was no
+// existing HTTP wrapper for sync_media_to_theme.py yet). Always targets the
+// Shopify DRAFT theme — sync_media_to_theme.py hardcodes PREVIEW_THEME_ID,
+// no live-theme code path exists, so there is no price-approval-style gate
+// needed here.
+
+export type MediaSyncState = "syncing" | "synced" | "error";
+
+export interface MediaSyncStatus {
+  state: MediaSyncState;
+  at?: string;
+  error?: string;
+}
+
+const MEDIA_SYNC_API_URL = (import.meta.env.VITE_MEDIA_SYNC_API_URL as string | undefined) || "http://localhost:9881";
+const MEDIA_SYNC_API_TOKEN = (import.meta.env.VITE_MEDIA_SYNC_API_TOKEN as string | undefined) || "";
+
+export const isMediaSyncApiConfigured = Boolean(MEDIA_SYNC_API_TOKEN);
+
+export interface MediaSyncResult {
+  returncode: number;
+  stdout: string;
+  stderr: string;
+  summary: { templates_considered: number; changes: number; errors: number; mode: string } | null;
+}
+
+async function runMediaSync(args: { mode: "dry_run" | "execute"; only?: string; key?: string }): Promise<MediaSyncResult> {
+  const resp = await fetch(`${MEDIA_SYNC_API_URL}/media/sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Media-Sync-Token": MEDIA_SYNC_API_TOKEN },
+    body: JSON.stringify({ mode: args.mode, only: args.only, key: args.key }),
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+    throw new Error(body.error || `Sync API returned HTTP ${resp.status}`);
+  }
+  return (await resp.json()) as MediaSyncResult;
+}
+
+const MEDIA_SYNC_STATUS_QUERY_KEY = ["media_sync_status"] as const;
+const MEDIA_SYNC_STATUS_LS_KEY = "trio_media_sync_status_v1";
+
+function loadMediaSyncStatus(): Record<string, MediaSyncStatus> {
+  try {
+    const raw = localStorage.getItem(MEDIA_SYNC_STATUS_LS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, MediaSyncStatus>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistMediaSyncStatus(map: Record<string, MediaSyncStatus>) {
+  try { localStorage.setItem(MEDIA_SYNC_STATUS_LS_KEY, JSON.stringify(map)); } catch { /* best-effort only */ }
+}
+
+/** Reactive map of media_key -> last known sync status. Client-side only,
+ * same documented caveat as the Catalogue's sync status (fast-follow: a real
+ * DB column would survive across browsers/devices). */
+export const useMediaSyncStatusMap = () =>
+  useQuery({
+    queryKey: MEDIA_SYNC_STATUS_QUERY_KEY,
+    queryFn: () => loadMediaSyncStatus(),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+
+export const useMediaSyncStatus = (mediaKey: string): MediaSyncStatus | undefined => {
+  const { data } = useMediaSyncStatusMap();
+  return data?.[mediaKey];
+};
+
+function patchMediaSyncStatus(qc: ReturnType<typeof useQueryClient>, patch: Record<string, MediaSyncStatus>) {
+  const next = { ...(qc.getQueryData<Record<string, MediaSyncStatus>>(MEDIA_SYNC_STATUS_QUERY_KEY) ?? loadMediaSyncStatus()), ...patch };
+  qc.setQueryData(MEDIA_SYNC_STATUS_QUERY_KEY, next);
+  persistMediaSyncStatus(next);
+}
+
+const MEDIA_AUTO_SYNC_DEBOUNCE_MS = 4000;
+let mediaPending = new Map<string, string>(); // media_key -> page
+let mediaDebounceHandle: ReturnType<typeof setTimeout> | null = null;
+
+async function flushMediaAutoSync(qc: ReturnType<typeof useQueryClient>, only?: string[]) {
+  const entries = only
+    ? Array.from(mediaPending.entries()).filter(([k]) => only.includes(k))
+    : Array.from(mediaPending.entries());
+  for (const [k] of entries) mediaPending.delete(k);
+  if (entries.length === 0) return;
+
+  if (!isMediaSyncApiConfigured) {
+    const patch: Record<string, MediaSyncStatus> = {};
+    for (const [k] of entries) patch[k] = { state: "error", error: "Sync API not configured in this environment" };
+    patchMediaSyncStatus(qc, patch);
+    return;
+  }
+
+  // sync_media_to_theme.py supports --key for exactly one media_key — the
+  // smallest possible blast radius, so each changed item gets its own call
+  // (sequential, never parallel, same discipline as the Catalogue).
+  for (const [mediaKey] of entries) {
+    patchMediaSyncStatus(qc, { [mediaKey]: { state: "syncing" } });
+    try {
+      const result = await runMediaSync({ mode: "execute", key: mediaKey });
+      const at = new Date().toISOString();
+      if (result.returncode !== 0 || (result.summary?.errors ?? 0) > 0) {
+        patchMediaSyncStatus(qc, { [mediaKey]: { state: "error", error: "Theme sync finished with errors — see History" } });
+      } else {
+        patchMediaSyncStatus(qc, { [mediaKey]: { state: "synced", at } });
+      }
+    } catch (err) {
+      patchMediaSyncStatus(qc, { [mediaKey]: { state: "error", error: (err as Error).message } });
+    }
+  }
+}
+
+/** Called after every successful save (edit, replace file). Marks the asset
+ * "Syncing…" immediately and debounces the actual push a few seconds so
+ * rapid edits to the same asset batch into one sync run. */
+export function scheduleMediaAutoSync(qc: ReturnType<typeof useQueryClient>, mediaKey: string, page: string) {
+  mediaPending.set(mediaKey, page);
+  patchMediaSyncStatus(qc, { [mediaKey]: { state: "syncing" } });
+  if (mediaDebounceHandle) clearTimeout(mediaDebounceHandle);
+  mediaDebounceHandle = setTimeout(() => {
+    mediaDebounceHandle = null;
+    void flushMediaAutoSync(qc);
+  }, MEDIA_AUTO_SYNC_DEBOUNCE_MS);
+}
+
+/** "Retry" — the one manual control left. Skips the debounce. */
+export function retryMediaSync(qc: ReturnType<typeof useQueryClient>, mediaKey: string, page: string) {
+  mediaPending.set(mediaKey, page);
+  patchMediaSyncStatus(qc, { [mediaKey]: { state: "syncing" } });
+  void flushMediaAutoSync(qc, [mediaKey]);
+}

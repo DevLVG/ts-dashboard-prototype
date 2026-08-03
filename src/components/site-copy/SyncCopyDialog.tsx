@@ -1,7 +1,11 @@
-// "Sync to site" — dry-run first, explicit confirm to execute.
+// "Advanced sync…" — dry-run first, explicit confirm to execute.
 // One-way middleware -> Shopify DRAFT theme only. Reuses/extends
 // sync_copy_to_theme.py via the local copy_sync_api.py wrapper (cloned from
 // the Catalogue's catalog_sync_api.py pattern — see src/data/siteCopyLive.ts).
+//
+// CEO live-review 2026-08-03 (Marcello approved): saves now auto-sync (see
+// scheduleCopyAutoSync in siteCopyLive.ts) — this dialog is the de-emphasized
+// escape hatch for reviewing a dry-run diff or forcing an arbitrary page.
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,10 +52,10 @@ export const SyncCopyDialog = ({ open, onOpenChange }: Props) => {
     <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset(); }}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Sync to site</DialogTitle>
+          <DialogTitle>Advanced sync</DialogTitle>
           <DialogDescription>
-            One-way: middleware → Shopify DRAFT theme only (never live). Nothing is ever pulled back from the theme.
-            Always review the dry-run diff before confirming.
+            Every saved change already syncs automatically. Use this only to review a dry-run diff or force a sync
+            for a specific page. One-way: middleware → Shopify DRAFT theme only (never live).
           </DialogDescription>
         </DialogHeader>
 

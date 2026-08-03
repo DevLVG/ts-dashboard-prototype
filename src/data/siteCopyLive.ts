@@ -137,9 +137,13 @@ export const useUpdateSiteCopyField = () => {
       if (error) throw toFriendlyError(error);
       return data as SiteCopyRow;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["site_copy"] });
       qc.invalidateQueries({ queryKey: ["site_copy_audit"] });
+      // Marcello approved (2026-08-03): every saved text change now
+      // auto-triggers "Sync to site" too — always toward the DRAFT theme,
+      // see scheduleCopyAutoSync below.
+      scheduleCopyAutoSync(qc, data.page_handle);
     },
   });
 };
@@ -173,18 +177,119 @@ const SYNC_API_TOKEN = (import.meta.env.VITE_COPY_SYNC_API_TOKEN as string | und
 
 export const isCopySyncApiConfigured = Boolean(SYNC_API_TOKEN);
 
-export const useSyncCopyToTheme = () =>
-  useMutation({
-    mutationFn: async (args: { mode: "dry_run" | "execute"; only?: string }): Promise<CopySyncResult> => {
-      const resp = await fetch(`${SYNC_API_URL}/copy/sync`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Copy-Sync-Token": SYNC_API_TOKEN },
-        body: JSON.stringify({ mode: args.mode, only: args.only }),
-      });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
-        throw new Error(body.error || `Sync API returned HTTP ${resp.status}`);
-      }
-      return (await resp.json()) as CopySyncResult;
-    },
+async function runCopySync(args: { mode: "dry_run" | "execute"; only?: string }): Promise<CopySyncResult> {
+  const resp = await fetch(`${SYNC_API_URL}/copy/sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Copy-Sync-Token": SYNC_API_TOKEN },
+    body: JSON.stringify({ mode: args.mode, only: args.only }),
   });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+    throw new Error(body.error || `Sync API returned HTTP ${resp.status}`);
+  }
+  return (await resp.json()) as CopySyncResult;
+}
+
+/** Manual path — kept as an "Advanced sync…" escape hatch (dry-run diff
+ * review, arbitrary page scoping) now that saves auto-sync. See
+ * SyncCopyDialog.tsx. */
+export const useSyncCopyToTheme = () => useMutation({ mutationFn: runCopySync });
+
+// ------------------------------------------------- automatic theme sync
+// Marcello approved (2026-08-03): a saved text change triggers "Sync to
+// site" automatically — ALWAYS toward the DRAFT theme (PREVIEW_THEME_ID is
+// hardcoded in sync_copy_to_theme.py, no live-theme code path exists, so
+// there's no price-approval-style gate needed here, unlike the Catalogue).
+// Scoped per page_handle (the sync script's own unit of "--only").
+
+export type CopySyncState = "syncing" | "synced" | "error";
+
+export interface CopySyncStatus {
+  state: CopySyncState;
+  at?: string;
+  error?: string;
+}
+
+const COPY_SYNC_STATUS_QUERY_KEY = ["copy_sync_status"] as const;
+const COPY_SYNC_STATUS_LS_KEY = "trio_copy_sync_status_v1";
+
+function loadCopySyncStatus(): Record<string, CopySyncStatus> {
+  try {
+    const raw = localStorage.getItem(COPY_SYNC_STATUS_LS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, CopySyncStatus>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistCopySyncStatus(map: Record<string, CopySyncStatus>) {
+  try { localStorage.setItem(COPY_SYNC_STATUS_LS_KEY, JSON.stringify(map)); } catch { /* best-effort only */ }
+}
+
+/** Reactive map of page_handle -> last known sync status. Client-side only
+ * (same documented caveat as the Catalogue/Media sync status). */
+export const useCopySyncStatusMap = () =>
+  useQuery({
+    queryKey: COPY_SYNC_STATUS_QUERY_KEY,
+    queryFn: () => loadCopySyncStatus(),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+
+function patchCopySyncStatus(qc: ReturnType<typeof useQueryClient>, patch: Record<string, CopySyncStatus>) {
+  const next = { ...(qc.getQueryData<Record<string, CopySyncStatus>>(COPY_SYNC_STATUS_QUERY_KEY) ?? loadCopySyncStatus()), ...patch };
+  qc.setQueryData(COPY_SYNC_STATUS_QUERY_KEY, next);
+  persistCopySyncStatus(next);
+}
+
+const COPY_AUTO_SYNC_DEBOUNCE_MS = 4000;
+let copyPending = new Set<string>(); // page_handle
+let copyDebounceHandle: ReturnType<typeof setTimeout> | null = null;
+
+async function flushCopyAutoSync(qc: ReturnType<typeof useQueryClient>, only?: string[]) {
+  const pages = only ? Array.from(copyPending).filter((p) => only.includes(p)) : Array.from(copyPending);
+  for (const p of pages) copyPending.delete(p);
+  if (pages.length === 0) return;
+
+  if (!isCopySyncApiConfigured) {
+    const patch: Record<string, CopySyncStatus> = {};
+    for (const p of pages) patch[p] = { state: "error", error: "Sync API not configured in this environment" };
+    patchCopySyncStatus(qc, patch);
+    return;
+  }
+
+  for (const page of pages) {
+    patchCopySyncStatus(qc, { [page]: { state: "syncing" } });
+    try {
+      const result = await runCopySync({ mode: "execute", only: page });
+      const at = result.diff?.stamp ?? new Date().toISOString();
+      if (result.returncode !== 0 || (result.diff?.errors.length ?? 0) > 0) {
+        patchCopySyncStatus(qc, { [page]: { state: "error", error: "Theme sync finished with errors — see History" } });
+      } else {
+        patchCopySyncStatus(qc, { [page]: { state: "synced", at } });
+      }
+    } catch (err) {
+      patchCopySyncStatus(qc, { [page]: { state: "error", error: (err as Error).message } });
+    }
+  }
+}
+
+/** Called after every successful save. Marks the page "Syncing…"
+ * immediately and debounces the actual push a few seconds so rapid edits to
+ * the same page batch into one sync run. */
+export function scheduleCopyAutoSync(qc: ReturnType<typeof useQueryClient>, pageHandle: string) {
+  copyPending.add(pageHandle);
+  patchCopySyncStatus(qc, { [pageHandle]: { state: "syncing" } });
+  if (copyDebounceHandle) clearTimeout(copyDebounceHandle);
+  copyDebounceHandle = setTimeout(() => {
+    copyDebounceHandle = null;
+    void flushCopyAutoSync(qc);
+  }, COPY_AUTO_SYNC_DEBOUNCE_MS);
+}
+
+/** "Retry" / force-sync — the one manual control left for the auto path. */
+export function retryCopySync(qc: ReturnType<typeof useQueryClient>, pageHandle: string) {
+  copyPending.add(pageHandle);
+  patchCopySyncStatus(qc, { [pageHandle]: { state: "syncing" } });
+  void flushCopyAutoSync(qc, [pageHandle]);
+}

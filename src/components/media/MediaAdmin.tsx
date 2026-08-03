@@ -1,21 +1,74 @@
 // Media/Asset CMS — editable registry for every site image, video and
-// brochure, one-way sync to the theme. CEO decision 2026-07-25: graphic
+// brochure, automatic sync to the theme. CEO decision 2026-07-25: graphic
 // assets must be centrally managed like the rest (Catalogue + Site Copy
 // already have CMS modules). Built for non-technical club staff: a grid
 // of thumbnails, one edit dialog, filters, an audit trail.
+//
+// CEO live-review 2026-08-03 (Marcello approved): every saved edit/replace
+// now auto-triggers sync_media_to_theme.py (via the new media_sync_api.py
+// wrapper) — same debounce + per-item status pattern as the Catalogue.
+// Always the DRAFT theme, never live — see mediaLive.ts header comment.
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { ImageIcon, Video, FileText, Search, Pencil, ShieldAlert, AlertTriangle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ImageIcon, Video, FileText, Search, Pencil, ShieldAlert, AlertTriangle, Loader2, CheckCircle2, XCircle, ShieldQuestion } from "lucide-react";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import { useAuth } from "@/contexts/AuthContext";
-import { useSiteMedia, type SiteMediaAsset, STORAGE_BACKEND_LABEL } from "@/data/mediaLive";
+import {
+  useSiteMedia, type SiteMediaAsset, STORAGE_BACKEND_LABEL,
+  useMediaSyncStatusMap, retryMediaSync, isMediaSyncApiConfigured, type MediaSyncStatus,
+} from "@/data/mediaLive";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 import { MediaEditDialog } from "@/components/media/MediaEditDialog";
 import { MediaAuditLog } from "@/components/media/MediaAuditLog";
+
+const fmtTime = (iso?: string) => (iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
+
+const MediaSyncBadge = ({ mediaKey, page, status }: { mediaKey: string; page: string; status: MediaSyncStatus | undefined }) => {
+  const qc = useQueryClient();
+  const stop = (e: React.MouseEvent) => e.stopPropagation(); // tile itself is a button (opens Edit)
+
+  if (!isMediaSyncApiConfigured) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span onClick={stop} className="inline-flex items-center gap-0.5 text-[9px] text-muted-foreground cursor-help">
+            <ShieldQuestion className="h-2.5 w-2.5" /> sync N/A
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs text-xs">
+          This environment can't reach the media sync API — edits save but won't reach the draft theme from here.
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+  if (!status) return null;
+  if (status.state === "syncing") {
+    return <span className="inline-flex items-center gap-0.5 text-[9px] text-muted-foreground"><Loader2 className="h-2.5 w-2.5 animate-spin" /> syncing</span>;
+  }
+  if (status.state === "error") {
+    return (
+      <button
+        type="button"
+        onClick={(e) => { stop(e); retryMediaSync(qc, mediaKey, page); }}
+        className="inline-flex items-center gap-0.5 text-[9px] text-destructive underline decoration-dotted"
+        title={status.error}
+      >
+        <XCircle className="h-2.5 w-2.5" /> error — retry
+      </button>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-0.5 text-[9px] text-emerald-500">
+      <CheckCircle2 className="h-2.5 w-2.5" /> synced {fmtTime(status.at)}
+    </span>
+  );
+};
 
 const TypeIcon = ({ type, className }: { type: string; className?: string }) => {
   if (type === "video") return <Video className={className} />;
@@ -40,6 +93,7 @@ export const MediaAdmin = () => {
   const { session } = useAuth();
   const actor = session?.user?.email ?? "unknown";
   const { data: assets, isLoading, isError, error } = useSiteMedia();
+  const { data: syncStatusMap } = useMediaSyncStatusMap();
 
   const [search, setSearch] = useState("");
   const [pageFilter, setPageFilter] = useState<string>("ALL");
@@ -75,8 +129,8 @@ export const MediaAdmin = () => {
       <div className="rounded-md border border-sky-500/30 bg-sky-500/5 px-4 py-3 text-sm flex items-start gap-2">
         <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0 text-sky-400" />
         <span>
-          This panel is the <strong>single source of truth</strong> for site media. Edits save here first — the live
-          site only updates when the theme sync runs (<code className="text-xs">sync_media_to_theme.py</code>).
+          This panel is the <strong>single source of truth</strong> for site media. Every saved edit or file replace
+          now syncs to the Shopify <strong>draft theme</strong> automatically within a few seconds — never live.
           Nothing here is ever pulled back from the theme.
         </span>
       </div>
@@ -154,6 +208,7 @@ export const MediaAdmin = () => {
                   <p className="text-[10px] text-muted-foreground">
                     {a.width && a.height ? `${a.width}×${a.height} · ` : ""}{fmtBytes(a.bytes)}
                   </p>
+                  <MediaSyncBadge mediaKey={a.media_key} page={a.page} status={syncStatusMap?.[a.media_key]} />
                 </div>
                 <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-background/90 border">

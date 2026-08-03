@@ -1,32 +1,89 @@
-// Site Copy CMS — editable EN/AR website copy, one-way sync to the Shopify
-// draft theme. CEO decision 2026-07-25: all Trio Sporting Website V1 copy
-// lives here so future edits need no developer, and it's ready for the
+// Site Copy CMS — editable EN/AR website copy, automatic sync to the
+// Shopify draft theme. CEO decision 2026-07-25: all Trio Sporting Website V1
+// copy lives here so future edits need no developer, and it's ready for the
 // Arabic version (EN/AR side by side). Built for non-technical club staff:
 // pick a page, open a section, edit the text, save happens automatically.
+//
+// CEO live-review 2026-08-03 (Marcello approved): the "Sync to site" button
+// is replaced by a per-page auto-sync status readout (same pattern as the
+// Catalogue's per-product Shopify chip) — see scheduleCopyAutoSync in
+// siteCopyLive.ts. SyncCopyDialog stays as a de-emphasized "Advanced sync…"
+// escape hatch for dry-run diff review / arbitrary page scoping.
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { RefreshCw, Search, Languages, ShieldAlert } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Search, Languages, ShieldAlert, Loader2, CheckCircle2, XCircle, ShieldQuestion } from "lucide-react";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import { useAuth } from "@/contexts/AuthContext";
-import { useSiteCopy, type SiteCopyRow } from "@/data/siteCopyLive";
+import {
+  useSiteCopy, type SiteCopyRow, type CopySyncStatus,
+  useCopySyncStatusMap, retryCopySync, isCopySyncApiConfigured,
+} from "@/data/siteCopyLive";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 import { pageLabel } from "./siteCopyLabels";
 import { SiteCopyFieldRow } from "./SiteCopyFieldRow";
 import { SiteCopyAuditLog } from "./SiteCopyAuditLog";
 import { SyncCopyDialog } from "./SyncCopyDialog";
 
+const fmtTime = (iso?: string) => (iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
+
 const PAGE_ORDER_HINT = ["index", "header-group", "footer-group", "footer.liquid"]; // pinned to the top of the picker
+
+/** Replaces the old "Sync to site" button — a no-op-styled status readout
+ * for the currently selected page, per Marcello's approval. Retry is the
+ * one manual control (plus "Advanced sync…" for dry-run review). */
+const CopySyncStatusReadout = ({ page, status, onRetry }: { page: string; status: CopySyncStatus | undefined; onRetry: () => void }) => {
+  if (!isCopySyncApiConfigured) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground cursor-help">
+            <ShieldQuestion className="h-3.5 w-3.5" /> Sync unavailable
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-xs text-xs">
+          This environment can't reach the copy sync API — edits save but won't reach the draft theme from here.
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+  if (!status) {
+    return <span className="text-xs text-muted-foreground">Synced ✓ (auto)</span>;
+  }
+  if (status.state === "syncing") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Syncing {pageLabel(page)}…
+      </span>
+    );
+  }
+  if (status.state === "error") {
+    return (
+      <button type="button" onClick={onRetry} title={status.error}
+        className="inline-flex items-center gap-1.5 text-xs text-destructive underline decoration-dotted hover:text-destructive/80">
+        <XCircle className="h-3.5 w-3.5" /> Sync error — retry
+      </button>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-emerald-500">
+      <CheckCircle2 className="h-3.5 w-3.5" /> Synced ✓ (auto) {fmtTime(status.at)}
+    </span>
+  );
+};
 
 export const SiteCopyAdmin = () => {
   const { session } = useAuth();
   const actor = session?.user?.email ?? "unknown";
   const { data: rows, isLoading, isError, error } = useSiteCopy();
+  const { data: copySyncMap } = useCopySyncStatusMap();
+  const qc = useQueryClient();
 
   const [search, setSearch] = useState("");
   const [needsArOnly, setNeedsArOnly] = useState(false);
@@ -94,8 +151,7 @@ export const SiteCopyAdmin = () => {
         <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0 text-sky-400" />
         <span>
           This panel is the <strong>single source of truth</strong> for the website's text. Edits save here as you
-          type — the live site only updates when you run <strong>Sync to site</strong>, and it always pushes to the
-          draft theme, never live.
+          type, then sync to the draft theme automatically within a few seconds — never live.
         </span>
       </div>
 
@@ -106,9 +162,20 @@ export const SiteCopyAdmin = () => {
             <DataSourceBadge source="live" />
             <span className="text-xs text-muted-foreground">Supabase · site_copy</span>
           </div>
-          <Button size="sm" className="gap-1.5" onClick={() => setSyncOpen(true)}>
-            <RefreshCw className="h-4 w-4" /> Sync to site
-          </Button>
+          <div className="flex items-center gap-3">
+            <CopySyncStatusReadout
+              page={selectedPage}
+              status={copySyncMap?.[selectedPage]}
+              onRetry={() => retryCopySync(qc, selectedPage)}
+            />
+            <button
+              type="button"
+              onClick={() => setSyncOpen(true)}
+              className="text-xs text-muted-foreground underline decoration-dotted hover:text-foreground"
+            >
+              Advanced sync…
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap mt-4 mb-4">

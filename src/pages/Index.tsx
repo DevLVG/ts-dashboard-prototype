@@ -19,6 +19,7 @@ import { MediaAdmin } from "@/components/media/MediaAdmin";
 import { SiteCopyAdmin } from "@/components/site-copy/SiteCopyAdmin";
 import { CompetitionsAdmin } from "@/components/competitions/CompetitionsAdmin";
 import { InstructorsAdmin } from "@/components/instructors/InstructorsAdmin";
+import { SlotPriorityAdmin } from "@/components/slot-priority/SlotPriorityAdmin";
 import { PageType } from "@/types/dashboard";
 import { useAlignment } from "@/contexts/AlignmentContext";
 import { useBasisRows, lastCompleteFromBasis } from "@/data/alignment";
@@ -42,7 +43,7 @@ const Index = () => {
 
   const getCurrentPageFromPath = (): PageType => {
     const path = location.pathname.slice(1);
-    if (path === "overview" || path === "performance" || path === "cash" || path === "treasury" || path === "payments" || path === "balance" || path === "analysis" || path === "catalog" || path === "media" || path === "copy" || path === "competitions" || path === "instructors") {
+    if (path === "overview" || path === "performance" || path === "cash" || path === "treasury" || path === "payments" || path === "balance" || path === "analysis" || path === "catalog" || path === "media" || path === "copy" || path === "competitions" || path === "instructors" || path === "slot-priority") {
       return path as PageType;
     }
     return "overview";
@@ -76,6 +77,8 @@ const Index = () => {
         return <CompetitionsAdmin />;
       case "instructors":
         return <InstructorsAdmin />;
+      case "slot-priority":
+        return <SlotPriorityAdmin />;
       default:
         return <PnLOverview />;
     }

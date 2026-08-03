@@ -9,6 +9,7 @@ import { resolveRole, landingPageFor } from "@/lib/roles";
 import Login from "./pages/Login";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
+import { ReportPage } from "@/components/report/ReportPage";
 
 const queryClient = new QueryClient();
 
@@ -54,12 +55,17 @@ const App = () => {
                 <Route path="/treasury" element={<Index />} />
                 <Route path="/payments" element={<Index />} />
                 <Route path="/balance" element={<Index />} />
+                {/* Report (fix-6-report, 2026-08-03): standalone route, NOT
+                    through Index.tsx's PageType switch — ReportPage mounts
+                    its own <DashboardNav/> + role gate. */}
+                <Route path="/report" element={<ReportPage />} />
                 <Route path="/analysis" element={<Navigate to="/performance" replace />} />
                 <Route path="/catalog" element={<Index />} />
                 <Route path="/media" element={<Index />} />
                 <Route path="/copy" element={<Index />} />
                 <Route path="/competitions" element={<Index />} />
                 <Route path="/instructors" element={<Index />} />
+                <Route path="/slot-priority" element={<Index />} />
                 {/* Legacy routes from the pre-alignment IA */}
                 <Route path="/ratios" element={<Navigate to="/performance" replace />} />
                 <Route path="/statements" element={<Navigate to="/performance" replace />} />

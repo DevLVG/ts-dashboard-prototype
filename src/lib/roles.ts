@@ -42,7 +42,7 @@ const CMS_PAGES: PageType[] = ["catalog", "media", "copy", "competitions", "inst
 // components themselves are untouched for now — this is an access-list
 // change only.
 const ALL_PAGES: PageType[] = [
-  "performance", "cash", "treasury", "payments", "balance",
+  "performance", "cash", "treasury", "payments", "balance", "report",
   ...CMS_PAGES,
 ];
 /** "Everything business" = every screen except the CMS admin tabs. */

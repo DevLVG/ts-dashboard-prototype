@@ -20,6 +20,7 @@ import {
   Users,
   CalendarClock,
   ChevronDown,
+  FileText,
   type LucideIcon,
 } from "lucide-react";
 import { PageType } from "@/types/dashboard";
@@ -52,6 +53,9 @@ const ALL_PAGES: NavPage[] = [
   { id: "performance", label: "Economics", icon: TrendingUp, path: "/performance" },
   { id: "cash", label: "Cash Flow", icon: Banknote, path: "/cash" },
   { id: "balance", label: "Balance Sheet", icon: Scale, path: "/balance" },
+  // Report (fix-6-report, 2026-08-03): the ONE export place — bottom of the
+  // Performance group, per Marcello's live-review spec.
+  { id: "report", label: "Report", icon: FileText, path: "/report" },
   { id: "treasury", label: "Treasury", icon: Wallet, path: "/treasury" },
   { id: "payments", label: "Approvals", icon: Stamp, path: "/payments" },
   { id: "catalog", label: "Catalogue", icon: Package, path: "/catalog" },
@@ -82,7 +86,7 @@ interface NavGroup {
 }
 
 const NAV_GROUPS: NavGroup[] = [
-  { id: "performance-group", label: "Performance", defaultPageId: "performance", pageIds: ["performance", "cash", "balance"] },
+  { id: "performance-group", label: "Performance", defaultPageId: "performance", pageIds: ["performance", "cash", "balance", "report"] },
   { id: "admin-group", label: "Admin", defaultPageId: "treasury", pageIds: ["treasury", "payments"] },
   { id: "marketing-group", label: "Marketing", pageIds: ["catalog", "media", "copy", "competitions", "instructors", "slot-priority"] },
 ];

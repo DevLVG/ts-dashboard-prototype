@@ -42,7 +42,7 @@ const CMS_PAGES: PageType[] = ["catalog", "media", "copy", "competitions", "inst
 // components themselves are untouched for now — this is an access-list
 // change only.
 const ALL_PAGES: PageType[] = [
-  "performance", "cash", "treasury", "payments", "balance", "report",
+  "performance", "cash", "treasury", "confirmations", "payments", "balance", "report",
   ...CMS_PAGES,
 ];
 /** "Everything business" = every screen except the CMS admin tabs. */
@@ -51,8 +51,11 @@ const BUSINESS_PAGES: PageType[] = ALL_PAGES.filter((p) => !CMS_PAGES.includes(p
 /** Pages each role may see. First entry is that role's landing page. */
 export const ROLE_PAGES: Record<Role, PageType[]> = {
   leveredge: ALL_PAGES,                    // everything, incl. CMS admin
-  ceo: BUSINESS_PAGES,                     // Economics + Cash Flow + Balance Sheet + Treasury + Approvals; not CMS
-  administration: ["treasury", "cash"],    // Treasury workspace (4 sub-tabs) + Cash Flow only
+  ceo: BUSINESS_PAGES,                     // Economics + Cash Flow + Balance Sheet + Treasury + Confirmations + Approvals; not CMS
+  // Treasury workspace (2 sub-tabs) + Cash Flow + Confirmations (live review
+  // #3, 2026-08-03 — "confirmation staff" work, promoted out of Treasury into
+  // its own standalone page/nav item; administration keeps access to it).
+  administration: ["treasury", "cash", "confirmations"],
   unknown: ["performance"],                // Economics only, read-only default landing
 };
 

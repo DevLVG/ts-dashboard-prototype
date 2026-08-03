@@ -10,6 +10,7 @@ import Login from "./pages/Login";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import { ReportPage } from "@/components/report/ReportPage";
+import { ConfirmationsPage } from "@/components/confirmations/ConfirmationsPage";
 
 const queryClient = new QueryClient();
 
@@ -59,6 +60,11 @@ const App = () => {
                     through Index.tsx's PageType switch — ReportPage mounts
                     its own <DashboardNav/> + role gate. */}
                 <Route path="/report" element={<ReportPage />} />
+                {/* Confirmations (live review #3, 2026-08-03): promoted out of
+                    the Treasury workspace tabs into its own page. Standalone
+                    route, same pattern as /report — ConfirmationsPage mounts
+                    its own <DashboardNav/> + role gate. */}
+                <Route path="/confirmations" element={<ConfirmationsPage />} />
                 <Route path="/analysis" element={<Navigate to="/performance" replace />} />
                 <Route path="/catalog" element={<Index />} />
                 <Route path="/media" element={<Index />} />

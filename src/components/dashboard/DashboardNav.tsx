@@ -21,6 +21,7 @@ import {
   CalendarClock,
   ChevronDown,
   FileText,
+  FileCheck2,
   type LucideIcon,
 } from "lucide-react";
 import { PageType } from "@/types/dashboard";
@@ -57,6 +58,11 @@ const ALL_PAGES: NavPage[] = [
   // Performance group, per Marcello's live-review spec.
   { id: "report", label: "Report", icon: FileText, path: "/report" },
   { id: "treasury", label: "Treasury", icon: Wallet, path: "/treasury" },
+  // Confirmations (live review #3, 2026-08-03): promoted out of the Treasury
+  // workspace tabs into its own standalone page + nav item — see
+  // ConfirmationsPage.tsx. Sits between Treasury and Approvals in the Admin
+  // dropdown per Marcello's explicit order.
+  { id: "confirmations", label: "Confirmations", icon: FileCheck2, path: "/confirmations" },
   { id: "payments", label: "Approvals", icon: Stamp, path: "/payments" },
   { id: "catalog", label: "Catalogue", icon: Package, path: "/catalog" },
   { id: "media", label: "Media", icon: Image, path: "/media" },
@@ -87,7 +93,9 @@ interface NavGroup {
 
 const NAV_GROUPS: NavGroup[] = [
   { id: "performance-group", label: "Performance", defaultPageId: "performance", pageIds: ["performance", "cash", "balance", "report"] },
-  { id: "admin-group", label: "Admin", defaultPageId: "treasury", pageIds: ["treasury", "payments"] },
+  // Admin group = Treasury (default, unchanged) · Confirmations · Approvals
+  // (Marcello, live review #3, 2026-08-03) — three items, in this order.
+  { id: "admin-group", label: "Admin", defaultPageId: "treasury", pageIds: ["treasury", "confirmations", "payments"] },
   { id: "marketing-group", label: "Marketing", pageIds: ["catalog", "media", "copy", "competitions", "instructors", "slot-priority"] },
 ];
 

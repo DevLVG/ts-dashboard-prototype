@@ -477,6 +477,13 @@ export const PnLOverview = () => {
             return <IncompleteMark flagged={flagged} className="text-base" />;
           })()}
         </div>
+        {/* Provenance note (Fix A, live review 2026-08-03): the budget series
+            spans two vintages plus a documented gap — spelled out once, near
+            the badge, so "no budget" in Jun-26 reads as by-design rather than
+            a bug. */}
+        <p className="text-[11px] text-muted-foreground/80 mb-2">
+          Budget: approved 16 Jul (from Jul '26) · historical to May '26 · Jun '26: no approved budget.
+        </p>
         <p className="text-xs text-muted-foreground mb-4">
           {view === "A" ? "Statutory shape — as booked in the ledger." : "Management shape — the validated package structure (recurring lens)."}
           {" "}Every column header names its window; PY is the same window shifted −12 months, same basis, same perimeter.

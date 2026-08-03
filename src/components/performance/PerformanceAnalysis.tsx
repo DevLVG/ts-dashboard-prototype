@@ -1,976 +1,426 @@
-// PERFORMANCE ANALYSIS — spec §1.2, the package-story screen.
+// ECONOMICS — Marcello's live-review rebuild, 2026-08-03.
 //
-// Reproduces, live from the warehouse, the validated performance-analysis
-// storyline delivered 18-Jul. Default basis: Validated. Default window: TTM
-// at the latest complete month; the "As delivered (Jun-25→May-26)" preset is
-// one click away. Information hierarchy (spec frontend #5):
-//   headline KPIs (P1 recurring YoY · P2 total YoY · P3 recurring EBITDA)
-//   → the anti-confusion devices (P6 basis & window bridge · P5 CN anomaly)
-//   → composition (P4 per-BU growth · P7 calendar quarters)
-//   → budget story (P8) → multi-year clean series (P9).
-// Every figure arrives via queries — the traceability gate (§5.D) forbids any
-// golden number as a literal in this bundle.
-import { useEffect, useMemo, useState } from "react";
+// This screen replaces the old Performance Analysis bundle (recurring
+// tiles, basis & window bridge, credit-note anomaly, budget-story panel,
+// multi-year series, fiscal quarters — "va via, non ci serve niente") AND
+// absorbs P&L Overview + the Drill screen (fix-1 is removing both from
+// nav; this page's explodable table covers Drill's job).
+//
+// Final page layout, top to bottom (nothing else):
+//   global controls (period selector · Comparison · Scope — all owned by
+//   the shared chrome layer, consumed here, never rebuilt)
+//   -> KPI circles + comparison histogram (squad fix-4-kpi's mount point —
+//      wired in once their components land; see the marked spot below)
+//   -> ONE interactive, expandable P&L table (built here)
+//
+// The table:
+//   - Macro rows, statutory order: Gross revenue -> COGS -> Gross margin ->
+//     OpEx (its 3 sections) -> Total OpEx -> EBITDA -> Project costs ->
+//     EBITDA (reported) -> D&A -> EBIT -> Non-operating -> Net income.
+//   - Every SECTION-backed macro row expands (click) into its MoA clusters
+//     (L3), each of which expands into its individual MoA leaves (L4,
+//     moa_code) — data/moaMaster.ts's dictionary, the same one the old P&L
+//     drill used. Subtotal rows (Gross margin, Total OpEx, EBITDA, EBITDA
+//     reported, EBIT, Net income) are derived, not expandable.
+//   - Comparison column follows the GLOBAL Comparison toggle (PY | Budget),
+//     one at a time. Granularity rule (Marcello's explicit caveat):
+//       vs Previous Year  -> full leaf granularity everywhere.
+//       vs Budget         -> capped at budget_2026's own granularity (macro
+//                            sections only — the budget vocabulary doesn't
+//                            share a code scheme with the actual MoA tree,
+//                            so mapping budget lines onto actual leaves
+//                            would be invented, not real). Expansion is
+//                            disabled in Budget mode; a note says why.
+//   - MTD pro-ration: Month-to-date compares a partial month's actual
+//     against a FULL prior-year month / FULL budget month, which
+//     overstates both — same elapsed-day pro-ration rule fix-4's KPI
+//     header uses (`computeMtdProration` + `prorateAgg`/`prorateBudget`),
+//     applied uniformly down to every cluster/leaf so a child row's
+//     comparison always sums back to its parent's.
+//   - Window = the global period selector (month/quarter/MTD/YTD/TTM).
+import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { Info, TrendingUp, TrendingDown, FileSearch } from "lucide-react";
-import {
-  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
-  ResponsiveContainer, ReferenceLine, Legend, Cell, LabelList,
-} from "recharts";
+import { ChevronRight, ChevronDown, Info } from "lucide-react";
 import { useAlignment } from "@/contexts/AlignmentContext";
-import { BasisBadge, BasisToggle, WindowPicker, CompletenessBanner, FrozenRefChip, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
+import { WindowPicker, ComparisonToggle, ScopeToggle, OpenMonthsBadge, CompletenessBanner, StrictBasisNote } from "@/components/chrome/AlignmentChrome";
 import {
-  useBasisRows, useRecurrence, useModelAdjustments, useCreditNoteAudit,
-  useCollectionsMonthly, collectionsInWin,
-  aggregatePL, aggregateRecurring, aggregateBudgetWindow, recurrenceIsLive,
-  creditNotesInWin, adjustmentLadder, resolveRecurrence, fiscalQuarters,
-  factMonths, winLabel, pyWin, AS_DELIVERED_WIN, BASIS_SHORT,
-  type Basis, type BasisRow, type Win, type RecurrenceState,
+  useBasisRows, useRecurrence, resolveRecurrence, aggregateBudgetWindow,
+  computeMtdProration, prorateBudget, factMonths,
+  type BasisRow, type Win, type RecurrenceState, type BudgetAgg,
 } from "@/data/alignment";
-import { useBudgetMonthly, useBudgetAllVersions, LIVE_BU_LABELS, monthKey, monthKeyLabel, shiftMonthKey } from "@/data/liveData";
-import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtPct, fmtCompact, pctChange, fmtOrDash } from "@/lib/format";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useBudgetMonthly, monthKeyLabel } from "@/data/liveData";
+import { moaInfo } from "@/data/moaMaster";
+import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtOrDash, pctChange } from "@/lib/format";
 
-// ------------------- FROZEN PACKAGE CITATIONS (punch item 6, spec §0.3/§5-A)
-// These strings/values are QUOTATIONS of the delivered 18-Jul package (12-Jun
-// extraction / 16-Jul model freeze). They legitimately exist nowhere in the
-// live warehouse — they render ONLY inside <FrozenRefChip>, clearly labeled
-// "as delivered", visually distinct from live figures. The §5-D traceability
-// gate excepts exactly these labeled citations (they are citations of the
-// delivered package, not figures of the panel).
-const DELIVERED_P1_PY_TEXT = "PY 3,027,897 · +29.3%";
-const DELIVERED_P3_CLEAN_SAR = 80942; // "Recurring EBITDA (clean)" as delivered
+// ---------------------------------------------------------------- helpers
 
-// ------------------------------------------------------------- primitives
+/** Budget non-recurring project lines (GA-NRP* / MS-FFC) — restated locally
+ * (not exported from the data layer) so the "Only Recurring" scope's Budget
+ * comparison stays consistent with the KPI header above this table, which
+ * restates the same rule for the same reason. */
+const isBudgetNonRecLine = (moa: string): boolean => moa.startsWith("GA-NRP") || moa === "MS-FFC";
 
-const YoYChip = ({ pct, positiveIsGood = true }: { pct: number | null; positiveIsGood?: boolean }) => {
-  if (pct === null) return <span className="text-sm text-muted-foreground">n/a</span>;
-  const good = positiveIsGood ? pct >= 0 : pct < 0;
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-sm font-bold tabular-nums ${good ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive"}`}>
-      {pct >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-      {fmtDeltaPct(pct)}
-    </span>
-  );
-};
+const monthKey = (date: string): string => date.slice(0, 7);
+const inWin = (k: string, w: Win): boolean => k >= w.startKey && k <= w.endKey;
 
-const TileHeader = ({ title, basis, hint }: { title: string; basis?: Basis; hint?: string }) => (
-  <div className="flex items-center gap-2 flex-wrap">
-    <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
-    {basis && <BasisBadge basis={basis} />}
-    {hint && (
-      <Tooltip>
-        <TooltipTrigger asChild><Info className="h-3.5 w-3.5 text-muted-foreground/70 cursor-help" /></TooltipTrigger>
-        <TooltipContent side="top" className="max-w-sm text-xs">{hint}</TooltipContent>
-      </Tooltip>
-    )}
-  </div>
-);
+const PL_SECTIONS = ["Revenue", "COGS", "OPEX-GA", "OPEX-MS", "OPEX-People", "Project-Costs", "D&A", "NON-OP"] as const;
+type PLSection = (typeof PL_SECTIONS)[number];
 
-// Bug fix (2026-08-03, Marcello live review — defect 1): this used to render
-// the same "pending dim_recurrence" copy unconditionally, even when the
-// recurrence probe (useRecurrence) had actually FAILED with a real error
-// (permission/network/etc.) — the error was swallowed, so the tile always
-// blamed a missing warehouse object even when the object was live and the
-// real cause was something else entirely. Now it reports the real reason.
-const PendingRecurrence = ({ error }: { error?: unknown }) => {
-  if (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return (
-      <p className="text-sm text-destructive/90 py-4">
-        Recurring view unavailable — the recurrence probe failed: {msg}
-      </p>
-    );
+interface LeafNode { moaCode: string; leafName: string; total: number }
+interface ClusterNode { clusterKey: string; clusterName: string; total: number; leaves: Map<string, LeafNode> }
+interface SectionTree { total: number; clusters: Map<string, ClusterNode> }
+
+/** Builds the section -> cluster -> leaf tree for one window/scope. Every
+ * macro row's value is later DERIVED as the sum over this same tree — the
+ * displayed total and its expansion can never silently disagree. */
+const buildTree = (
+  rows: BasisRow[] | undefined,
+  w: Win,
+  scope: "ALL" | "RECURRING",
+  rec: RecurrenceState | undefined,
+): Map<PLSection, SectionTree> => {
+  const tree = new Map<PLSection, SectionTree>();
+  for (const s of PL_SECTIONS) tree.set(s, { total: 0, clusters: new Map() });
+  if (!rows) return tree;
+  for (const r of rows) {
+    if (!PL_SECTIONS.includes(r.section as PLSection)) continue;
+    const k = monthKey(r.period_month);
+    if (!inWin(k, w)) continue;
+    if (scope === "RECURRING" && resolveRecurrence(r, rec) === "non-recurring") continue;
+    const section = r.section as PLSection;
+    const node = tree.get(section)!;
+    node.total += r.amount_sar;
+    const moa = r.moa_code ?? "—";
+    const info = moaInfo(moa);
+    const clusterKey = `${section}::${info.clusterCode}`;
+    let cluster = node.clusters.get(clusterKey);
+    if (!cluster) {
+      cluster = { clusterKey, clusterName: info.clusterName, total: 0, leaves: new Map() };
+      node.clusters.set(clusterKey, cluster);
+    }
+    cluster.total += r.amount_sar;
+    let leaf = cluster.leaves.get(moa);
+    if (!leaf) {
+      leaf = { moaCode: moa, leafName: info.leafName, total: 0 };
+      cluster.leaves.set(moa, leaf);
+    }
+    leaf.total += r.amount_sar;
   }
-  return (
-    <p className="text-sm text-muted-foreground py-4">
-      Recurring view pending recurrence dimension — activates automatically once
-      dim_recurrence is live in the warehouse.
-    </p>
-  );
+  return tree;
 };
 
-const DataStateFootnote = () => (
-  <p className="text-[11px] leading-snug text-muted-foreground/80 mt-2">
-    PY computed live from the warehouse — includes the post-delivery remediation of
-    Dec-24/Jan-25/Feb-25 postings; the delivered package quoted the 12-Jun frozen extraction.
-  </p>
-);
+/** Scales every number in a tree by a fixed fraction (MTD pro-ration) —
+ * applied uniformly top to bottom so parent = sum(children) always holds. */
+const scaleTree = (tree: Map<PLSection, SectionTree>, fraction: number): Map<PLSection, SectionTree> => {
+  const out = new Map<PLSection, SectionTree>();
+  for (const [section, node] of tree) {
+    const clusters = new Map<string, ClusterNode>();
+    for (const [ck, c] of node.clusters) {
+      const leaves = new Map<string, LeafNode>();
+      for (const [lk, l] of c.leaves) leaves.set(lk, { ...l, total: l.total * fraction });
+      clusters.set(ck, { ...c, total: c.total * fraction, leaves });
+    }
+    out.set(section, { total: node.total * fraction, clusters });
+  }
+  return out;
+};
 
-/** "YYYY-MM" -> "Jan".."Dec", for the calendar-quarter labels (P7). */
-const monthAbbr = (key: string): string =>
-  ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(key.slice(5, 7)) - 1];
+const sectionTotal = (tree: Map<PLSection, SectionTree>, s: PLSection): number => tree.get(s)?.total ?? 0;
 
-// ------------------------------------------------------------- waterfall
+/** The 6 derived subtotals, computed FROM the tree's section totals — never
+ * from a separate aggregation path, so the table can't disagree with itself. */
+interface Subtotals {
+  grossMargin: number; opexTotal: number; ebitda5: number; ebitdaReported: number; ebit: number; netResult: number;
+}
+const deriveSubtotals = (tree: Map<PLSection, SectionTree>): Subtotals => {
+  const revenue = sectionTotal(tree, "Revenue");
+  const cogs = sectionTotal(tree, "COGS");
+  const grossMargin = revenue + cogs;
+  const opexTotal = sectionTotal(tree, "OPEX-GA") + sectionTotal(tree, "OPEX-MS") + sectionTotal(tree, "OPEX-People");
+  const ebitda5 = grossMargin + opexTotal;
+  const projectCosts = sectionTotal(tree, "Project-Costs");
+  const ebitdaReported = ebitda5 + projectCosts;
+  const da = sectionTotal(tree, "D&A");
+  const ebit = ebitdaReported + da;
+  const nonOp = sectionTotal(tree, "NON-OP");
+  const netResult = ebit + nonOp;
+  return { grossMargin, opexTotal, ebitda5, ebitdaReported, ebit, netResult };
+};
 
-interface WaterfallStep {
+/** Budget value for a macro row key — null where budget_2026 structurally
+ * doesn't reach (Project costs / D&A / EBIT / Non-op / Net income: the
+ * budget has no lines there at all, never a fabricated figure). */
+const budgetValueFor = (key: string, b: BudgetAgg | null): number | null => {
+  if (!b) return null;
+  switch (key) {
+    case "Revenue": return b.revenue;
+    case "COGS": return b.cogs;
+    case "GrossMargin": return b.revenue + b.cogs;
+    case "OPEX-GA": return b.opexGa;
+    case "OPEX-MS": return b.opexMs;
+    case "OPEX-People": return b.opexPeople;
+    case "OpexTotal": return b.opexGa + b.opexMs + b.opexPeople;
+    case "EBITDA5": return b.ebitdaAll;
+    default: return null; // Project costs, EBITDA reported, D&A, EBIT, Non-op, Net income
+  }
+};
+
+interface MacroRowDef {
+  key: string;
   label: string;
-  /** Compact x-axis label for narrow viewports (≤768px) — punch item 7. */
-  short?: string;
-  value: number;
-  kind: "anchor" | "delta";
+  section?: PLSection;
+  subtotal?: boolean;
+  emphasis?: boolean;
 }
 
-const Waterfall = ({ steps, height = 260 }: { steps: WaterfallStep[]; height?: number }) => {
-  const isMobile = useIsMobile();
-  // Build float bars: anchors run 0→value; deltas run prev→prev+value.
-  const data = useMemo(() => {
-    let running = 0;
-    return steps.map((s) => {
-      const label = isMobile && s.short ? s.short : s.label;
-      if (s.kind === "anchor") {
-        running = s.value;
-        return { label, base: Math.min(0, s.value), size: Math.abs(s.value), kind: "anchor" as const, raw: s.value };
-      }
-      const from = running;
-      running += s.value;
-      return { label, base: Math.min(from, running), size: Math.abs(s.value), kind: s.value >= 0 ? ("up" as const) : ("down" as const), raw: s.value };
-    });
-  }, [steps, isMobile]);
-  const Tip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ payload: (typeof data)[number] }>; label?: string }) => {
-    if (!active || !payload || payload.length === 0) return null;
-    const d = payload[0].payload;
-    return (
-      <div className="chart-tooltip">
-        <p className="chart-tooltip-title">{label}</p>
-        <p className="chart-tooltip-content chart-tooltip-actual">
-          {d.kind === "anchor" ? fmtSAR(d.raw) : fmtDeltaSAR(d.raw)}
-        </p>
-      </div>
-    );
-  };
-  return (
-    <ResponsiveContainer width="100%" height={isMobile ? height + 26 : height}>
-      <ComposedChart data={data} margin={{ top: 18, right: 8, bottom: 0, left: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-        <XAxis
-          dataKey="label"
-          stroke="hsl(var(--muted-foreground))"
-          tick={{ fill: "hsl(var(--muted-foreground))", fontSize: isMobile ? 9.5 : 10.5 }}
-          tickLine={false}
-          interval={0}
-          angle={isMobile ? -32 : 0}
-          textAnchor={isMobile ? "end" : "middle"}
-          height={isMobile ? 54 : 30}
-        />
-        <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={isMobile ? 42 : 54} />
-        <RTooltip content={<Tip />} />
-        <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeOpacity={0.5} />
-        <Bar dataKey="base" stackId="wf" fill="transparent" isAnimationActive={false} />
-        <Bar dataKey="size" stackId="wf" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={56}>
-          {data.map((d, i) => (
-            <Cell
-              key={i}
-              fill={d.kind === "anchor" ? "hsl(var(--gold) / 0.9)" : d.kind === "up" ? "hsl(195 75% 55% / 0.8)" : "hsl(0 70% 60% / 0.75)"}
-            />
-          ))}
-          <LabelList
-            dataKey="raw"
-            position="top"
-            formatter={(v: number) => fmtCompact(v)}
-            style={{ fill: "hsl(var(--foreground))", fontSize: 10.5, fontWeight: 600 }}
-          />
-        </Bar>
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
+const MACRO_ROWS: MacroRowDef[] = [
+  { key: "Revenue", label: "Gross revenue", section: "Revenue" },
+  { key: "COGS", label: "Cost of goods sold", section: "COGS" },
+  { key: "GrossMargin", label: "Gross margin", subtotal: true },
+  { key: "OPEX-GA", label: "General & administrative", section: "OPEX-GA" },
+  { key: "OPEX-MS", label: "Marketing & sales", section: "OPEX-MS" },
+  { key: "OPEX-People", label: "People", section: "OPEX-People" },
+  { key: "OpexTotal", label: "Total operating expenses", subtotal: true },
+  { key: "EBITDA5", label: "EBITDA", subtotal: true, emphasis: true },
+  { key: "Project-Costs", label: "Project costs", section: "Project-Costs" },
+  { key: "EBITDAReported", label: "EBITDA (reported)", subtotal: true },
+  { key: "D&A", label: "Depreciation & amortization", section: "D&A" },
+  { key: "EBIT", label: "EBIT", subtotal: true },
+  { key: "NON-OP", label: "Non-operating items", section: "NON-OP" },
+  { key: "NetResult", label: "Net income", subtotal: true, emphasis: true },
+];
+
+const macroValue = (key: string, tree: Map<PLSection, SectionTree>, sub: Subtotals): number => {
+  switch (key) {
+    case "GrossMargin": return sub.grossMargin;
+    case "OpexTotal": return sub.opexTotal;
+    case "EBITDA5": return sub.ebitda5;
+    case "EBITDAReported": return sub.ebitdaReported;
+    case "EBIT": return sub.ebit;
+    case "NetResult": return sub.netResult;
+    default: return sectionTotal(tree, key as PLSection);
+  }
 };
 
-// --------------------------------------------------------------- screen
+// ------------------------------------------------------------- component
 
 export const PerformanceAnalysis = () => {
-  const { basis, win, py, winLabelText, pyLabelText, windowName, lastComplete, memoOn, setMemoOn, includesOpenMonths } = useAlignment();
+  const { win, py, preset, todayKey, windowName, comparisonMode, scope, includesOpenMonths } = useAlignment();
   const { data: basisData, isLoading, error: basisError } = useBasisRows();
   const { data: rec, error: recError } = useRecurrence();
-  const { data: budgetRows } = useBudgetMonthly();
-  const { data: adjState } = useModelAdjustments();
-  const { data: collState } = useCollectionsMonthly();
-  const [cnDrillOpen, setCnDrillOpen] = useState(false);
-  const cnAudit = useCreditNoteAudit(cnDrillOpen);
-
-  // Bug fix (defect 1): the recurrence + basis probes used to fail silently
-  // (retry: false, no surfaced error) — any real failure looked identical to
-  // "warehouse object not live yet". Log the ACTUAL error to the console so
-  // it is diagnosable, instead of only ever showing the generic pending copy.
-  useEffect(() => {
-    if (recError) console.error("[PerformanceAnalysis] useRecurrence failed:", recError);
-  }, [recError]);
-  useEffect(() => {
-    if (basisError) console.error("[PerformanceAnalysis] useBasisRows failed:", basisError);
-  }, [basisError]);
-
+  const { data: budgetRowsAll, isLoading: budgetLoading } = useBudgetMonthly();
   const rows = basisData?.rows;
-  const recLive = recurrenceIsLive(rows, rec);
 
-  // ---------------------------------------------------------- aggregates
-  const recCur = useMemo(() => aggregateRecurring(rows, basis, win, rec), [rows, basis, win, rec]);
-  const recPy = useMemo(() => aggregateRecurring(rows, basis, py, rec), [rows, basis, py, rec]);
-  // BOTH bases, current AND PY — the Strict-basis explainer chip (item 1) is
-  // DATA-CONDITIONED: it states the actual live relationship between the two
-  // bases' YoY, so it needs the full 2×2 (basis × period) grid.
-  const otherBasis: Basis = basis === "VALIDATED" ? "STRICT" : "VALIDATED";
-  const recCurOther = useMemo(() => aggregateRecurring(rows, otherBasis, win, rec), [rows, otherBasis, win, rec]);
-  const recPyOther = useMemo(() => aggregateRecurring(rows, otherBasis, py, rec), [rows, otherBasis, py, rec]);
-  const totCur = useMemo(() => aggregatePL(rows, basis, win), [rows, basis, win]);
-  const totPy = useMemo(() => aggregatePL(rows, basis, py), [rows, basis, py]);
-  const cnCur = useMemo(() => creditNotesInWin(rows, win), [rows, win]);
-  const cnPy = useMemo(() => creditNotesInWin(rows, py), [rows, py]);
-  // Collections (migration 032) — denominator of the CN/collections ratio (P5).
-  const collCur = useMemo(() => collectionsInWin(collState?.rows, win), [collState, win]);
-  const collPy = useMemo(() => collectionsInWin(collState?.rows, py), [collState, py]);
-  // Recurring-tagged memo adjustments only: the ladder from AS-BOOKED to the
-  // model's CLEAN recurring EBITDA (non-recurring memo rows sit elsewhere).
-  const ladder = useMemo(() => adjustmentLadder(adjState, win, "recurring"), [adjState, win]);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (key: string) => setExpanded((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
 
-  const recYoY = recCur && recPy ? pctChange(recCur.recRevenue, recPy.recRevenue) : null;
-  const recYoYOther = recCurOther && recPyOther ? pctChange(recCurOther.recRevenue, recPyOther.recRevenue) : null;
-  const totYoY = pctChange(totCur.revenue, totPy.revenue);
+  const mtdPro = useMemo(() => (preset === "MTD" ? computeMtdProration(todayKey) : null), [preset, todayKey]);
 
-  // ------------------------------------------------------------- bridge
-  const bridge = useMemo(() => {
-    if (!rows) return null;
-    const presetValidated = aggregatePL(rows, "VALIDATED", AS_DELIVERED_WIN);
-    const winValidated = aggregatePL(rows, "VALIDATED", win);
-    const winStrict = aggregatePL(rows, "STRICT", win);
-    return { presetValidated, winValidated, winStrict };
-  }, [rows, win]);
+  const actualTree = useMemo(() => buildTree(rows, win, scope, rec), [rows, win, scope, rec]);
+  const priorTreeRaw = useMemo(() => buildTree(rows, py, scope, rec), [rows, py, scope, rec]);
+  const priorTree = useMemo(() => (mtdPro ? scaleTree(priorTreeRaw, mtdPro.fraction) : priorTreeRaw), [priorTreeRaw, mtdPro]);
 
-  // ------------------------------------------------------ per-BU (P4)
-  const buTable = useMemo(() => {
-    if (!rows || !recLive) return null;
-    const acc = new Map<string, { cur: number; py: number }>();
-    for (const r of rows) {
-      if (r.section !== "Revenue") continue;
-      if (basis === "VALIDATED" && r.source === "credit_note") continue;
-      const rc = resolveRecurrence(r, rec);
-      if (rc === "non-recurring") continue; // recurring perimeter (validated DRIFT tags)
-      const k = monthKey(r.period_month);
-      const b = r.bu ?? "—";
-      const slot = acc.get(b) ?? { cur: 0, py: 0 };
-      if (k >= win.startKey && k <= win.endKey) slot.cur += r.amount_sar;
-      if (k >= py.startKey && k <= py.endKey) slot.py += r.amount_sar;
-      acc.set(b, slot);
+  const budgetRowsForScope = useMemo(
+    () => (scope === "RECURRING" ? budgetRowsAll?.filter((r) => !isBudgetNonRecLine(r.moa_code)) : budgetRowsAll),
+    [budgetRowsAll, scope],
+  );
+  const budgetAggRaw = useMemo(() => aggregateBudgetWindow(budgetRowsForScope, win), [budgetRowsForScope, win]);
+  const budgetAgg = useMemo(() => (mtdPro ? prorateBudget(budgetAggRaw, mtdPro.fraction) : budgetAggRaw), [budgetAggRaw, mtdPro]);
+
+  const actualSub = useMemo(() => deriveSubtotals(actualTree), [actualTree]);
+  const priorSub = useMemo(() => deriveSubtotals(priorTree), [priorTree]);
+
+  const isBudgetMode = comparisonMode === "BUDGET";
+  const comparisonLabel = isBudgetMode ? "Budget" : "Previous Year";
+  const budgetNaNote = isBudgetMode && !budgetAgg ? `No approved budget exists for ${windowName}.` : null;
+
+  const hasAnyData = rows && rows.length > 0;
+
+  // ------------------------------------------------------------ row build
+  interface Row { indent: 0 | 1 | 2; keyPath: string; label: string; actual: number; comparison: number | null; expandable: boolean; expanded: boolean; onToggle?: () => void; subtotal?: boolean; emphasis?: boolean }
+
+  const tableRows = useMemo((): Row[] => {
+    const out: Row[] = [];
+    for (const m of MACRO_ROWS) {
+      const actual = macroValue(m.key, actualTree, actualSub);
+      const comparison = isBudgetMode ? budgetValueFor(m.key, budgetAgg) : macroValue(m.key, priorTree, priorSub);
+      const sectionKey = m.section ? `sec:${m.section}` : null;
+      const canExpand = !isBudgetMode && !!m.section && (actualTree.get(m.section)!.clusters.size > 0);
+      out.push({
+        indent: 0,
+        keyPath: m.key,
+        label: m.label,
+        actual,
+        comparison,
+        expandable: canExpand,
+        expanded: !!sectionKey && expanded.has(sectionKey),
+        onToggle: canExpand && sectionKey ? () => toggle(sectionKey) : undefined,
+        subtotal: m.subtotal,
+        emphasis: m.emphasis,
+      });
+      if (!m.section || !sectionKey || !expanded.has(sectionKey) || isBudgetMode) continue;
+      const curClusters = [...actualTree.get(m.section)!.clusters.values()];
+      const priorClusterMap = priorTree.get(m.section)!.clusters;
+      const clusterKeys = new Set<string>([...curClusters.map((c) => c.clusterKey), ...priorClusterMap.keys()]);
+      const clusterList = [...clusterKeys].map((ck) => {
+        const cur = actualTree.get(m.section!)!.clusters.get(ck);
+        const prior = priorClusterMap.get(ck);
+        return { ck, name: cur?.clusterName ?? prior?.clusterName ?? ck, cur: cur?.total ?? 0, prior: prior?.total ?? 0, curLeaves: cur?.leaves, priorLeaves: prior?.leaves };
+      }).filter((c) => Math.abs(c.cur) > 0.5 || Math.abs(c.prior) > 0.5)
+        .sort((a, b) => Math.abs(b.cur) - Math.abs(a.cur));
+      for (const c of clusterList) {
+        const clusterExpandKey = `clu:${c.ck}`;
+        const leafCount = c.curLeaves?.size ?? 0;
+        const canExpandCluster = leafCount > 1;
+        out.push({
+          indent: 1,
+          keyPath: c.ck,
+          label: c.name,
+          actual: c.cur,
+          comparison: c.prior,
+          expandable: canExpandCluster,
+          expanded: expanded.has(clusterExpandKey),
+          onToggle: canExpandCluster ? () => toggle(clusterExpandKey) : undefined,
+        });
+        if (!canExpandCluster || !expanded.has(clusterExpandKey)) continue;
+        const leafKeys = new Set<string>([...(c.curLeaves?.keys() ?? []), ...(c.priorLeaves?.keys() ?? [])]);
+        const leafList = [...leafKeys].map((moa) => {
+          const cur = c.curLeaves?.get(moa);
+          const prior = c.priorLeaves?.get(moa);
+          return { moa, name: cur?.leafName ?? prior?.leafName ?? moa, cur: cur?.total ?? 0, prior: prior?.total ?? 0 };
+        }).filter((l) => Math.abs(l.cur) > 0.5 || Math.abs(l.prior) > 0.5)
+          .sort((a, b) => Math.abs(b.cur) - Math.abs(a.cur));
+        for (const l of leafList) {
+          out.push({ indent: 2, keyPath: l.moa, label: `${l.name} (${l.moa})`, actual: l.cur, comparison: l.prior, expandable: false, expanded: false });
+        }
+      }
     }
-    return [...acc.entries()]
-      .map(([bu, v]) => ({ bu, label: LIVE_BU_LABELS[bu] ?? bu, ...v, yoy: pctChange(v.cur, v.py) }))
-      .filter((r) => Math.abs(r.cur) > 0.5 || Math.abs(r.py) > 0.5)
-      .sort((a, b) => b.cur - a.cur);
-  }, [rows, rec, recLive, basis, win, py]);
-
-  // --------------------------------------------------- calendar quarters (P7)
-  // Marcello, live-review addendum 2026-08-03: "the fiscal year concept is
-  // DROPPED — Trio runs on the calendar year." Quarters are now plain
-  // calendar quarters (Q1=Jan-Mar · Q2=Apr-Jun · Q3=Jul-Sep · Q4=Oct-Dec),
-  // PY = same calendar quarter, prior year (unchanged: pyWin always shifts
-  // −12 months). `fiscalQuarters` itself is a generic "4 quarters from a
-  // year-start key" splitter (data/alignment.ts) — reused as-is, just fed
-  // January instead of June.
-  const quarters = useMemo(() => {
-    if (!rows || !recLive) return null;
-    // Calendar year containing the window end. If fewer than 3 months of
-    // that year have elapsed, show the PREVIOUS calendar year — a quarter
-    // chart with one elapsed month answers nothing.
-    const [y] = win.endKey.split("-").map(Number);
-    let calYearStart = `${y}-01`;
-    const elapsed = (Number(win.endKey.slice(0, 4)) * 12 + Number(win.endKey.slice(5, 7))) -
-      (Number(calYearStart.slice(0, 4)) * 12 + Number(calYearStart.slice(5, 7))) + 1;
-    if (elapsed < 3) calYearStart = shiftMonthKey(calYearStart, -12);
-    return fiscalQuarters(calYearStart).map((q) => {
-      const cur = aggregateRecurring(rows, basis, q.win, rec);
-      const prior = aggregateRecurring(rows, basis, pyWin(q.win), rec);
-      return {
-        label: `${q.label} '${q.win.startKey.slice(2, 4)} (${monthAbbr(q.win.startKey)}-${monthAbbr(q.win.endKey)})`,
-        short: q.label,
-        cur: cur?.recRevenue ?? 0,
-        py: prior?.recRevenue ?? 0,
-        future: q.win.startKey > lastComplete,
-      };
-    });
-  }, [rows, rec, recLive, basis, win, lastComplete]);
-
-  const ytd = useMemo(() => {
-    if (!rows || !recLive) return null;
-    const yr = lastComplete.slice(0, 4);
-    const w: Win = { startKey: `${yr}-01`, endKey: lastComplete };
-    const cur = aggregateRecurring(rows, basis, w, rec);
-    const prior = aggregateRecurring(rows, basis, pyWin(w), rec);
-    return cur && prior ? { w, cur: cur.recRevenue, py: prior.recRevenue, yoy: pctChange(cur.recRevenue, prior.recRevenue) } : null;
-  }, [rows, rec, recLive, basis, lastComplete]);
-
-  // ------------------------------------------------------- budget (P8)
-  const budgetStory = useMemo(() => {
-    if (!budgetRows) return null;
-    const hist = aggregateBudgetWindow(budgetRows, AS_DELIVERED_WIN);
-    if (!rows || !hist) return null;
-    const actualHistValidated = aggregatePL(rows, "VALIDATED", AS_DELIVERED_WIN);
-    const recHist = aggregateRecurring(rows, "VALIDATED", AS_DELIVERED_WIN, rec);
-    // Budget recurring = revenue excl. the DRIFT line (COMP-IA*).
-    let drift = 0;
-    for (const r of budgetRows) {
-      const k = monthKey(r.period_month);
-      if (k < AS_DELIVERED_WIN.startKey || k > AS_DELIVERED_WIN.endKey) continue;
-      if (r.section === "Revenue" && r.moa_code.startsWith("COMP-IA")) drift += r.budget_amount_sar;
-    }
-    // Forward: first forward month, H2-26 (Jul→Dec-26), FY27.
-    const forwardMonths = [...budgetMonthsSetLocal(budgetRows)].filter((m) => m > lastComplete).sort();
-    const firstFwd = forwardMonths[0];
-    const fwdFirst = firstFwd ? aggregateBudgetWindow(budgetRows, { startKey: firstFwd, endKey: firstFwd }) : null;
-    const fwdYear = firstFwd ? firstFwd.slice(0, 4) : null;
-    const h2 = fwdYear ? aggregateBudgetWindow(budgetRows, { startKey: firstFwd!, endKey: `${fwdYear}-12` }) : null;
-    const nextYear = fwdYear ? String(Number(fwdYear) + 1) : null;
-    const fy27 = nextYear ? aggregateBudgetWindow(budgetRows, { startKey: `${nextYear}-01`, endKey: `${nextYear}-12` }) : null;
-    return {
-      hist, drift, histRecBudget: hist.revenue - drift,
-      actualHistValidated, recHist,
-      firstFwd, fwdFirst, h2, fy27, fwdYear, nextYear,
-    };
-  }, [budgetRows, rows, rec, lastComplete]);
-
-  // --------------------------------------- budget vintages strip (P8/DB-6)
-  const { data: allBudgetRows } = useBudgetAllVersions();
-  const vintageStrip = useMemo(() => {
-    if (!allBudgetRows || allBudgetRows.length === 0) return [];
-    const byVersion = new Map<string, { revenue: number; minKey: string }>();
-    for (const r of allBudgetRows) {
-      if (r.section !== "Revenue") continue;
-      const slot = byVersion.get(r.version_id) ?? { revenue: 0, minKey: "9999-99" };
-      slot.revenue += r.budget_amount_sar;
-      const k = monthKey(r.period_month);
-      if (k < slot.minKey) slot.minKey = k;
-      byVersion.set(r.version_id, slot);
-    }
-    const label = (id: string): string => {
-      if (/-V1-/.test(id)) return "V1 original";
-      if (/-V2-/.test(id)) return "V2 revised Dec-May";
-      if (/APPROVED/.test(id)) return "Approved forward";
-      return "Deck blend";
-    };
-    return [...byVersion.entries()]
-      .map(([id, v]) => ({ id, label: label(id), revenue: v.revenue, minKey: v.minKey, isDefault: !/-V\d+-/.test(id) }))
-      .sort((a, b) => (/-V1-/.test(a.id) ? 0 : /-V2-/.test(a.id) ? 1 : /APPROVED/.test(a.id) ? 3 : 2) - (/-V1-/.test(b.id) ? 0 : /-V2-/.test(b.id) ? 1 : /APPROVED/.test(b.id) ? 3 : 2));
-  }, [allBudgetRows]);
-
-  // ----------------------------------------------------- multi-year (P9)
-  const multiYear = useMemo(() => {
-    if (!rows) return [];
-    const years = [...new Set(factMonths(rows).map((m) => m.slice(0, 4)))].sort();
-    return years.map((y) => {
-      const w: Win = { startKey: `${y}-01`, endKey: `${y}-12` };
-      const agg = aggregatePL(rows, basis, w);
-      const recAgg = recLive ? aggregateRecurring(rows, basis, w, rec) : null;
-      const partial = `${y}-12` > lastComplete;
-      return {
-        year: partial ? `${y}*` : y,
-        revenue: recAgg ? recAgg.recRevenue : agg.revenue,
-        ebitda: agg.ebitda5,
-        partial,
-      };
-    });
-  }, [rows, basis, rec, recLive, lastComplete]);
-
-  const hasDriftInPy = (recPy?.nonRecRevenue ?? 0) !== 0;
+    return out;
+  }, [actualTree, priorTree, actualSub, priorSub, expanded, isBudgetMode, budgetAgg]);
 
   return (
     <div className="space-y-5">
-      {/* Controls */}
+      <div>
+        <h1 className="font-heading text-2xl tracking-wide text-foreground">Economics</h1>
+        <p className="text-xs text-muted-foreground mt-0.5">Live P&amp;L — every figure computed from the warehouse for the selected window.</p>
+      </div>
+
+      {/* ---------- global controls ---------- */}
       <div className="flex flex-wrap items-center gap-3">
         <WindowPicker months={factMonths(rows)} />
-        <BasisToggle />
-        <span className="text-xs text-muted-foreground">
-          Window: <strong className="text-foreground">{windowName}</strong> · PY = {pyLabelText} (same window −12 months)
-        </span>
-        {/* Spec §0.3 honesty rule (defect 2): any window reaching into a month
-            that hasn't closed yet must say so — revenue is live, costs may be
-            partial. Was built in the chrome layer but never wired onto this
-            screen; wired here, in the Performance-specific bundle only. */}
+        <ComparisonToggle />
+        <ScopeToggle />
         <OpenMonthsBadge />
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <StrictBasisNote />
       </div>
 
       <CompletenessBanner rows={rows} />
       {isLoading && <p className="text-sm text-muted-foreground">Loading live warehouse rows…</p>}
-      {/* Bug fix (stuck-loading complaint): previously a failed basis-rows
-          fetch just made the loading line vanish with nothing in its place —
-          indistinguishable from "still loading" at a glance, and the rest of
-          the screen stayed blank with no explanation. Now a real fetch error
-          says so explicitly. */}
       {basisError && !isLoading && (
         <p className="text-sm text-destructive/90">
           Could not load warehouse rows — {basisError instanceof Error ? basisError.message : String(basisError)}
         </p>
       )}
+      {recError && <p className="text-xs text-destructive/70">Recurrence data unavailable — {recError instanceof Error ? recError.message : String(recError)} (Only Recurring scope may be incomplete.)</p>}
 
-      {/* ---------- headline row: P1 · P2 · P3 ---------- */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* P1 — Recurring revenue YoY (THE headline) */}
-        <Card className="p-5 space-y-2.5 border-2 border-gold/40">
-          <TileHeader
-            title={`Recurring revenue — ${winLabelText}`}
-            basis={basis}
-            hint="Validated DRIFT perimeter from the recurrence dimension (dim_recurrence). PY = same window −12 months, same basis, same perimeter."
-          />
-          {!recLive || !recCur ? <PendingRecurrence error={recError} /> : (
-            <>
-              <div className="flex items-end gap-3 flex-wrap">
-                <p className="text-4xl font-heading tracking-tight tabular-nums">{fmtSAR(recCur.recRevenue)}</p>
-                <YoYChip pct={recYoY} />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                PY ({pyLabelText}): <span className="tabular-nums">{fmtOrDash(recPy?.recRevenue)}</span>
-              </p>
-              {basis === "STRICT" && recYoY !== null && recYoYOther !== null && (() => {
-                // DATA-CONDITIONED explainer (punch item 1): states the ACTUAL
-                // live relationship between the two bases' YoY — direction and
-                // magnitude computed from the fetched rows, never asserted.
-                const sameDirection = (recYoY >= 0) === (recYoYOther >= 0);
-                const relation = Math.abs(recYoY - recYoYOther) < 0.05
-                  ? "in line with"
-                  : recYoY < recYoYOther ? "lower than" : "higher than";
-                const cnRatio = cnPy > 0.5 ? cnCur / cnPy : null;
-                const cnPhrase = cnRatio === null
-                  ? (cnCur > 0.5 ? "appeared this window (none in PY)" : "are immaterial in both periods")
-                  : cnRatio >= 2 ? "more than doubled YoY"
-                  : cnRatio > 1.005 ? `rose ${fmtDeltaPct(pctChange(cnCur, cnPy) ?? 0)} YoY`
-                  : cnRatio >= 0.995 ? "were flat YoY"
-                  : `declined ${fmtDeltaPct(pctChange(cnCur, cnPy) ?? 0)} YoY`;
-                return (
-                  <div className="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-300">
-                    {sameDirection ? (
-                      <>Strict basis: <strong className="tabular-nums">{fmtDeltaPct(recYoY)}</strong> — same direction
-                      as the Validated basis, {relation} its <span className="tabular-nums">{fmtDeltaPct(recYoYOther)}</span>{" "}
-                      because customer credit notes {cnPhrase} ({fmtSAR(cnCur)} vs {fmtSAR(cnPy)} net of VAT) —
-                      see the credit-note tile.</>
-                    ) : (
-                      <>Direction differs from the Validated basis (<span className="tabular-nums">{fmtDeltaPct(recYoY)}</span> Strict
-                      vs <span className="tabular-nums">{fmtDeltaPct(recYoYOther)}</span> Validated) because customer credit
-                      notes {cnPhrase} ({fmtSAR(cnCur)} vs {fmtSAR(cnPy)} net of VAT) — see the credit-note tile.</>
-                    )}
-                  </div>
-                );
-              })()}
-              {basis === "VALIDATED" && recYoY !== null && (
-                <p className="text-xs text-muted-foreground">
-                  {recYoY > 0
-                    ? "The package headline: recurring club growth on the validated basis — the growth story the founder delivered."
-                    : "Recurring revenue is not above PY on this window — the delivered growth headline applies to the As-delivered TTM window."}
-                </p>
-              )}
-              <div className="pt-0.5">
-                <FrozenRefChip label="As delivered · 12-Jun extraction">
-                  {DELIVERED_P1_PY_TEXT} <span className="text-muted-foreground/70">({winLabel(AS_DELIVERED_WIN)} window)</span>
-                </FrozenRefChip>
-              </div>
-              <DataStateFootnote />
-            </>
-          )}
-        </Card>
+      {/* ---------- KPI circles + comparison histogram ---------- */}
+      {/* MOUNT POINT (squad fix-4-kpi): <KpiCircles /> + <ComparisonHistogram />
+          go here once pushed — both read useKpiHeaderData(), which already
+          reads this same window/comparison/scope, so they'll tie to the
+          table below with zero extra wiring. Not yet available at the time
+          of this commit (2026-08-03); pull-rebase and mount when they land. */}
 
-        {/* P2 — Total revenue YoY */}
-        <Card className="p-5 space-y-2.5">
-          <TileHeader title={`Total revenue — ${winLabelText}`} basis={basis} />
-          {/* Defect 2 (spec §0.3): the window can legitimately include months
-              that haven't closed yet — revenue is live and correct, costs may
-              still be partial. Flag it right on the figure, not just globally. */}
-          {includesOpenMonths && (
-            <div>
-              <OpenMonthsBadge />
-            </div>
-          )}
-          <div className="flex items-end gap-3 flex-wrap">
-            <p className="text-4xl font-heading tracking-tight tabular-nums">{fmtSAR(totCur.revenue)}</p>
-            <YoYChip pct={totYoY} />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            PY ({pyLabelText}): <span className="tabular-nums">{fmtSAR(totPy.revenue)}</span>
-          </p>
-          {/* DATA-CONDITIONED narrative (punch item 4): the DRIFT roll-off
-              reading renders only when the window actually shows it — total
-              below PY while the recurring perimeter grows. */}
-          {totYoY !== null && (
-            <p className="text-xs text-muted-foreground">
-              {totYoY < 0 && recYoY !== null && recYoY > 0
-                ? "Total revenue below PY (non-recurring DRIFT roll-off), as in the delivered analysis — the recurring club is the growth story."
-                : totYoY < 0
-                  ? "Total revenue below PY on this window."
-                  : "Total revenue above PY on this window."}
-            </p>
-          )}
-        </Card>
-
-        {/* P3 — Recurring EBITDA */}
-        <Card className="p-5 space-y-2.5">
-          <TileHeader
-            title={`Recurring EBITDA — ${winLabelText}`}
-            basis={basis}
-            hint="As-booked recurring EBITDA (recurring revenue + recurring direct costs + recurring OpEx). The model-adjusted 'clean' ladder renders only when the model-adjustment memo layer is loaded (founder decision gate)."
-          />
-          {!recLive || !recCur ? <PendingRecurrence error={recError} /> : (
-            <>
-              <div className="flex items-end gap-3 flex-wrap">
-                <p className={`text-4xl font-heading tracking-tight tabular-nums ${recCur.recEbitda >= 0 ? "text-success" : "text-destructive"}`}>
-                  {fmtSAR(recCur.recEbitda)}
-                </p>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                PY ({pyLabelText}): <span className="tabular-nums">{fmtOrDash(recPy?.recEbitda)}</span>
-                {recPy && recCur.recEbitda >= 0 && recPy.recEbitda < 0 && (
-                  <span className="ml-1.5 text-success font-semibold">
-                    sign flipped to positive · {fmtDeltaSAR(recCur.recEbitda - recPy.recEbitda)} swing
-                  </span>
-                )}
-              </p>
-              {/* Founder gate (punch item 3): the memo ladder is OPT-IN —
-                  default OFF on load, persisted; never rendered unrequested
-                  in client viewing. */}
-              {ladder.length > 0 ? (
-                <div className="text-xs text-muted-foreground space-y-1 border-t border-border/40 pt-2">
-                  <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={memoOn}
-                      onChange={(e) => setMemoOn(e.target.checked)}
-                      className="accent-[hsl(var(--gold))]"
-                    />
-                    <span className="font-semibold text-foreground/80">
-                      Model-adjustment ladder <span className="text-amber-400">[model adj — not in books]</span>
-                    </span>
-                  </label>
-                  {!memoOn && (
-                    <p className="text-[10px] text-muted-foreground/70">
-                      Off by default for client viewing (founder gate) — tick to reconcile to the
-                      package's clean recurring EBITDA.
-                    </p>
-                  )}
-                  {memoOn && (() => {
-                    let running = recCur.recEbitda;
-                    const stepsOut = [
-                      <p key="start" className="tabular-nums">As booked: {fmtSAR(recCur.recEbitda)}</p>,
-                    ];
-                    for (const s of ladder) {
-                      running += s.amount;
-                      stepsOut.push(
-                        <p key={s.code} className="tabular-nums">{s.label}: {fmtDeltaSAR(s.amount)}</p>,
-                      );
-                    }
-                    const isPresetWin = win.startKey === AS_DELIVERED_WIN.startKey && win.endKey === AS_DELIVERED_WIN.endKey;
-                    stepsOut.push(<p key="end" className="tabular-nums font-semibold text-foreground">Clean (model-adjusted): {fmtSAR(running)}</p>);
-                    stepsOut.push(
-                      <div key="ref" className="pt-1">
-                        <FrozenRefChip label="As delivered · 16-Jul freeze">
-                          Recurring EBITDA (clean) +{fmtSAR(DELIVERED_P3_CLEAN_SAR)}
-                          {isPresetWin && (
-                            <> · live re-computation {fmtSAR(running)} — post-freeze bookings {fmtDeltaSAR(running - DELIVERED_P3_CLEAN_SAR)}</>
-                          )}
-                        </FrozenRefChip>
-                      </div>,
-                    );
-                    stepsOut.push(
-                      <p key="fn" className="text-[10px] text-muted-foreground/70 pt-1">
-                        Computed live — the warehouse has moved since the package's 12-Jun/16-Jul freeze
-                        (remediated postings); the delivered clean figure is not restated here.
-                      </p>,
-                    );
-                    return stepsOut;
-                  })()}
-                </div>
-              ) : (
-                <p className="text-[11px] text-muted-foreground/70">
-                  Model-adjustment memo layer not loaded — ladder to the package's clean figure renders
-                  once the founder-gated adjustment layer lands (default off for client viewing).
-                </p>
-              )}
-            </>
-          )}
-        </Card>
-      </div>
-
-      {/* ---------- anti-confusion row: P6 bridge + P5 CN ---------- */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        {/* P6 — basis & window bridge */}
-        <Card className="p-5 xl:col-span-2 space-y-2">
-          <TileHeader
-            title="Basis & window bridge — revenue"
-            hint="From the delivered package figure (Validated basis, As-delivered window) to the certified Strict figure for the selected window. Terms computed live from the fact rows — nothing typed in."
-          />
-          {/* Bug fix (defect 3): this rendered NOTHING but the header — an
-              empty box — whenever `bridge` was null, which is true for the
-              ENTIRE first paint (rows haven't arrived yet) and would stay
-              true forever on a genuine fetch failure, with no way to tell
-              the two apart. Now every state says something. */}
-          {isLoading ? (
-            <p className="text-sm text-muted-foreground py-4">Loading warehouse rows…</p>
-          ) : bridge ? (
-            <>
-              <Waterfall
-                steps={[
-                  { label: `Package (Validated, ${winLabel(AS_DELIVERED_WIN)})`, short: "Package", value: bridge.presetValidated.revenue, kind: "anchor" },
-                  { label: "Window roll", short: "Window", value: bridge.winValidated.revenue - bridge.presetValidated.revenue, kind: "delta" },
-                  { label: `Validated (${winLabelText})`, short: "Validated", value: bridge.winValidated.revenue, kind: "anchor" },
-                  { label: "Credit notes", short: "CN", value: bridge.winStrict.revenue - bridge.winValidated.revenue, kind: "delta" },
-                  { label: `Strict (${winLabelText})`, short: "Strict", value: bridge.winStrict.revenue, kind: "anchor" },
-                ]}
-              />
-              <p className="text-xs text-muted-foreground tabular-nums">
-                Revenue: {fmtSAR(bridge.presetValidated.revenue)} (package, Validated, {winLabel(AS_DELIVERED_WIN)})
-                {" → "}window {fmtDeltaSAR(bridge.winValidated.revenue - bridge.presetValidated.revenue)}
-                {" → "}{fmtSAR(bridge.winValidated.revenue)} (Validated, {winLabelText})
-                {" → "}credit notes {fmtDeltaSAR(bridge.winStrict.revenue - bridge.winValidated.revenue)}
-                {" → "}<strong className="text-foreground">{fmtSAR(bridge.winStrict.revenue)} (Strict)</strong>
-              </p>
-              <p className="text-xs text-muted-foreground tabular-nums">
-                EBITDA (5-section) bridge: {fmtSAR(bridge.presetValidated.ebitda5)} (Validated, {winLabel(AS_DELIVERED_WIN)})
-                {" → "}window {fmtDeltaSAR(bridge.winValidated.ebitda5 - bridge.presetValidated.ebitda5)}
-                {" → "}{fmtSAR(bridge.winValidated.ebitda5)} (Validated, {winLabelText})
-                {" → "}credit notes {fmtDeltaSAR(bridge.winStrict.ebitda5 - bridge.winValidated.ebitda5)}
-                {" → "}<strong className="text-foreground">{fmtSAR(bridge.winStrict.ebitda5)} (Strict)</strong>
-              </p>
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground py-4">
-              {basisError ? "Could not load the warehouse rows this bridge needs." : "No data for this window."}
-            </p>
-          )}
-        </Card>
-
-        {/* P5 — credit-note anomaly (always visible, both bases) */}
-        <Card className="p-5 space-y-2.5 border border-amber-500/30">
-          <TileHeader
-            title={`Credit-note anomaly — ${winLabelText}`}
-            hint="Customer credit notes net of VAT; ratio denominator = collections allocated to invoices (v_collections_monthly, register P5 definition). Real business signal already flagged to the client — this is what explains the basis toggle. Drill: v_credit_note_audit (authenticated)."
-          />
-          <div className="flex items-end gap-3 flex-wrap">
-            <p className="text-3xl font-heading tracking-tight tabular-nums text-amber-400">{fmtSAR(cnCur)}</p>
-            <YoYChip pct={pctChange(cnCur, cnPy)} positiveIsGood={false} />
-          </div>
-          <p className="text-xs text-muted-foreground tabular-nums">
-            PY ({pyLabelText}): {fmtSAR(cnPy)}
-            {pctChange(cnCur, cnPy) !== null && <> · net {fmtDeltaPct(pctChange(cnCur, cnPy)!)} YoY</>}
-          </p>
-          {/* Spec P5: CN ÷ collections, BOTH periods, computed live (item 5). */}
-          {collCur !== null && collCur > 0 && collPy !== null && collPy > 0 ? (
-            <p className="text-xs text-muted-foreground tabular-nums">
-              CN ÷ collections: <strong className="text-amber-400">{fmtPct((cnCur / collCur) * 100)}</strong> ({winLabelText})
-              {" "}vs <strong className="text-foreground">{fmtPct((cnPy / collPy) * 100)}</strong> (PY {pyLabelText})
-              {" "}· collections {fmtSAR(collCur)} vs {fmtSAR(collPy)}
-            </p>
-          ) : (
-            <p className="text-[11px] text-muted-foreground/70">
-              CN/collections ratio pending — v_collections_monthly not reachable for this window.
-            </p>
-          )}
-          <p className="text-xs text-muted-foreground">
-            Validated basis shows revenue BEFORE these credit notes (as the package did); Strict basis
-            nets them off. The anomaly is open with the client.
-          </p>
-          <button
-            type="button"
-            onClick={() => setCnDrillOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 transition-colors"
-          >
-            <FileSearch className="h-3.5 w-3.5" /> Open credit-note audit drill
-          </button>
-        </Card>
-      </div>
-
-      {/* ---------- composition: P4 per-BU + P7 quarters ---------- */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {/* P4 — per-BU growth */}
-        <Card className="p-5 space-y-3">
-          <TileHeader
-            title={`Recurring revenue by business unit — ${winLabelText} vs PY`}
-            basis={basis}
-            hint="Recurring perimeter per the model's own recurrence tags (dim_recurrence) — Competitions follows the tagged recurring total, resolving the deck's dual convention to one number."
-          />
-          {!buTable ? <PendingRecurrence error={recError} /> : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[420px]">
-                <thead>
-                  <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="text-left py-2 pr-3 font-semibold">Business unit</th>
-                    <th className="text-right py-2 px-3 font-semibold">{winLabelText}</th>
-                    <th className="text-right py-2 px-3 font-semibold">PY ({pyLabelText})</th>
-                    <th className="text-right py-2 pl-3 font-semibold">Δ %</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {buTable.map((r) => (
-                    <tr key={r.bu} className="border-b border-border/10">
-                      <td className="py-1.5 pr-3">{r.label}</td>
-                      <td className="py-1.5 px-3 text-right tabular-nums">{fmtSAR(r.cur)}</td>
-                      <td className="py-1.5 px-3 text-right tabular-nums text-muted-foreground">{fmtSAR(r.py)}</td>
-                      <td className={`py-1.5 pl-3 text-right tabular-nums font-semibold ${r.yoy === null ? "text-muted-foreground" : r.yoy >= 0 ? "text-success" : "text-destructive"}`}>
-                        {r.yoy === null ? "n/a" : fmtDeltaPct(r.yoy)}
-                      </td>
-                    </tr>
-                  ))}
-                  <tr className="border-t-2 border-t-border font-semibold">
-                    <td className="py-2 pr-3">Total recurring</td>
-                    <td className="py-2 px-3 text-right tabular-nums">{fmtOrDash(recCur?.recRevenue)}</td>
-                    <td className="py-2 px-3 text-right tabular-nums text-muted-foreground">{fmtOrDash(recPy?.recRevenue)}</td>
-                    <td className={`py-2 pl-3 text-right tabular-nums ${recYoY !== null && recYoY >= 0 ? "text-success" : "text-destructive"}`}>
-                      {recYoY === null ? "n/a" : fmtDeltaPct(recYoY)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              {hasDriftInPy && (
-                <p className="text-[11px] text-muted-foreground/80 mt-2">
-                  PY window contains DRIFT/non-recurring revenue — excluded here by the recurrence tags.
-                </p>
-              )}
-              <DataStateFootnote />
-            </div>
-          )}
-        </Card>
-
-        {/* P7 — calendar quarters + YTD momentum */}
-        <Card className="p-5 space-y-3">
-          <TileHeader
-            title="Recurring revenue — quarters vs PY"
-            basis={basis}
-            hint="Calendar quarters: Q1=Jan-Mar · Q2=Apr-Jun · Q3=Jul-Sep · Q4=Oct-Dec. PY = same calendar quarter, prior year."
-          />
-          {!quarters ? <PendingRecurrence error={recError} /> : (
-            <>
-              <ResponsiveContainer width="100%" height={210}>
-                <ComposedChart data={quarters} margin={{ top: 14, right: 8, bottom: 0, left: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-                  <XAxis dataKey="short" stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} />
-                  <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={50} />
-                  <RTooltip
-                    content={({ active, payload }) => {
-                      if (!active || !payload || payload.length === 0) return null;
-                      // Full label ("Q2 '26 (Apr-Jun)") lives on the datum itself, not
-                      // the axis tick (which stays a compact "Q1".."Q4" — all four
-                      // quarters share one calendar year, so the tick doesn't need it).
-                      const fullLabel = (payload[0]?.payload as { label?: string } | undefined)?.label;
-                      const cur = payload.find((p) => p.dataKey === "cur")?.value as number | undefined;
-                      const prior = payload.find((p) => p.dataKey === "py")?.value as number | undefined;
-                      return (
-                        <div className="chart-tooltip">
-                          <p className="chart-tooltip-title">{fullLabel}</p>
-                          <p className="chart-tooltip-content chart-tooltip-actual">Actual: {cur !== undefined ? fmtSAR(cur) : "—"}</p>
-                          <p className="chart-tooltip-content chart-tooltip-budget">PY: {prior !== undefined ? fmtSAR(prior) : "—"}</p>
-                        </div>
-                      );
-                    }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="cur" name="Actual" fill="hsl(var(--gold) / 0.85)" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={34} />
-                  <Bar dataKey="py" name="PY (same quarter −12m)" fill="hsl(36 18% 70% / 0.45)" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={34} />
-                </ComposedChart>
-              </ResponsiveContainer>
-              {quarters.some((q) => q.future) && (
-                <p className="text-[11px] text-muted-foreground/80">Quarters extending beyond the last closed month are partial.</p>
-              )}
-              {ytd && (
-                <p className="text-xs text-muted-foreground tabular-nums">
-                  Calendar YTD ({winLabel(ytd.w)}): <strong className="text-foreground">{fmtSAR(ytd.cur)}</strong> vs {fmtSAR(ytd.py)} PY
-                  {ytd.yoy !== null && <span className={`ml-1.5 font-semibold ${ytd.yoy >= 0 ? "text-success" : "text-destructive"}`}>{fmtDeltaPct(ytd.yoy)}</span>}
-                </p>
-              )}
-            </>
-          )}
-        </Card>
-      </div>
-
-      {/* ---------- P8 budget story ---------- */}
+      {/* ---------- the P&L table ---------- */}
       <Card className="p-5 space-y-3">
-        <TileHeader
-          title="Budget story — history and forward plan"
-          hint="Historical vintage BUD-HIST-2025-26 (ties the delivered deck to the cent) and the approved forward budget BUD-2026-07-16-APPROVED, both from budget_2026."
-        />
-        {budgetStory ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-1">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Backward — {winLabel(AS_DELIVERED_WIN)} <BasisBadge basis="VALIDATED" className="ml-1" /></p>
-              <p className="text-sm tabular-nums">Recurring: {fmtOrDash(budgetStory.recHist?.recRevenue)} vs bud {fmtSAR(budgetStory.histRecBudget)}
-                {budgetStory.recHist && <span className={`ml-1 font-semibold ${budgetStory.recHist.recRevenue >= budgetStory.histRecBudget ? "text-success" : "text-destructive"}`}>{fmtDeltaPct(pctChange(budgetStory.recHist.recRevenue, budgetStory.histRecBudget) ?? 0)}</span>}
-              </p>
-              <p className="text-sm tabular-nums">Total: {fmtSAR(budgetStory.actualHistValidated.revenue)} vs bud {fmtSAR(budgetStory.hist.revenue)}
-                <span className={`ml-1 font-semibold ${budgetStory.actualHistValidated.revenue >= budgetStory.hist.revenue ? "text-success" : "text-destructive"}`}>{fmtDeltaPct(pctChange(budgetStory.actualHistValidated.revenue, budgetStory.hist.revenue) ?? 0)}</span>
-              </p>
-              <p className="text-sm tabular-nums">EBITDA: {fmtSAR(budgetStory.actualHistValidated.ebitdaReported)} vs bud {fmtSAR(budgetStory.hist.ebitdaAll)}</p>
-              {/* DATA-CONDITIONED (item 4): the DRIFT-slip attribution renders
-                  only when the DRIFT gap actually carries the total miss. */}
-              {(() => {
-                const totalGap = budgetStory.actualHistValidated.revenue - budgetStory.hist.revenue;
-                const driftGap = (budgetStory.recHist?.nonRecRevenue ?? 0) - budgetStory.drift;
-                const recGapPct = budgetStory.recHist ? pctChange(budgetStory.recHist.recRevenue, budgetStory.histRecBudget) : null;
-                if (totalGap < 0 && driftGap < 0 && Math.abs(driftGap) >= 0.5 * Math.abs(totalGap)) {
-                  return (
-                    <p className="text-[11px] text-muted-foreground/80 tabular-nums">
-                      DRIFT slip drives the total-revenue miss ({fmtSAR(driftGap)} of the {fmtSAR(totalGap)} gap);
-                      recurring core {recGapPct !== null ? (Math.abs(recGapPct) <= 10 ? `near plan (${fmtDeltaPct(recGapPct)})` : `${fmtDeltaPct(recGapPct)} vs plan`) : "—"}.
-                    </p>
-                  );
-                }
-                return recGapPct !== null ? (
-                  <p className="text-[11px] text-muted-foreground/80 tabular-nums">Recurring core {fmtDeltaPct(recGapPct)} vs plan.</p>
-                ) : null;
-              })()}
-            </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-1">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Next budget month {budgetStory.firstFwd ? `(${monthKeyLabel(budgetStory.firstFwd)})` : ""}
-              </p>
-              <p className="text-sm tabular-nums">Revenue: {fmtOrDash(budgetStory.fwdFirst?.revenue)}</p>
-              <p className="text-sm tabular-nums">EBITDA: {fmtOrDash(budgetStory.fwdFirst?.ebitdaAll)}</p>
-              <p className="text-[11px] text-muted-foreground/80">Approved 2026-07-16 · BUD-2026-07-16-APPROVED</p>
-            </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-1">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                H2-{budgetStory.fwdYear?.slice(2)} plan {budgetStory.firstFwd ? `(${monthKeyLabel(budgetStory.firstFwd)}→Dec)` : ""}
-              </p>
-              <p className="text-sm tabular-nums">Revenue: {fmtOrDash(budgetStory.h2?.revenue)}</p>
-              <p className="text-sm tabular-nums">EBITDA: {fmtOrDash(budgetStory.h2?.ebitdaAll)}</p>
-            </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-1">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">FY{budgetStory.nextYear?.slice(2)} plan</p>
-              <p className="text-sm tabular-nums">Revenue: {fmtOrDash(budgetStory.fy27?.revenue)}</p>
-              <p className="text-sm tabular-nums">EBITDA: {fmtOrDash(budgetStory.fy27?.ebitdaAll)}</p>
-              {/* Conditioned (item 4): only claim the turn when planned EBITDA IS positive. */}
-              {budgetStory.fy27 && budgetStory.fy27.ebitdaAll > 0 && (
-                <p className="text-[11px] text-muted-foreground/80">Self-financing plan — planned EBITDA turns structurally positive.</p>
-              )}
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">Loading budget series…</p>
-        )}
-        {vintageStrip.length > 1 && (
-          <div className="flex flex-wrap items-center gap-2 border-t border-border/40 pt-3">
-            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Budget history:</span>
-            {vintageStrip.map((v, i) => (
-              <span key={v.id} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className={`rounded border px-2 py-0.5 tabular-nums ${v.isDefault ? "border-gold/40 bg-gold/10 text-gold" : "border-border bg-muted/30"}`}>
-                  {v.label}: {fmtSAR(v.revenue)}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            P&amp;L — {windowName}
+          </h2>
+          {mtdPro && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground cursor-help">
+                  <Info className="h-3 w-3" /> {comparisonLabel} pro-rated to {mtdPro.elapsedDays}/{mtdPro.daysInMonth} days
                 </span>
-                {i < vintageStrip.length - 1 && <span className="text-muted-foreground/50">→</span>}
-              </span>
-            ))}
-          </div>
-        )}
-        <p className="text-[11px] text-muted-foreground/80">
-          {/* Coverage gap DERIVED from the loaded budget months (item 4) —
-              no hardcoded month list. */}
-          {(() => {
-            if (!budgetRows || budgetRows.length === 0) return null;
-            const covered = [...budgetMonthsSetLocal(budgetRows)].sort();
-            const missing: string[] = [];
-            let k = covered[0];
-            while (k <= covered[covered.length - 1]) {
-              if (!covered.includes(k)) missing.push(k);
-              k = shiftMonthKey(k, 1);
-            }
-            if (missing.length === 0) return null;
-            return (
-              <>No budget exists for {missing.map(monthKeyLabel).join(", ")} — by design: the historical
-              vintage ends {monthKeyLabel(shiftMonthKey(missing[0], -1))}, the approved forward budget
-              starts {monthKeyLabel(shiftMonthKey(missing[missing.length - 1], 1))}.{" "}</>
-            );
-          })()}
-          Budget is net of VAT with no credit-note concept. Pre-blend vintages (V1 original, V2 revised)
-          are storytelling only — never the default comparison.
-        </p>
-      </Card>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="max-w-xs text-xs">
+                Month to date compares a partial month — the {comparisonLabel.toLowerCase()} figure is scaled to the
+                same elapsed share of the month so the comparison is fair. Actual is never pro-rated.
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </div>
 
-      {/* ---------- P9 multi-year ---------- */}
-      <Card className="p-5 space-y-3">
-        <TileHeader
-          title={`Multi-year clean series — ${recLive ? "recurring revenue" : "revenue"} & 5-section EBITDA by calendar year`}
-          basis={basis}
-          hint="Yearly series computed live from the fact rows on the active basis. * = partial year (through the last closed month)."
-        />
-        {/* Bug fix (defect 3): with no rows loaded yet (or a genuinely empty
-            series) `multiYear` is `[]`, which used to render the full chart
-            shell — axes, legend, empty plot — with nothing to look at and no
-            explanation. Now loading/empty are both said in words; the chart
-            itself renders only once there is something to show. */}
-        {isLoading ? (
-          <p className="text-sm text-muted-foreground py-4">Loading warehouse rows…</p>
-        ) : multiYear.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4">
-            {basisError ? "Could not load the warehouse rows this series needs." : "No data for this window."}
+        {budgetNaNote && (
+          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">{budgetNaNote}</p>
+        )}
+        {isBudgetMode && !budgetNaNote && (
+          <p className="text-[11px] text-muted-foreground/80">
+            Detail limited to budget granularity — budget_2026 has no line-level equivalent to the managerial chart of
+            accounts, so rows don't expand in Budget view. Switch to Previous Year for full leaf detail.
           </p>
-        ) : (
-          <ResponsiveContainer width="100%" height={240}>
-            <ComposedChart data={multiYear} margin={{ top: 14, right: 8, bottom: 0, left: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-              <XAxis dataKey="year" stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} tickLine={false} />
-              <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={54} />
-              <RTooltip
-                content={({ active, payload, label }) => {
-                  if (!active || !payload || payload.length === 0) return null;
-                  const rev = payload.find((p) => p.dataKey === "revenue")?.value as number | undefined;
-                  const eb = payload.find((p) => p.dataKey === "ebitda")?.value as number | undefined;
-                  return (
-                    <div className="chart-tooltip">
-                      <p className="chart-tooltip-title">{label}</p>
-                      <p className="chart-tooltip-content chart-tooltip-actual">{recLive ? "Recurring revenue" : "Revenue"}: {rev !== undefined ? fmtSAR(rev) : "—"}</p>
-                      <p className="chart-tooltip-content chart-tooltip-budget">EBITDA (5-section): {eb !== undefined ? fmtSAR(eb) : "—"}</p>
-                    </div>
-                  );
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeOpacity={0.5} />
-              <Bar dataKey="revenue" name={recLive ? "Recurring revenue" : "Revenue"} fill="hsl(var(--gold) / 0.85)" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={48} />
-              <Line dataKey="ebitda" name="EBITDA (5-section)" stroke="hsl(195 75% 55%)" strokeWidth={2.5} dot={{ r: 3.5, fill: "hsl(195 75% 55%)", strokeWidth: 0 }} isAnimationActive={false} />
-            </ComposedChart>
-          </ResponsiveContainer>
         )}
-      </Card>
 
-      {/* ---------- CN audit drill ---------- */}
-      <Sheet open={cnDrillOpen} onOpenChange={setCnDrillOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle className="font-heading tracking-wide">CREDIT-NOTE AUDIT</SheetTitle>
-            <SheetDescription>
-              v_credit_note_audit — duplication/anomaly findings on customer credit notes (net of VAT).
-            </SheetDescription>
-          </SheetHeader>
-          <div className="mt-4">
-            {cnAudit.isLoading && <p className="text-sm text-muted-foreground">Loading audit rows…</p>}
-            {cnAudit.data && cnAudit.data.length > 0 && (
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
-                    <th className="text-left py-2 pr-2 font-semibold">Date</th>
-                    <th className="text-left py-2 pr-2 font-semibold">Ref</th>
-                    <th className="text-left py-2 pr-2 font-semibold">Finding</th>
-                    <th className="text-right py-2 pl-2 font-semibold">Net of VAT</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cnAudit.data.map((r, i) => (
-                    <tr key={`${r.qoyod_credit_note_id}-${i}`} className="border-b border-border/10">
-                      <td className="py-1.5 pr-2 whitespace-nowrap text-muted-foreground">{r.issue_date}</td>
-                      <td className="py-1.5 pr-2">{r.reference ?? r.qoyod_credit_note_id}</td>
-                      <td className="py-1.5 pr-2">
-                        <span className="inline-flex rounded bg-amber-500/10 border border-amber-500/30 px-1.5 py-px text-[10px] text-amber-300">{r.finding}</span>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground py-4">Loading the P&amp;L…</p>
+        ) : !hasAnyData ? (
+          <p className="text-sm text-muted-foreground py-4">No data for this window.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[560px]">
+              <thead>
+                <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
+                  <th className="text-left py-2 pr-3 font-semibold">Line item</th>
+                  <th className="text-right py-2 px-3 font-semibold">This window</th>
+                  <th className="text-right py-2 px-3 font-semibold">{comparisonLabel}</th>
+                  <th className="text-right py-2 px-3 font-semibold">Δ value</th>
+                  <th className="text-right py-2 pl-3 font-semibold">Δ %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tableRows.map((r) => {
+                  const deltaAbs = r.comparison === null ? null : r.actual - r.comparison;
+                  const deltaPct = r.comparison === null ? null : pctChange(r.actual, r.comparison);
+                  const good = deltaAbs === null ? null : deltaAbs >= 0;
+                  return (
+                    <tr
+                      key={r.keyPath}
+                      className={`border-b border-border/10 ${r.subtotal ? "border-t-2 border-t-border" : ""} ${r.emphasis ? "font-semibold" : ""}`}
+                    >
+                      <td className="py-1.5 pr-3">
+                        <span style={{ paddingLeft: `${r.indent * 18}px` }} className="inline-flex items-center gap-1.5">
+                          {r.onToggle ? (
+                            <button type="button" onClick={r.onToggle} className="inline-flex items-center justify-center h-4 w-4 rounded hover:bg-muted/60 text-muted-foreground shrink-0">
+                              {r.expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                            </button>
+                          ) : r.indent > 0 ? <span className="inline-block h-4 w-4 shrink-0" /> : null}
+                          <span className={r.subtotal ? "text-foreground" : ""}>{r.label}</span>
+                        </span>
                       </td>
-                      <td className="py-1.5 pl-2 text-right tabular-nums">{fmtSAR(r.net_of_vat)}</td>
+                      <td className="py-1.5 px-3 text-right tabular-nums">{fmtSAR(r.actual)}</td>
+                      <td className="py-1.5 px-3 text-right tabular-nums text-muted-foreground">{fmtOrDash(r.comparison)}</td>
+                      <td className={`py-1.5 px-3 text-right tabular-nums ${good === null ? "text-muted-foreground" : good ? "text-success" : "text-destructive"}`}>
+                        {deltaAbs === null ? "—" : fmtDeltaSAR(deltaAbs)}
+                      </td>
+                      <td className={`py-1.5 pl-3 text-right tabular-nums font-semibold ${good === null ? "text-muted-foreground" : good ? "text-success" : "text-destructive"}`}>
+                        {deltaPct === null ? "—" : fmtDeltaPct(deltaPct)}
+                      </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {cnAudit.data && cnAudit.data.length === 0 && !cnAudit.isLoading && (
-              <p className="text-sm text-muted-foreground">No audit rows.</p>
-            )}
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        </SheetContent>
-      </Sheet>
+        )}
+        {budgetLoading && isBudgetMode && <p className="text-xs text-muted-foreground">Loading budget…</p>}
+      </Card>
     </div>
   );
-};
-
-// local helper (kept here to avoid re-export churn)
-const budgetMonthsSetLocal = (budgetRows: { period_month: string; section: string }[]): Set<string> => {
-  const s = new Set<string>();
-  for (const r of budgetRows) if (r.section !== "CASHFLOW") s.add(r.period_month.slice(0, 7));
-  return s;
 };

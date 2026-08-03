@@ -1,12 +1,16 @@
 // CASH FLOW PAGE DATA — Marcello's live-review rebuild, 2026-08-03.
+// Extended 2026-08-03 (fix-19, 2nd round): the CEO's mandate is a manager's
+// read of the statement — "where cash comes in, where it goes out, in human
+// words" — not a second accounting rebuild. Every new figure below is an
+// ADDITIVE view of the SAME warehouse totals already computed by
+// v_cashflow_statement_monthly; nothing here changes a top-level number.
 //
 // Page-agnostic aggregation layer for the Cash Flow screen, mirroring how
 // `useKpiHeaderData` feeds the Economics KPI circles: reads the SAME global
 // controls every aligned screen reads (`useAlignment` — window preset,
 // Comparison [PY|Budget]) and the cash-flow warehouse views already wired
 // into the app (`useCashflowMonthly`, `useBalanceSheet`, `useBankBalances`,
-// `useCashflowBudgetComparison`). Nothing here invents a new toggle or a
-// rival data path.
+// `useCashflowBudgetComparison`, `useWorkingCapitalMonthly`).
 //
 // Scope is intentionally NOT read here: v_cashflow_statement_monthly has no
 // recurrence dimension (unlike the P&L basis rows), so "Only Recurring"
@@ -19,9 +23,10 @@
 //     Net change) are FLOWS over the window — on Month-to-date they get the
 //     same elapsed-day pro-ration as the Economics table (`computeMtdProration`),
 //     applied to the comparison only, never the actual.
-//   - Cash POSITION (the circle, opening/closing anchors) is a STOCK at a
-//     point in time — pro-rating a balance by elapsed days is meaningless,
-//     so it is never scaled.
+//   - Cash POSITION (the circle, opening/closing anchors, and every
+//     working-capital / fixed-asset / equity balance used to derive a drill
+//     delta below) is a STOCK at a point in time — pro-rating a balance by
+//     elapsed days is meaningless, so it is never scaled.
 //
 // Budget-CF honesty rule (Marcello, live-review spec): the cash-flow budget
 // only carries real investing/financing lines from the month the forward
@@ -32,14 +37,69 @@
 // Any window that starts before that boundary shows "—" for the WHOLE
 // Budget comparison (never a mixed proxy+real blend, which would misstate
 // the data).
+//
+// ---------------------------------------------------------------------
+// fix-19 drill sourcing (2026-08-03) — what's real, what's derived, why:
+//
+//   Cash IN  ("Cash collected from customers") — v_collections_monthly
+//   (payment allocations to invoices, kind='received'): a real, itemized
+//   direct-cash-receipts ledger, independent of the GL-indirect CFS view.
+//
+//   Cash OUT ("Cash paid out") — the raw Qoyod payments log (qoyod_payments,
+//   kind='paid') is RLS-gated to service_role only (migration 025) — the
+//   frontend's `authenticated` session cannot read it at all, and no
+//   itemized-outflow warehouse view exists (verified empirically 2026-08-03:
+//   every direct query from an authenticated session returns zero rows).
+//   So "Cash paid out" is DERIVED so the two lines tie to the operating
+//   total EXACTLY, by construction: cash out = cash in − operating cash flow
+//   (displayed as a negative, i.e. cash in + cash out = operating cash flow).
+//   The sub-note says so plainly — never presented as itemized.
+//
+//   Working-capital explosion — v_working_capital_monthly (receivables /
+//   inventory / payables balances, SAME account-code ranges the CFS view's
+//   OP_WC bucket uses: 1103%/1104%/2010-2013%). A window's delta on each
+//   balance (end anchor − start-1 anchor, same anchor pattern as the cash
+//   circle) reconstructs each component's cash contribution. The CFS view's
+//   OP_WC bucket ALSO includes the VAT control accounts (20269/20270), which
+//   v_working_capital_monthly does not carry — the residual
+//   (operating_wc_change − reconstructed AR/Inv/AP) is exactly that VAT
+//   movement, verified empirically to the cent across the full 2021-2026
+//   history before shipping. Shown as its own honestly-labeled line, never
+//   folded silently into receivables or payables.
+//
+//   Investing (capex) / Financing (equity, intercompany) drills —
+//   v_balance_sheet_monthly (already fetched by this hook for the cash
+//   anchors) carries per-line monthly balances at exactly the granularity
+//   the warehouse exposes to `authenticated`: two fixed-asset lines
+//   (A_PPE, A_OFA), the six real equity accounts (E_CAPITAL, E_OWN_*,
+//   E_RE_BOOKS, E_UNMAPPED fallback) and the two intercompany lines
+//   (IC_1108001, IC_1108002). A window's delta on each line's dr-signed
+//   balance reconstructs that line's contribution to investing_cash_flow /
+//   financing_equity / financing_intercompany EXACTLY — verified empirically
+//   to the cent across the full history before shipping (see
+//   `bsLineContribution` below for the one formula that holds for all three).
+//   No raw ledger-line query is used anywhere on this page (qoyod_accounts /
+//   qoyod_journal_entry_lines are not readable by `authenticated` either —
+//   verified empirically the same way).
+//
+//   v_balance_sheet_monthly stops at the last CLOSED month (by its own
+//   contract) — a window reaching into the still-open current month has no
+//   drill detail for investing/financing yet (the top-level total from
+//   v_cashflow_statement_monthly still shows, live). Handled the same way
+//   the rest of this page handles an open month: a plain note, never a
+//   fabricated zero.
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAlignment, type ComparisonMode } from "@/contexts/AlignmentContext";
 import { computeMtdProration, type Win, type MtdProration } from "@/data/alignment";
 import { monthKey, monthKeyLabel, shiftMonthKey } from "@/data/liveData";
 import {
   useCashflowMonthly, useBalanceSheet, useBankBalances, useCashflowBudgetComparison,
-  type CashflowMonthRow, type CashflowBudgetRow, type BankBalanceRow,
+  useWorkingCapitalMonthly,
+  type CashflowMonthRow, type CashflowBudgetRow, type BankBalanceRow, type BalanceSheetRow,
+  type WorkingCapitalMonthRow,
 } from "@/data/statementsLive";
+import { supabase, isSupabaseConfigured, toFriendlyError } from "@/lib/supabaseClient";
 import { fmtSAR } from "@/lib/format";
 
 const n = (v: number | null | undefined): number => v ?? 0;
@@ -175,6 +235,181 @@ export interface BankSplitData {
   stale: boolean;
 }
 
+// ------------------------------------------------------- customer receipts
+//
+// v_collections_monthly (migration 032): payment allocations to invoices
+// from RECEIVED payments — a real, itemized direct-cash-receipts figure,
+// already granted to `authenticated`. This is the ONLY direct-cash-in/out
+// read path the warehouse exposes to the frontend (raw qoyod_payments is
+// RLS service-role-only — verified empirically, see file header).
+interface CollectionsMonthRow {
+  period_month: string;
+  collections_sar: number | null;
+}
+
+const useCollectionsMonthly = () =>
+  useQuery({
+    queryKey: ["v_collections_monthly"],
+    queryFn: async (): Promise<CollectionsMonthRow[]> => {
+      if (!supabase) throw new Error("Supabase is not configured");
+      const { data, error } = await supabase
+        .from("v_collections_monthly")
+        .select("period_month,collections_sar")
+        .order("period_month", { ascending: true })
+        .limit(1000);
+      if (error) throw toFriendlyError(error);
+      return (data ?? []) as CollectionsMonthRow[];
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+  });
+
+/** Sums collections over a window; null only when NOT ONE month in the
+ * window has a collections row at all (absent ≠ zero). */
+const sumCollections = (rows: CollectionsMonthRow[] | undefined, w: Win): number | null => {
+  if (!rows) return null;
+  let sum = 0;
+  let any = false;
+  for (const r of rows) {
+    const k = monthKey(r.period_month);
+    if (!inWin(k, w)) continue;
+    if (r.collections_sar !== null) { sum += r.collections_sar; any = true; }
+  }
+  return any ? sum : null;
+};
+
+// --------------------------------------------------- working-capital drill
+
+interface WcStock { receivables: number; inventory: number; payables: number }
+
+const wcStockAt = (rows: WorkingCapitalMonthRow[] | undefined, k: string): WcStock | null => {
+  if (!rows) return null;
+  const row = rows.find((r) => monthKey(r.period_month) === k);
+  if (!row) return null;
+  return { receivables: n(row.receivables), inventory: n(row.inventory), payables: n(row.payables) };
+};
+
+interface WcDelta { dAr: number | null; dInv: number | null; dAp: number | null }
+
+/** Balance delta across the window (end anchor − start-1 anchor) — same
+ * anchor pattern the cash-position circle already uses. A stock difference,
+ * never pro-rated (see file header). */
+const wcDelta = (rows: WorkingCapitalMonthRow[] | undefined, w: Win): WcDelta => {
+  const start = wcStockAt(rows, shiftMonthKey(w.startKey, -1));
+  const end = wcStockAt(rows, w.endKey);
+  if (!start || !end) return { dAr: null, dInv: null, dAp: null };
+  return {
+    dAr: end.receivables - start.receivables,
+    dInv: end.inventory - start.inventory,
+    dAp: end.payables - start.payables,
+  };
+};
+
+const arContribution = (d: WcDelta): number | null => (d.dAr === null ? null : -d.dAr);
+const invContribution = (d: WcDelta): number | null => (d.dInv === null ? null : -d.dInv);
+const apContribution = (d: WcDelta): number | null => (d.dAp === null ? null : d.dAp);
+
+/** The residual (VAT-control-account timing) that makes AR+Inv+AP tie
+ * exactly to operating_wc_change — verified empirically to be exactly the
+ * VAT movement, to the cent, across the full 2021-2026 history. */
+const vatResidual = (wcChange: number, d: WcDelta): number | null => {
+  const ar = arContribution(d); const inv = invContribution(d); const ap = apContribution(d);
+  if (ar === null || inv === null || ap === null) return null;
+  return wcChange - (ar + inv + ap);
+};
+
+// --------------------------------------------------- investing/financing drill
+//
+// v_balance_sheet_monthly line codes this drill reads (all real, all already
+// fetched by `useBalanceSheet` for the cash anchors — no extra query):
+//   Investing  — A_PPE ("Property, plant & equipment"), A_OFA ("Capital
+//                 works & other fixed assets")
+//   Equity     — E_CAPITAL, E_OWN_30202..30205, E_RE_BOOKS, E_UNMAPPED
+//   Intercompany — IC_1108001 ("Hospital Jeddah New"), IC_1108002 ("Family Office")
+const bsSignedAt = (rows: BalanceSheetRow[], k: string, lineCode: string): number | null => {
+  const row = rows.find((r) => monthKey(r.month) === k && r.line_code === lineCode);
+  if (!row) return null;
+  // dr-signed reconstruction: the view flips sign to present Liabilities/
+  // Equity as natural positives; undoing that flip recovers the dr-signed
+  // ledger balance, whose window delta ties to the CFS view's ledger-mv
+  // formula EXACTLY (verified to the cent across the full 2021-2026 history).
+  return row.section === "Assets" ? row.amount : -row.amount;
+};
+
+/** One line's contribution to its CFS bucket over the window = −Δ(dr-signed
+ * balance). The SAME formula holds for investing (capex), financing-equity
+ * and financing-intercompany — only the line codes differ. Null when either
+ * anchor month is missing from v_balance_sheet_monthly (pre-ledger horizon,
+ * or the window reaches into the still-open month the BS view doesn't emit
+ * yet — never a fabricated zero). */
+const bsLineContribution = (rows: BalanceSheetRow[], w: Win, lineCode: string): number | null => {
+  const start = bsSignedAt(rows, shiftMonthKey(w.startKey, -1), lineCode);
+  const end = bsSignedAt(rows, w.endKey, lineCode);
+  if (start === null || end === null) return null;
+  return -(end - start);
+};
+
+export interface DrillItem {
+  key: string;
+  label: string;
+  actual: number | null;
+  comparison: number | null;
+  explainer?: string;
+}
+
+const INVESTING_LINES: Array<{ code: string; label: string }> = [
+  { code: "A_PPE", label: "Property, plant & equipment" },
+  { code: "A_OFA", label: "Capital works & other fixed assets" },
+];
+const EQUITY_LINES: Array<{ code: string; label: string }> = [
+  { code: "E_CAPITAL", label: "Share capital" },
+  { code: "E_OWN_30202", label: "Shareholder current account — Mrs. Arwa" },
+  { code: "E_OWN_30203", label: "Shareholder current account — Dr. Hamed" },
+  { code: "E_OWN_30204", label: "Shareholder current account — Dr. Khaled" },
+  { code: "E_OWN_30205", label: "Shareholder current account — Madam Arij" },
+  { code: "E_RE_BOOKS", label: "Retained earnings (per books)" },
+  { code: "E_UNMAPPED", label: "Other owner movements" },
+];
+// Family Office (IC_1108002) sits under Financing/intercompany here because
+// that is how v_cashflow_statement_monthly's OWN split works (financing_
+// intercompany = code LIKE '1108%') — moving it would break the cent-tie.
+// The Balance Sheet page (fix-20, same day) reclassifies this SAME balance
+// as "equity-equivalent" for its managerial read — a presentation choice on
+// that page only, no view change. Cross-referenced here so the two pages
+// don't read as contradictory.
+const INTERCO_LINES: Array<{ code: string; label: string; explainer?: string }> = [
+  {
+    code: "IC_1108002", label: "Family Office",
+    explainer: "Classified here as intercompany, matching the cash-flow statement's own split. The Balance Sheet page treats this same balance as equity-equivalent for a managerial read — two lenses on one number, per Marcello's 2026-08-03 decision.",
+  },
+  { code: "IC_1108001", label: "Hospital Jeddah New" },
+];
+
+const DRILL_EPSILON = 0.5;
+
+/** Builds the named-item drill for one bucket: only lines with REAL
+ * (non-zero) movement in the actual window OR the comparison window are
+ * shown — "no clutter" — never a fabricated zero for an inactive line.
+ * `cmpFraction` mirrors the MTD pro-ration already applied to the parent
+ * row's comparison total (`scaleCfAgg`) — without it, a partial-month
+ * comparison would show FULL prior-year-month figures on the child rows
+ * while the parent shows the pro-rated total, so children would no longer
+ * sum to their own parent. */
+const buildBsDrill = (
+  bsRows: BalanceSheetRow[], win: Win, cmpWin: Win | null, lines: Array<{ code: string; label: string; explainer?: string }>,
+  cmpFraction: number | null,
+): DrillItem[] => {
+  const items: DrillItem[] = [];
+  for (const { code, label, explainer } of lines) {
+    const actual = bsLineContribution(bsRows, win, code);
+    const cmpRaw = cmpWin ? bsLineContribution(bsRows, cmpWin, code) : null;
+    const comparison = cmpRaw !== null && cmpFraction !== null ? cmpRaw * cmpFraction : cmpRaw;
+    const hasActivity = (actual !== null && Math.abs(actual) >= DRILL_EPSILON) || (comparison !== null && Math.abs(comparison) >= DRILL_EPSILON);
+    if (hasActivity) items.push({ key: code, label, actual, comparison, explainer });
+  }
+  return items;
+};
+
 // --------------------------------------------------------------- exports
 
 export interface CashFlowLineRow {
@@ -185,7 +420,11 @@ export interface CashFlowLineRow {
   actual: number | null;
   comparison: number | null;
   comparisonUnavailableReason?: string;
-  indent: 0 | 1;
+  /** Mirrors `comparisonUnavailableReason` for the ACTUAL column — used by
+   * the drill rows, where a "—" can come from a genuinely missing anchor
+   * month (e.g. the still-open month) rather than "no data posted at all". */
+  actualUnavailableReason?: string;
+  indent: 0 | 1 | 2;
   expandable: boolean;
   /** Set on child rows only — the Table component shows them exclusively
    * when this parent key is in its local `expanded` set (same click-to-
@@ -196,6 +435,22 @@ export interface CashFlowLineRow {
   /** Anchor rows (Opening/Closing cash) are stocks, not flows — flagged so
    * the table can skip the MTD pro-ration hint on them. */
   isStock?: boolean;
+  /** Plain-language tooltip — "no naked jargon anywhere on the page"
+   * (Marcello, fix-19 mandate). Shown via a small info icon next to the
+   * label. */
+  explainer?: string;
+  /** Fixed cash-direction styling (azure "in" / red "out") for the
+   * manager's cash-in/cash-out view — independent of the delta-vs-
+   * comparison tone used everywhere else on this table. */
+  flow?: "in" | "out";
+  /** A short caption rendered as its own line ABOVE this row, with no
+   * numeric columns — used once, to mark the accounting (indirect-method)
+   * reconciliation as an alternate lens on the SAME operating-cash-flow
+   * total shown just above, not an additional amount. */
+  captionAbove?: string;
+  /** A small persistent note under the label (not hidden in a tooltip) —
+   * used for the one row whose figure is derived rather than itemized. */
+  subNote?: string;
 }
 
 export interface CashFlowPageData {
@@ -235,6 +490,8 @@ export const useCashFlowPageData = (): CashFlowPageData => {
   const { data: bsData, isLoading: bsLoading } = useBalanceSheet();
   const { data: bankRows, isLoading: bankLoading } = useBankBalances();
   const { data: budgetRows, isLoading: budgetLoading } = useCashflowBudgetComparison();
+  const { data: wcRows, isLoading: wcLoading } = useWorkingCapitalMonthly();
+  const { data: collectionsRows, isLoading: collectionsLoading } = useCollectionsMonthly();
 
   const mtdPro = useMemo(() => (preset === "MTD" ? computeMtdProration(todayKey) : null), [preset, todayKey]);
   const factMonths = useMemo(
@@ -374,6 +631,64 @@ export const useCashFlowPageData = (): CashFlowPageData => {
     ? `No cash-flow data posted yet for ${windowName} — the flow lines below show "—" until the close.`
     : null;
 
+  // ---------------------------------------------- manager's cash-in/out view
+  const cashInActualRaw = useMemo(() => sumCollections(collectionsRows, win), [collectionsRows, win]);
+  const cashInPriorRaw = useMemo(() => sumCollections(collectionsRows, py), [collectionsRows, py]);
+  const cashInPrior = cashInPriorRaw !== null && mtdPro ? cashInPriorRaw * mtdPro.fraction : cashInPriorRaw;
+
+  // Cash out is DERIVED so the two lines tie to Operating Cash Flow EXACTLY
+  // (cash in + cash out = operating cash flow, cash out shown negative) —
+  // see file header for why an itemized figure isn't available.
+  const cashOutActual = cashInActualRaw !== null && !noActualData ? -(cashInActualRaw - actualAgg.operatingCashFlow) : null;
+  const cashOutPrior = cashInPrior !== null && !noPriorData ? -(cashInPrior - priorAgg.operatingCashFlow) : null;
+
+  // ---------------------------------------------------- working-capital drill
+  const wcDeltaActual = useMemo(() => wcDelta(wcRows, win), [wcRows, win]);
+  const wcDeltaPriorRaw = useMemo(() => wcDelta(wcRows, py), [wcRows, py]);
+  const wcDeltaPrior = useMemo(() => (mtdPro
+    ? {
+        dAr: wcDeltaPriorRaw.dAr === null ? null : wcDeltaPriorRaw.dAr * mtdPro.fraction,
+        dInv: wcDeltaPriorRaw.dInv === null ? null : wcDeltaPriorRaw.dInv * mtdPro.fraction,
+        dAp: wcDeltaPriorRaw.dAp === null ? null : wcDeltaPriorRaw.dAp * mtdPro.fraction,
+      }
+    : wcDeltaPriorRaw), [wcDeltaPriorRaw, mtdPro]);
+
+  // ------------------------------------------------- investing/financing drill
+  const bsRowsAvail = useMemo(() => (bsData?.available ? bsData.rows : []), [bsData]);
+  const cmpFraction = mtdPro ? mtdPro.fraction : null;
+  const investingDrill = useMemo(
+    () => (bsData?.available ? buildBsDrill(bsRowsAvail, win, isBudgetMode ? null : py, INVESTING_LINES, cmpFraction) : []),
+    [bsData, bsRowsAvail, win, py, isBudgetMode, cmpFraction],
+  );
+  const equityDrill = useMemo(
+    () => (bsData?.available ? buildBsDrill(bsRowsAvail, win, isBudgetMode ? null : py, EQUITY_LINES, cmpFraction) : []),
+    [bsData, bsRowsAvail, win, py, isBudgetMode, cmpFraction],
+  );
+  const intercoDrill = useMemo(
+    () => (bsData?.available ? buildBsDrill(bsRowsAvail, win, isBudgetMode ? null : py, INTERCO_LINES, cmpFraction) : []),
+    [bsData, bsRowsAvail, win, py, isBudgetMode, cmpFraction],
+  );
+  // The BS view stops at the last CLOSED month — a window reaching past that
+  // has no drill detail yet for investing/financing (the top-level total
+  // above is still live from the CFS view). Detected by the end anchor being
+  // unavailable while the start-1 anchor IS available (i.e. genuinely an
+  // open-month gap, not simply "before the ledger horizon").
+  const bsDrillUnavailableReason = !bsData?.available
+    ? "Detail arrives with the balance-sheet view."
+    : (bsSignedAt(bsRowsAvail, win.endKey, "A_PPE") === null && bsSignedAt(bsRowsAvail, shiftMonthKey(win.startKey, -1), "A_PPE") !== null)
+      ? "Line-by-line detail arrives once this month closes — the balance-sheet view that carries it stops at the last closed month. The total above is live."
+      : null;
+
+  // Same open-month gap, for the working-capital explosion (v_working_
+  // capital_monthly may not carry a row for the still-open current month
+  // yet either) — the parent "Change in working capital" total above still
+  // comes from the CFS view and stays live either way.
+  const wcDrillUnavailableReason = !wcRows
+    ? "Detail arrives with the working-capital view."
+    : (wcStockAt(wcRows, win.endKey) === null && wcStockAt(wcRows, shiftMonthKey(win.startKey, -1)) !== null)
+      ? "Line-by-line detail arrives once this month closes — the working-capital view that carries it stops at the last posted month. The total above is live."
+      : null;
+
   const rows: CashFlowLineRow[] = useMemo(() => {
     const actualOr = (v: number): number | null => (noActualData ? null : v);
     const cmp = (kind: keyof CfWindowAgg | null, budgetField: keyof CfBudgetWindowAgg | null): number | null => {
@@ -390,27 +705,156 @@ export const useCashFlowPageData = (): CashFlowPageData => {
       key: "operating", label: "Operating cash flow", actual: actualOr(actualAgg.operatingCashFlow),
       comparison: cmp("operatingCashFlow", "operatingBudget"),
       indent: 0, expandable: !isBudgetMode, emphasis: true,
+      explainer: "Cash generated (or used) by the day-to-day business — members, clients, suppliers, staff.",
     });
     if (!isBudgetMode) {
-      out.push({ key: "operating.result", parentKey: "operating", label: "Operating result", actual: actualOr(actualAgg.operatingResult), comparison: cmp("operatingResult", null), indent: 1, expandable: false });
-      out.push({ key: "operating.wc", parentKey: "operating", label: "Working-capital change", actual: actualOr(actualAgg.operatingWcChange), comparison: cmp("operatingWcChange", null), indent: 1, expandable: false });
-      out.push({ key: "operating.da", parentKey: "operating", label: "D&A add-back (non-cash)", actual: actualOr(actualAgg.operatingDaNoncash), comparison: cmp("operatingDaNoncash", null), indent: 1, expandable: false });
+      out.push({
+        key: "operating.cashin", parentKey: "operating", label: "Cash collected from customers",
+        actual: noActualData ? null : cashInActualRaw,
+        comparison: noPriorData ? null : cashInPrior,
+        indent: 1, expandable: false, flow: "in",
+        explainer: "Real payments received from members and clients this window — straight from the payment log, not an accounting estimate.",
+      });
+      out.push({
+        key: "operating.cashout", parentKey: "operating", label: "Cash paid out",
+        actual: noActualData ? null : cashOutActual,
+        comparison: noPriorData ? null : cashOutPrior,
+        indent: 1, expandable: false, flow: "out",
+        explainer: "Everything that left the bank for the business — suppliers, payroll, day-to-day running costs.",
+        subNote: "Derived from the accounting ledger (cash in − this = operating cash flow) — a line-by-line supplier/payroll breakdown isn't available in the warehouse yet; it arrives once the bank feed is connected.",
+      });
+
+      out.push({
+        key: "operating.result", parentKey: "operating", label: "Accounting profit before non-cash costs",
+        actual: actualOr(actualAgg.operatingResult), comparison: cmp("operatingResult", null),
+        indent: 1, expandable: false,
+        captionAbove: "The same total, from the accounting ledger:",
+        explainer: "Revenue booked minus costs booked, before depreciation — the accounting starting point for the reconciliation below.",
+      });
+      out.push({
+        key: "operating.wc", parentKey: "operating", label: "Change in working capital",
+        actual: actualOr(actualAgg.operatingWcChange), comparison: cmp("operatingWcChange", null),
+        indent: 1, expandable: true,
+        explainer: "Cash tied up or freed by customers paying late, suppliers being paid later, or stock sitting on the shelf.",
+      });
+      out.push({
+        key: "operating.wc.ar", parentKey: "operating.wc", label: "Change in customer receivables",
+        actual: noActualData ? null : arContribution(wcDeltaActual),
+        comparison: noPriorData ? null : arContribution(wcDeltaPrior),
+        indent: 2, expandable: false,
+        explainer: "Cash trapped in unpaid invoices — negative means customers owe more than before; positive means they've paid down what they owed.",
+        actualUnavailableReason: !noActualData && arContribution(wcDeltaActual) === null ? (wcDrillUnavailableReason ?? undefined) : undefined,
+      });
+      out.push({
+        key: "operating.wc.ap", parentKey: "operating.wc", label: "Change in supplier payables",
+        actual: noActualData ? null : apContribution(wcDeltaActual),
+        comparison: noPriorData ? null : apContribution(wcDeltaPrior),
+        indent: 2, expandable: false,
+        explainer: "Cash held onto by paying suppliers later — positive means more cash kept in hand than before.",
+        actualUnavailableReason: !noActualData && apContribution(wcDeltaActual) === null ? (wcDrillUnavailableReason ?? undefined) : undefined,
+      });
+      out.push({
+        key: "operating.wc.inv", parentKey: "operating.wc", label: "Change in inventory",
+        actual: noActualData ? null : invContribution(wcDeltaActual),
+        comparison: noPriorData ? null : invContribution(wcDeltaPrior),
+        indent: 2, expandable: false,
+        explainer: "Cash tied up in stock sitting on the shelf — negative means more stock was bought than sold down.",
+        actualUnavailableReason: !noActualData && invContribution(wcDeltaActual) === null ? (wcDrillUnavailableReason ?? undefined) : undefined,
+      });
+      out.push({
+        key: "operating.wc.vat", parentKey: "operating.wc", label: "VAT timing",
+        actual: noActualData ? null : vatResidual(actualAgg.operatingWcChange, wcDeltaActual),
+        comparison: noPriorData ? null : vatResidual(priorAgg.operatingWcChange, wcDeltaPrior),
+        indent: 2, expandable: false,
+        explainer: "Movement in VAT collected from members/clients and owed to ZATCA — a timing difference, not part of receivables or payables.",
+        actualUnavailableReason: !noActualData && vatResidual(actualAgg.operatingWcChange, wcDeltaActual) === null ? (wcDrillUnavailableReason ?? undefined) : undefined,
+      });
+      out.push({
+        key: "operating.da", parentKey: "operating", label: "Depreciation add-back (non-cash)",
+        actual: actualOr(actualAgg.operatingDaNoncash), comparison: cmp("operatingDaNoncash", null),
+        indent: 1, expandable: false,
+        explainer: "An accounting cost that never moves cash — added back so the total reflects real cash, not bookkeeping.",
+      });
     }
 
     out.push({
       key: "investing", label: "Investing cash flow", actual: actualOr(actualAgg.investingCashFlow),
       comparison: cmp("investingCashFlow", "investingBudget"),
-      indent: 0, expandable: false, emphasis: true,
+      indent: 0, expandable: !isBudgetMode, emphasis: true,
+      explainer: "Money spent on or recovered from long-term assets — buildings, arenas, vehicles, equipment.",
     });
+    if (!isBudgetMode) {
+      if (investingDrill.length > 0) {
+        for (const item of investingDrill) {
+          out.push({
+            key: `investing.${item.key}`, parentKey: "investing", label: item.label,
+            actual: item.actual, comparison: item.comparison,
+            indent: 1, expandable: false,
+            actualUnavailableReason: item.actual === null ? (bsDrillUnavailableReason ?? undefined) : undefined,
+          });
+        }
+      } else {
+        out.push({
+          key: "investing.empty", parentKey: "investing",
+          label: bsDrillUnavailableReason ? "Detail not available yet" : "No fixed-asset activity this window",
+          actual: null, comparison: null, indent: 1, expandable: false,
+          actualUnavailableReason: bsDrillUnavailableReason ?? "Nothing posted to a fixed-asset account this window.",
+        });
+      }
+    }
 
     out.push({
       key: "financing", label: "Financing cash flow", actual: actualOr(actualAgg.financingCashFlow),
       comparison: cmp("financingCashFlow", "financingBudget"),
       indent: 0, expandable: !isBudgetMode, emphasis: true,
+      explainer: "Money moved with the owners and related entities — capital, shareholder current accounts, intercompany transfers.",
     });
     if (!isBudgetMode) {
-      out.push({ key: "financing.equity", parentKey: "financing", label: "Financing — equity", actual: actualOr(actualAgg.financingEquity), comparison: cmp("financingEquity", null), indent: 1, expandable: false });
-      out.push({ key: "financing.intercompany", parentKey: "financing", label: "Financing — intercompany", actual: actualOr(actualAgg.financingIntercompany), comparison: cmp("financingIntercompany", null), indent: 1, expandable: false });
+      out.push({
+        key: "financing.equity", parentKey: "financing", label: "Owner & capital movements",
+        actual: actualOr(actualAgg.financingEquity), comparison: cmp("financingEquity", null),
+        indent: 1, expandable: true,
+        explainer: "Capital injections, share capital, and the shareholders' current accounts.",
+      });
+      if (equityDrill.length > 0) {
+        for (const item of equityDrill) {
+          out.push({
+            key: `financing.equity.${item.key}`, parentKey: "financing.equity", label: item.label,
+            actual: item.actual, comparison: item.comparison, indent: 2, expandable: false, explainer: item.explainer,
+            actualUnavailableReason: item.actual === null ? (bsDrillUnavailableReason ?? undefined) : undefined,
+          });
+        }
+      } else {
+        out.push({
+          key: "financing.equity.empty", parentKey: "financing.equity",
+          label: bsDrillUnavailableReason ? "Detail not available yet" : "No owner/capital movement this window",
+          actual: null, comparison: null, indent: 2, expandable: false,
+          actualUnavailableReason: bsDrillUnavailableReason ?? "No shareholder or capital account moved this window.",
+        });
+      }
+
+      out.push({
+        key: "financing.intercompany", parentKey: "financing", label: "Family Office & related-entity movements",
+        actual: actualOr(actualAgg.financingIntercompany), comparison: cmp("financingIntercompany", null),
+        indent: 1, expandable: true,
+        explainer: "Transfers with the Family Office and the Hospital Jeddah New entity.",
+      });
+      if (intercoDrill.length > 0) {
+        for (const item of intercoDrill) {
+          out.push({
+            key: `financing.intercompany.${item.key}`, parentKey: "financing.intercompany", label: item.label,
+            actual: item.actual, comparison: item.comparison, indent: 2, expandable: false, explainer: item.explainer,
+            actualUnavailableReason: item.actual === null ? (bsDrillUnavailableReason ?? undefined) : undefined,
+          });
+        }
+      } else {
+        out.push({
+          key: "financing.intercompany.empty", parentKey: "financing.intercompany",
+          label: bsDrillUnavailableReason ? "Detail not available yet" : "No intercompany movement this window",
+          actual: null, comparison: null, indent: 2, expandable: false,
+          actualUnavailableReason: bsDrillUnavailableReason ?? "Nothing moved with a related entity this window.",
+        });
+      }
     }
 
     out.push({
@@ -418,12 +862,14 @@ export const useCashFlowPageData = (): CashFlowPageData => {
       comparison: isBudgetMode ? null : cmp("otherCashFlow", null),
       comparisonUnavailableReason: isBudgetMode && budgetAvailableForWin ? "No budget line for other cash flow." : undefined,
       indent: 0, expandable: false,
+      explainer: "Smaller items outside the categories above — prepaid expenses, staff advances, and similar.",
     });
 
     out.push({
       key: "net", label: "Net change in cash", actual: actualOr(actualAgg.netCashFlow),
       comparison: cmp("netCashFlow", "netBudget"),
       indent: 0, expandable: false, subtotal: true, emphasis: true,
+      explainer: "Everything above, added together — how much the bank balance actually moved this window.",
     });
 
     out.push({
@@ -441,7 +887,10 @@ export const useCashFlowPageData = (): CashFlowPageData => {
 
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actualAgg, priorAgg, budgetAgg, isBudgetMode, budgetAvailableForWin, noActualData, noPriorData, win, openingActual, openingComparison, closingActual, closingComparison]);
+  }, [
+    actualAgg, priorAgg, budgetAgg, isBudgetMode, budgetAvailableForWin, noActualData, noPriorData, win, openingActual, openingComparison, closingActual, closingComparison,
+    cashInActualRaw, cashInPrior, cashOutActual, cashOutPrior, wcDeltaActual, wcDeltaPrior, wcDrillUnavailableReason, investingDrill, equityDrill, intercoDrill, bsDrillUnavailableReason,
+  ]);
 
   // --------------------------------------------------------- bank split
   const bankSplit: BankSplitData = useMemo(() => {
@@ -459,7 +908,7 @@ export const useCashFlowPageData = (): CashFlowPageData => {
     : null;
 
   return {
-    isLoading: cfLoading || bsLoading || bankLoading || budgetLoading,
+    isLoading: cfLoading || bsLoading || bankLoading || budgetLoading || wcLoading || collectionsLoading,
     isError: cfError,
     comparisonMode, comparisonLabel, windowName, winLabelText,
     mtdProrated: mtdPro !== null,

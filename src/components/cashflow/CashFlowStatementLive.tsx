@@ -26,7 +26,14 @@
 //     the single-window statement table below replaces all of them with
 //     the same expandable-row idiom Economics uses, so the CFO gets one
 //     coherent way to read every statement in the cockpit.
-import { WindowPicker, ComparisonToggle, OpenMonthsBadge, CompletenessBanner } from "@/components/chrome/AlignmentChrome";
+//   - The "Data completeness" boxed disclaimer (2026-08-03, 2nd-round
+//     mandate — "kill the banners", Marcello: a manager's cockpit page, not
+//     a disclaimer wall). The ONLY completeness signal left on this page is
+//     the small inline `OpenMonthsBadge` next to the window picker; the
+//     mini `actualDataNote`/`budgetCapNote` lines inside the statement card
+//     itself (rendered only when genuinely relevant to the selected window)
+//     stay, since those are a single honest sentence, not a boxed banner.
+import { WindowPicker, ComparisonToggle, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
 import { useCashFlowPageData } from "@/hooks/useCashFlowPageData";
 import { CashPositionCircle } from "@/components/cashflow/CashPositionCircle";
 import { CashByBankSplit } from "@/components/cashflow/CashByBankSplit";
@@ -48,8 +55,6 @@ export const CashFlowStatementLive = () => {
         <ComparisonToggle />
         <OpenMonthsBadge />
       </div>
-
-      <CompletenessBanner rows={undefined} />
 
       {data.isLoading && <p className="text-sm text-muted-foreground">Loading live cash-flow data…</p>}
       {data.isError && (

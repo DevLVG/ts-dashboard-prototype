@@ -65,6 +65,11 @@ export interface BsKpiMetric {
   /** null = genuinely unavailable for this as-of/comparison combo — never a fabricated zero. */
   comparison: number | null;
   comparisonUnavailableReason?: string;
+  /** Optional hover disclosure on the circle's main value — independent of
+   *  comparison availability. Used by Balance Sheet's Equity/Liabilities
+   *  circles to show the statutory vs shareholder-advance vs managerial
+   *  breakdown (Marcello mandate, fix-20-bs-equity, 2026-08-03). */
+  valueTooltip?: string;
 }
 
 const BsKpiCircle = ({ metric, comparisonLabel }: { metric: BsKpiMetric; comparisonLabel: string }) => {
@@ -80,23 +85,35 @@ const BsKpiCircle = ({ metric, comparisonLabel }: { metric: BsKpiMetric; compari
         {metric.label}
       </p>
 
-      <div
-        className={cn(
-          "relative flex h-36 w-36 md:h-40 md:w-40 shrink-0 items-center justify-center rounded-full border-[3px] bg-background/60 transition-colors",
-          TONE_RING[tone],
-        )}
-        role="img"
-        aria-label={`${metric.label}: ${valueStr} SAR${
-          metric.comparison !== null
-            ? `, ${fmtDeltaSAR(deltaAbs ?? 0)} SAR (${deltaPct !== null ? fmtDeltaPct(deltaPct) : "n/a"}) ${comparisonLabel.toLowerCase()}`
-            : `, no ${comparisonLabel.toLowerCase()} comparison available`
-        }`}
-      >
-        <div className="flex flex-col items-center px-2 text-center">
-          <p className={cn("font-heading tracking-tight leading-none", valueSizeClass(valueStr))}>{valueStr}</p>
-          <p className="mt-1 text-[10px] uppercase tracking-widest text-muted-foreground">SAR</p>
-        </div>
-      </div>
+      {(() => {
+        const circle = (
+          <div
+            className={cn(
+              "relative flex h-36 w-36 md:h-40 md:w-40 shrink-0 items-center justify-center rounded-full border-[3px] bg-background/60 transition-colors",
+              metric.valueTooltip ? "cursor-help" : "",
+              TONE_RING[tone],
+            )}
+            role="img"
+            aria-label={`${metric.label}: ${valueStr} SAR${
+              metric.comparison !== null
+                ? `, ${fmtDeltaSAR(deltaAbs ?? 0)} SAR (${deltaPct !== null ? fmtDeltaPct(deltaPct) : "n/a"}) ${comparisonLabel.toLowerCase()}`
+                : `, no ${comparisonLabel.toLowerCase()} comparison available`
+            }${metric.valueTooltip ? ` — ${metric.valueTooltip}` : ""}`}
+          >
+            <div className="flex flex-col items-center px-2 text-center">
+              <p className={cn("font-heading tracking-tight leading-none", valueSizeClass(valueStr))}>{valueStr}</p>
+              <p className="mt-1 text-[10px] uppercase tracking-widest text-muted-foreground">SAR</p>
+            </div>
+          </div>
+        );
+        if (!metric.valueTooltip) return circle;
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>{circle}</TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs text-xs">{metric.valueTooltip}</TooltipContent>
+          </Tooltip>
+        );
+      })()}
 
       <div className="flex flex-col items-center gap-0.5 min-h-[2.75rem] justify-center">
         {metric.comparison === null ? (

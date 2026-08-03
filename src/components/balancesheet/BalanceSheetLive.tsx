@@ -48,6 +48,33 @@ import { BsKpiCircles, type BsKpiMetric } from "@/components/balancesheet/BsKpiC
 // Negative-zero guard: rounding a tiny negative must render "0", never "(0)".
 const fmt = (v: number) => fmtSAR(Math.abs(v) < 0.5 ? 0 : v);
 
+// SHAREHOLDER-ADVANCE REGROUP (Marcello, mandate 2026-08-03, fix-20-bs-equity)
+// — presentation-only, books/view untouched, keyed on the already-stable
+// `line_code` so it needs no migration and no view change.
+//
+// Statutory (Qoyod's own classification, "formally correct") books the
+// family's funding of Trio's operating burn as a Liability: line IC_1108002
+// "Due to related parties — Family Office" (flat SAR 9,663,599.45 across
+// the whole ledger, 2021-01 -> today — migration 023 flagged it explicitly
+// "classification decision pending (Marcello)"). Decision made: for a
+// managerial read this is equity-equivalent (same economic substance as the
+// 4 individual shareholder current accounts, E_OWN_302xx, which migration
+// 023 ALREADY presents inside Equity — nothing to change there).
+//
+// IC_1108001 "Due to related parties — Hospital Jeddah New" is NOT in this
+// set: a different related party (a sister operating company, not the
+// family/holding funding vehicle) and immaterial (~SAR 32.9k) — stays an
+// ordinary intercompany liability.
+//
+// Guarded to section === "Liabilities": if this balance ever flips sign
+// (shows as a Due-FROM receivable under Assets), it is a receivable from the
+// family, not an advance BY the family — correctly excluded from the regroup
+// automatically, no code change needed.
+const SHAREHOLDER_ADVANCE_LINE_CODES = new Set(["IC_1108002"]);
+const SHAREHOLDER_ADVANCE_SUBSECTION = "Shareholder advances (equity-equivalent)";
+const isShareholderAdvanceRow = (r: Pick<BalanceSheetRow, "section" | "line_code">): boolean =>
+  r.section === "Liabilities" && SHAREHOLDER_ADVANCE_LINE_CODES.has(r.line_code);
+
 interface DisplayLine {
   key: string;
   label: string;
@@ -230,11 +257,14 @@ export const BalanceSheetLive = () => {
     return comparisonActualMap ? comparisonActualMap.get(compKey(r)) ?? null : null;
   };
 
-  /** Groups a section's rows by subsection (Map preserves first-seen order = sort_order order). */
+  /** Groups a section's rows by subsection (Map preserves first-seen order = sort_order order).
+   *  Liabilities excludes shareholder-advance lines — regrouped into the Equity
+   *  block below (see SHAREHOLDER_ADVANCE_LINE_CODES). */
   const groupSection = (section: "Assets" | "Liabilities" | "Equity") => {
     const bySubsection = new Map<string, DisplayLine[]>();
     for (const r of monthRows) {
       if (r.section !== section) continue;
+      if (section === "Liabilities" && isShareholderAdvanceRow(r)) continue;
       const list = bySubsection.get(r.subsection) ?? [];
       list.push({ key: r.line_code, label: r.line_item, actual: r.amount, comparison: comparisonFor(r) });
       bySubsection.set(r.subsection, list);
@@ -254,6 +284,46 @@ export const BalanceSheetLive = () => {
   const liabilities = groupSection("Liabilities");
   const equity = groupSection("Equity");
 
+  // ---------------------------------------------- shareholder-advance regroup
+  // Pulled out of monthRows directly (not from `liabilities`, which already
+  // excludes them) so they can be re-presented as their own Equity subsection.
+  const shareholderAdvanceLines: DisplayLine[] = monthRows
+    .filter(isShareholderAdvanceRow)
+    .map((r) => ({ key: r.line_code, label: r.line_item, actual: r.amount, comparison: comparisonFor(r) }));
+  const shareholderAdvanceActualTotal = shareholderAdvanceLines.reduce((s, l) => s + (l.actual ?? 0), 0);
+  const shareholderAdvanceComparisonTotal = shareholderAdvanceLines.some((l) => l.comparison !== null)
+    ? shareholderAdvanceLines.reduce((s, l) => s + (l.comparison ?? 0), 0)
+    : null;
+  const hasShareholderAdvanceLines = shareholderAdvanceLines.length > 0;
+
+  // Equity groups as displayed: statutory subsections + (if any) the new
+  // shareholder-advance subsection appended at the end.
+  const equityGroupsForDisplay: SubsectionGroup[] = hasShareholderAdvanceLines
+    ? [
+        ...equity.groups,
+        {
+          subsection: SHAREHOLDER_ADVANCE_SUBSECTION,
+          lines: shareholderAdvanceLines,
+          actualTotal: shareholderAdvanceActualTotal,
+          comparisonTotal: shareholderAdvanceComparisonTotal,
+        },
+      ]
+    : equity.groups;
+
+  // Two equity readings, same underlying data: "statutory" (Qoyod's own
+  // classification — matches Total Liabilities+Equity's old behaviour) and
+  // "managerial" (incl. shareholder advances) — the one the circle + the
+  // grand total now use, so Assets = Liabilities(reduced) + Equity(managerial)
+  // ties by construction (the regroup only moves lines between display
+  // buckets, never changes an amount).
+  const equityStatutoryActualTotal = equity.actualTotal;
+  const equityStatutoryComparisonTotal = equity.comparisonTotal;
+  const equityManagerialActualTotal = equityStatutoryActualTotal + shareholderAdvanceActualTotal;
+  const equityManagerialComparisonTotal =
+    equityStatutoryComparisonTotal !== null || shareholderAdvanceComparisonTotal !== null
+      ? (equityStatutoryComparisonTotal ?? 0) + (shareholderAdvanceComparisonTotal ?? 0)
+      : null;
+
   // Budget-only "Financing" line (L_FIN_DERIVED) has no actual-side
   // equivalent — surfaced as its own group so Budget-mode subsection totals
   // still add up to the Budget-mode grand total (never hidden inside an
@@ -267,9 +337,11 @@ export const BalanceSheetLive = () => {
     ? (liabilities.comparisonTotal ?? 0) + financingBudgetOnly
     : liabilities.comparisonTotal;
 
-  const totalLE_actual = liabilitiesTotalActual + equity.actualTotal;
-  const totalLE_comparison = liabilitiesTotalComparison !== null || equity.comparisonTotal !== null
-    ? (liabilitiesTotalComparison ?? 0) + (equity.comparisonTotal ?? 0)
+  // Uses the MANAGERIAL equity total (statutory + shareholder advances) so the
+  // regroup nets to zero: Liabilities lost exactly what Equity gained.
+  const totalLE_actual = liabilitiesTotalActual + equityManagerialActualTotal;
+  const totalLE_comparison = liabilitiesTotalComparison !== null || equityManagerialComparisonTotal !== null
+    ? (liabilitiesTotalComparison ?? 0) + (equityManagerialComparisonTotal ?? 0)
     : null;
 
   // Tie-check — ALWAYS on the actual as-of statement, independent of the
@@ -285,18 +357,29 @@ export const BalanceSheetLive = () => {
     ? (budgetHasData ? budgetRowsForMonth.filter((r) => r.section === "Assets" && r.subsection === "Fixed Assets").reduce((s, r) => s + r.budget_amount_sar, 0) : null)
     : (comparisonActualMap ? comparisonActualRows.filter((r) => r.section === "Assets" && r.subsection === "Fixed Assets").reduce((s, r) => s + r.amount, 0) : null);
 
+  // Value tooltips (independent of comparison mode — disclose the statutory
+  // vs shareholder-advance vs managerial breakdown on the two affected circles).
+  const equityValueTooltip = hasShareholderAdvanceLines
+    ? `Equity (statutory — Qoyod's own classification): ${fmt(equityStatutoryActualTotal)} SAR. Shareholder advances reclassified as equity-equivalent (Family Office intercompany funding, still booked as a liability in the books): +${fmt(shareholderAdvanceActualTotal)} SAR. Equity incl. shareholder advances: ${fmt(equityManagerialActualTotal)} SAR.`
+    : undefined;
+  const liabilitiesValueTooltip = hasShareholderAdvanceLines
+    ? `Excludes ${fmt(shareholderAdvanceActualTotal)} SAR of shareholder/family funding (Family Office intercompany), presented as equity-equivalent above. Statutory liabilities (Qoyod's own classification, incl. that funding): ${fmt(liabilitiesTotalActual + shareholderAdvanceActualTotal)} SAR.`
+    : undefined;
+
   const circleMetrics: BsKpiMetric[] = [
     {
       key: "fixedAssets", label: "Fixed Assets", actual: fixedAssetsActual, comparison: fixedAssetsComparison,
       comparisonUnavailableReason: isBudgetMode ? budgetUnavailableReason : undefined,
     },
     {
-      key: "equity", label: "Equity", actual: equity.actualTotal, comparison: equity.comparisonTotal,
+      key: "equity", label: "Equity", actual: equityManagerialActualTotal, comparison: equityManagerialComparisonTotal,
       comparisonUnavailableReason: isBudgetMode ? budgetUnavailableReason : undefined,
+      valueTooltip: equityValueTooltip,
     },
     {
       key: "liabilities", label: "Liabilities", actual: liabilitiesTotalActual, comparison: liabilitiesTotalComparison,
       comparisonUnavailableReason: isBudgetMode ? budgetUnavailableReason : undefined,
+      valueTooltip: liabilitiesValueTooltip,
     },
   ];
 
@@ -395,7 +478,7 @@ export const BalanceSheetLive = () => {
                 title="Liabilities & Equity"
                 groups={[
                   ...liabilitiesGroups.map((g) => ({ key: `L::${g.subsection}`, subsection: g.subsection, group: g })),
-                  ...equity.groups.map((g) => ({ key: `E::${g.subsection}`, subsection: g.subsection, group: g })),
+                  ...equityGroupsForDisplay.map((g) => ({ key: `E::${g.subsection}`, subsection: g.subsection, group: g })),
                 ]}
                 total={totalLE_actual}
                 comparisonTotal={totalLE_comparison}
@@ -404,7 +487,14 @@ export const BalanceSheetLive = () => {
                 onToggle={toggle}
                 extraGrandTotals={[
                   { afterKey: `L::${liabilitiesGroups[liabilitiesGroups.length - 1]?.subsection ?? ""}`, label: "Total Liabilities", actual: liabilitiesTotalActual, comparison: liabilitiesTotalComparison },
-                  { afterKey: `E::${equity.groups[equity.groups.length - 1]?.subsection ?? ""}`, label: "Total Equity", actual: equity.actualTotal, comparison: equity.comparisonTotal },
+                  ...(hasShareholderAdvanceLines
+                    ? [
+                        { afterKey: `E::${equity.groups[equity.groups.length - 1]?.subsection ?? ""}`, label: "Equity (statutory)", actual: equityStatutoryActualTotal, comparison: equityStatutoryComparisonTotal },
+                        { afterKey: `E::${SHAREHOLDER_ADVANCE_SUBSECTION}`, label: "Equity incl. shareholder advances", actual: equityManagerialActualTotal, comparison: equityManagerialComparisonTotal },
+                      ]
+                    : [
+                        { afterKey: `E::${equity.groups[equity.groups.length - 1]?.subsection ?? ""}`, label: "Total Equity", actual: equityManagerialActualTotal, comparison: equityManagerialComparisonTotal },
+                      ]),
                 ]}
               />
             </div>

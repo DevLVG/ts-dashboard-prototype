@@ -207,9 +207,12 @@ export interface CashFlowPageData {
   winLabelText: string;
   mtdProrated: boolean;
   mtdHint: MtdProration | null;
-  /** Distinct months actually present in the CF fact rows — feeds the
-   * WindowPicker's month list so it never offers a month with no data,
-   * same honesty rule the Economics table applies via `factMonths`. */
+  /** Distinct months actually present in the CF fact rows. No longer used to
+   * filter the WindowPicker's month list (2026-08-03: the shared selector
+   * now lists every calendar month/quarter regardless of data — see
+   * `AlignmentChrome`'s `WindowPicker` — an unfed one shows the page's own
+   * "—" empty state instead of being hidden from the picker). Kept for any
+   * other data-presence checks on this page. */
   factMonths: string[];
 
   // ---- the big circle ----

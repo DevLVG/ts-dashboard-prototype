@@ -230,7 +230,7 @@ export const resolveRecurrence = (
 /** Inclusive month-key window. */
 export interface Win { startKey: string; endKey: string }
 
-export type WindowPresetId = "AS_DELIVERED" | "MTD" | "LAST_MONTH" | "TTM" | "YTD" | "FY" | string; // "M:YYYY-MM"
+export type WindowPresetId = "AS_DELIVERED" | "MTD" | "LAST_MONTH" | "TTM" | "YTD" | "FY" | string; // "M:YYYY-MM" (a single month) | "Q:1".."Q:4" (a calendar quarter of the current year)
 
 /** The pinned package window (§0.2) — a WINDOW DEFINITION, not a figure. */
 export const AS_DELIVERED_WIN: Win = { startKey: "2025-06", endKey: "2026-05" };
@@ -253,6 +253,35 @@ export const pyWin = (w: Win): Win => shiftWin(w, -12);
  * extend into a month that hasn't fully posted yet — that's the honesty-rule
  * case (§0.3) the inline badge exists for. */
 export const windowIncludesOpenMonths = (w: Win, lastComplete: string): boolean => w.endKey > lastComplete;
+
+/** The most recently FINISHED calendar month relative to `todayKey` — e.g.
+ * any day in August resolves to July. Distinct from `lastComplete` (the last
+ * month whose COSTS are materially posted, data-driven): the global period
+ * selector's month list is anchored to the CALENDAR, not to accounting
+ * close, so a just-finished month is listed and selectable the moment it
+ * ends even if its costs are still partial — the page carries the
+ * open-month/completeness badge, the selector itself never hides the month
+ * (Marcello, live-review addendum 2026-08-03). */
+export const lastFinishedCalendarMonth = (todayKey: string): string => shiftMonthKey(todayKey, -1);
+
+/** Calendar-quarter month window: Q1=Jan-Mar … Q4=Oct-Dec of year `y`
+ * ("YYYY"). Plain calendar quarters — distinct from `fiscalQuarters` (FY
+ * start June), which serves a different, unrelated screen. */
+const quarterWin = (y: string, q: number): Win => {
+  const startKey = `${y}-${String((q - 1) * 3 + 1).padStart(2, "0")}`;
+  return { startKey, endKey: shiftMonthKey(startKey, 2) };
+};
+
+/** The four calendar quarters (Q1..Q4) of the year containing `todayKey` —
+ * ALWAYS all four, regardless of whether the warehouse has data for them yet
+ * (Marcello, live-review addendum 2026-08-03: "indipendentemente dal fatto
+ * che sia alimentato o no" — a quarter with no data shows an honest empty
+ * state on the page; it is never hidden from the selector). Preset ids
+ * "Q:1".."Q:4", resolved by `resolveWindow`. */
+export const calendarQuarters = (todayKey: string): { id: WindowPresetId; label: string; win: Win }[] => {
+  const y = todayKey.slice(0, 4);
+  return [1, 2, 3, 4].map((q) => ({ id: `Q:${q}`, label: `Q${q}`, win: quarterWin(y, q) }));
+};
 
 /**
  * Resolve a window preset to an actual month range + display name.
@@ -284,6 +313,12 @@ export const resolveWindow = (preset: WindowPresetId, lastComplete: string, toda
   if (preset.startsWith("M:")) {
     const k = preset.slice(2);
     return { win: { startKey: k, endKey: k }, name: monthKeyLabel(k) };
+  }
+  if (preset.startsWith("Q:")) {
+    const q = Number(preset.slice(2));
+    const y = todayKey.slice(0, 4);
+    const win = quarterWin(y, q);
+    return { win, name: `Q${q} ${y} (${winLabel(win)})` };
   }
   return resolveWindow("TTM", lastComplete, todayKey);
 };

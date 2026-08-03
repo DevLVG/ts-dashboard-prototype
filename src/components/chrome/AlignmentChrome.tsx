@@ -2,13 +2,14 @@
 // warehouse-driven completeness banner (spec §1 global chrome + §1.5).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertTriangle, Scale, Archive, ChevronsRight, Radio, ShieldCheck, TrendingUp, Wallet, Layers, Repeat } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlignment, type ComparisonMode, type Scope } from "@/contexts/AlignmentContext";
 import {
   BASIS_LABELS, deriveCompleteness, useCompletenessMonthly, resolveWindow,
-  flagsFromCompletenessView, type Basis, type BasisRow,
+  flagsFromCompletenessView, calendarQuarters, lastFinishedCalendarMonth, winLabel,
+  type Basis, type BasisRow,
 } from "@/data/alignment";
 import { monthKeyLabel, shiftMonthKey } from "@/data/liveData";
 
@@ -125,38 +126,56 @@ export const ScopeToggle = () => {
 
 // ---------------------------------------------------------- window picker
 
-export const WindowPicker = ({ months }: { months?: string[] }) => {
+export const WindowPicker = ({ months: _legacyMonths }: { months?: string[] }) => {
   const { preset, setPreset, lastComplete, todayKey } = useAlignment();
-  // Marcello, live-review addendum 2026-08-03 — exact selector contents and
-  // order: (1) Month to date, (2) YTD, (3) TTM (last 12 CLOSED months), then
-  // (4) individual CLOSED months, newest first, down to January of the
-  // CURRENT (calendar) year — dynamic length: today Jun '26 → Jun..Jan '26
-  // (6 items); becomes Jul..Jan once July closes; resets to just the newest
-  // month every January. "As delivered", "Last closed month" (redundant —
-  // the month itself now leads the list) and "FY to date" are dropped from
-  // the picker entirely (still valid `resolveWindow` presets internally,
-  // just not offered here — see AlignmentContext's preset sanitizer for
-  // sessions with one of these persisted from before).
+  // Marcello (CEO), live-review — FINAL shape of the shared period selector
+  // (2026-08-03), one control for Economics AND Cash Flow. Exact contents,
+  // in this exact order, nothing else:
+  //   1. Month to date
+  //   2. Year to date
+  //   3. Last 12 months (TTM)
+  //   4. The MONTHS, rolling: from the most recently FINISHED calendar month
+  //      (today Aug '26 -> tops out at Jul '26; flips to Aug once September
+  //      starts) back to January of the current year -- dynamic length,
+  //      resets every January. Anchored to the CALENDAR
+  //      (`lastFinishedCalendarMonth`), NOT to accounting close
+  //      (`lastComplete`): an open month (costs still partial) is listed and
+  //      selectable regardless -- the page's existing open-month/
+  //      completeness badge carries that signal, the selector never hides
+  //      the month.
+  //   5. The QUARTERS -- Q1..Q4 of the current calendar year -- ALWAYS all
+  //      four, regardless of whether the warehouse has data for them yet
+  //      ("indipendentemente dal fatto che sia alimentato o no"); a quarter
+  //      with no data renders the page's honest empty state, it is never
+  //      hidden from the picker.
+  // Item labels stay CLEAN -- no "(Jul '25->Jun '26)" window annotations
+  // cluttering the visible text; the full window detail moves to a hover
+  // tooltip (native `title`) on each option instead. "As delivered", "Last
+  // closed month" and "FY to date" stay dropped from the picker (still valid
+  // internal `resolveWindow` presets -- see AlignmentContext's sanitizer for
+  // sessions with one persisted from before). The `months` prop is legacy
+  // and no longer used to filter -- the calendar is now the sole source of
+  // truth for which months/quarters are offered; kept only so existing call
+  // sites compile unchanged.
   const monthItems = useMemo(() => {
     const yearStart = `${todayKey.slice(0, 4)}-01`;
+    const top = lastFinishedCalendarMonth(todayKey);
     const range: string[] = [];
-    let k = lastComplete;
+    let k = top;
     while (k >= yearStart) {
       range.push(k);
       k = shiftMonthKey(k, -1);
     }
-    if (months && months.length > 0) {
-      const have = new Set(months);
-      return range.filter((m) => have.has(m));
-    }
     return range;
-  }, [months, lastComplete, todayKey]);
-  // Every label is derived from resolveWindow — the SAME function that
-  // resolves the active window — so menu text can never drift from what
-  // selecting it actually computes. Nothing here is hard-coded: MTD/YTD
-  // track `todayKey` (today's real calendar month); TTM tracks
-  // `lastComplete` (the last CLOSED month) and relabels on its own once a
-  // new month's costs post (§0.2).
+  }, [todayKey]);
+  const quarterItems = useMemo(() => calendarQuarters(todayKey), [todayKey]);
+  // Every window (and its tooltip detail) is derived from resolveWindow —
+  // the SAME function that resolves the active window — so the hover text
+  // can never drift from what selecting the item actually computes. Nothing
+  // here is hard-coded: MTD/YTD track `todayKey` (today's real calendar
+  // month); TTM tracks `lastComplete` (the last CLOSED month, for trend
+  // comparability) and relabels on its own once a new month's costs post
+  // (§0.2).
   const mtd = useMemo(() => resolveWindow("MTD", lastComplete, todayKey), [lastComplete, todayKey]);
   const ytd = useMemo(() => resolveWindow("YTD", lastComplete, todayKey), [lastComplete, todayKey]);
   const ttm = useMemo(() => resolveWindow("TTM", lastComplete, todayKey), [lastComplete, todayKey]);
@@ -165,22 +184,27 @@ export const WindowPicker = ({ months }: { months?: string[] }) => {
       <SelectTrigger className="w-[290px] bg-background font-medium">
         <SelectValue />
       </SelectTrigger>
-      <SelectContent className="max-h-[340px]">
-        <SelectItem value="MTD">
+      <SelectContent className="max-h-[420px]">
+        <SelectItem value="MTD" title={mtd.name}>
           <span className="inline-flex items-center gap-2">
             <Radio className="h-3 w-3 text-amber-400" />
-            {mtd.name}
+            Month to date
           </span>
         </SelectItem>
-        <SelectItem value="YTD">
+        <SelectItem value="YTD" title={ytd.name}>
           <span className="inline-flex items-center gap-2">
             <Radio className="h-3 w-3 text-amber-400" />
-            {ytd.name}
+            Year to date
           </span>
         </SelectItem>
-        <SelectItem value="TTM">{ttm.name}</SelectItem>
+        <SelectItem value="TTM" title={ttm.name}>Last 12 months</SelectItem>
+        <SelectSeparator />
         {monthItems.map((m) => (
           <SelectItem key={m} value={`M:${m}`}>{monthKeyLabel(m)}</SelectItem>
+        ))}
+        <SelectSeparator />
+        {quarterItems.map((q) => (
+          <SelectItem key={q.id} value={q.id} title={winLabel(q.win)}>{q.label}</SelectItem>
         ))}
       </SelectContent>
     </Select>

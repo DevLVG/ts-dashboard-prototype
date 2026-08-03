@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, Scale, Lock, Archive, ChevronsRight, Radio } from "lucide-react";
+import { AlertTriangle, Scale, Lock, Archive, ChevronsRight, Info, Radio } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlignment } from "@/contexts/AlignmentContext";
 import {
@@ -36,6 +36,14 @@ export const BasisBadge = ({ basis, className }: { basis: Basis; className?: str
 
 // ------------------------------------------------------------ basis toggle
 
+// Plain-language basis labels (Marcello: the old "Validated/Strict · pre-CN/
+// net-CN" jargon was opaque). The internal enum (VALIDATED/STRICT) and every
+// underlying figure are UNCHANGED — this relabels the two buttons only.
+const BASIS_PLAIN_LABEL: Record<Basis, string> = {
+  VALIDATED: "Before credit notes",
+  STRICT: "Net of credit notes",
+};
+
 export const BasisToggle = ({ disabled, disabledReason }: { disabled?: boolean; disabledReason?: string }) => {
   const { basis, setBasis } = useAlignment();
   const seg = (b: Basis, label: string) => (
@@ -59,10 +67,36 @@ export const BasisToggle = ({ disabled, disabledReason }: { disabled?: boolean; 
     </button>
   );
   const control = (
-    <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
-      {seg("VALIDATED", "Validated · pre-CN")}
-      {seg("STRICT", "Strict · net-CN")}
-      {disabled && <Lock className="h-3.5 w-3.5 text-muted-foreground mr-1" />}
+    <div className="inline-flex items-center gap-1.5">
+      <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
+        {seg("VALIDATED", BASIS_PLAIN_LABEL.VALIDATED)}
+        {seg("STRICT", BASIS_PLAIN_LABEL.STRICT)}
+        {disabled && <Lock className="h-3.5 w-3.5 text-muted-foreground mr-1" />}
+      </div>
+      {!disabled && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="What are credit notes?"
+              className="inline-flex items-center justify-center h-6 w-6 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            >
+              <Info className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-xs text-xs space-y-1">
+            <p>
+              A <strong>credit note</strong> reverses part of an invoice after it was booked — a refund,
+              a discount, or a billing correction. It reduces the revenue that invoice originally showed.
+            </p>
+            <p>
+              <strong>Before credit notes</strong> matches the delivered performance package (the numbers
+              everyone already validated). <strong>Net of credit notes</strong> is the stricter view where
+              those reversals are subtracted — same underlying data, more conservative revenue.
+            </p>
+          </TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
   if (!disabled) return control;

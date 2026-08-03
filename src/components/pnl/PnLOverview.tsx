@@ -2,8 +2,9 @@
 //
 // One P&L matrix, 5 comparison columns for the selected window:
 //   Actual · Budget · Δ Bud (SAR + %) · PY · Δ PY (SAR + %)
-// Structure toggle: View A "As booked (IFRS)" (statutory shape) · View B
-// "Management (validated)" (the package §2 shape — DB-1 gated).
+// Structure toggle: View A "Statutory (as booked)" (statutory shape) · View B
+// "Management · recurring split" (the package §2 shape — DB-1 gated). Plain-
+// language labels only — the internal view keys ("A" / "B") are unchanged.
 // Budget rules (register §E): Jun-26 = "n/a — no budget exists (by design)";
 // TTM aggregates disclose coverage; basis footnote on every comparison;
 // budget is EBITDA-deep (D&A/EBIT/Net = "—").
@@ -14,11 +15,12 @@ import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsListPill, TabsTriggerPill } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Info } from "lucide-react";
+import { Info, Star } from "lucide-react";
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
   ResponsiveContainer, ReferenceLine, Legend, Cell,
 } from "recharts";
+import { cn } from "@/lib/utils";
 import { useAlignment } from "@/contexts/AlignmentContext";
 import { BasisBadge, BasisToggle, WindowPicker, OpenMonthsBadge, CompletenessBanner, BudgetBasisFootnote, IncompleteMark, ScrollHint } from "@/components/chrome/AlignmentChrome";
 import {
@@ -266,27 +268,29 @@ export const PnLOverview = () => {
     ];
   }, [actual, prior, budget]);
 
+  // Budget recurring mapping rule (spec §1.1 View B): DRIFT budget line =
+  // COMP-IA (non-recurring by the validated perimeter); NRP lines = GA-NRP-*
+  // + MS-FFC. Shared by the View-B matrix AND the recurring headline cards so
+  // both read the identical figure.
+  const recBudget = useMemo(() => {
+    if (!budget || !budgetRows) return { budRecRevenue: null as number | null, budDrift: null as number | null };
+    let drift = 0;
+    for (const r of budgetRows) {
+      const k = r.period_month.slice(0, 7);
+      if (k < win.startKey || k > win.endKey) continue;
+      if (bu && r.bu_code !== bu) continue;
+      if (r.section === "Revenue" && r.moa_code.startsWith("COMP-IA")) drift += r.budget_amount_sar;
+    }
+    return { budRecRevenue: budget.revenue - drift, budDrift: drift };
+  }, [budget, budgetRows, win, bu]);
+
   // ------------------------------------------------------ View B rows
   // Recurring-tagged memo rows only — the ladder from as-booked to the
   // model's clean recurring EBITDA (spec §1.1 View B).
   const ladder = useMemo(() => adjustmentLadder(adjState, win, "recurring"), [adjState, win]);
   const viewBRows: MatrixRow[] | null = useMemo(() => {
     if (!recActual) return null;
-    const b = budget;
-    // Budget recurring mapping rule: DRIFT budget line = COMP-IA (non-recurring
-    // by the validated perimeter); NRP lines = GA-NRP-* + MS-FFC.
-    let budRecRevenue: number | null = null, budDrift: number | null = null;
-    if (b && budgetRows) {
-      let drift = 0;
-      for (const r of budgetRows) {
-        const k = r.period_month.slice(0, 7);
-        if (k < win.startKey || k > win.endKey) continue;
-        if (bu && r.bu_code !== bu) continue;
-        if (r.section === "Revenue" && r.moa_code.startsWith("COMP-IA")) drift += r.budget_amount_sar;
-      }
-      budDrift = drift;
-      budRecRevenue = b.revenue - drift;
-    }
+    const { budRecRevenue, budDrift } = recBudget;
     const out: MatrixRow[] = [
       { label: "Recurring revenue", actual: recActual.recRevenue, budget: budRecRevenue, py: recPrior?.recRevenue ?? null, emphasis: true },
       { label: "Non-recurring revenue (DRIFT)", actual: recActual.nonRecRevenue, budget: budDrift, py: recPrior?.nonRecRevenue ?? null, indent: true },
@@ -350,7 +354,7 @@ export const PnLOverview = () => {
     const displayRows = view === "A" ? viewARows : (viewBRows ?? []);
     const notes: string[] = [];
     const flagged = [...flaggedKeys].some((k) => k >= win.startKey && k <= win.endKey);
-    if (displayRows.length === 0) notes.push("Management (validated) view is pending the recurrence dimension — no rows to export yet.");
+    if (displayRows.length === 0) notes.push("Management · recurring split view is pending the recurrence dimension — no rows to export yet.");
     if (flagged) notes.push("Window includes months with partial or missing cost postings — see the completeness banner in the cockpit.");
     if (coverageNote) notes.push(coverageNote);
     if (budgetNa) notes.push(budgetNa);
@@ -363,7 +367,7 @@ export const PnLOverview = () => {
           statement: `Profit & Loss — ${windowName}`,
           period: `${windowName} · Actual ${winLabelText} vs PY ${pyLabelText}`,
           basis: BASIS_LABELS[basis],
-          structure: view === "A" ? "As booked (IFRS)" : "Management (validated)",
+          structure: view === "A" ? "Statutory (as booked)" : "Management · recurring split",
           businessUnit: selectedBU === "ALL" ? "All Company" : `${LIVE_BU_LABELS[selectedBU] ?? selectedBU} (${selectedBU})`,
           source: `Supabase · ${basisData?.sourceObject ?? "pnl_management"} + v_budget_monthly (Qoyod-certified warehouse)`,
           dataAsOf: `${monthKeyLabel(lastComplete)} close complete`,
@@ -399,8 +403,8 @@ export const PnLOverview = () => {
         </Select>
         <Tabs value={view} onValueChange={(v) => setView(v as "A" | "B")}>
           <TabsListPill>
-            <TabsTriggerPill value="A">As booked (IFRS)</TabsTriggerPill>
-            <TabsTriggerPill value="B">Management (validated)</TabsTriggerPill>
+            <TabsTriggerPill value="A">Statutory (as booked)</TabsTriggerPill>
+            <TabsTriggerPill value="B">Management · recurring split</TabsTriggerPill>
           </TabsListPill>
         </Tabs>
         {view === "B" && adjState?.available && (
@@ -415,25 +419,50 @@ export const PnLOverview = () => {
       <CompletenessBanner rows={rows} />
       {isLoading && <p className="text-sm text-muted-foreground">Loading live P&L fact rows…</p>}
 
-      {/* Headline strip */}
+      {/* Headline strip — View A: statutory headline metrics. View B: the
+          recurring split, Recurring EBITDA visually emphasized (spec §1.1:
+          "make sure the recurring lines are prominent in View B"). Falls
+          back to View A cards if the recurrence dimension isn't live yet. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {([
-          { label: "Revenue", a: actual.revenue, b: budget?.revenue ?? null, p: prior.revenue, invert: false },
-          { label: "Gross margin", a: actual.grossMargin, b: budget ? budget.revenue + budget.cogs : null, p: prior.grossMargin, invert: false },
-          { label: "EBITDA reported", a: actual.ebitdaReported, b: budget?.ebitdaAll ?? null, p: prior.ebitdaReported, invert: false },
-          { label: "Net result", a: actual.netResult, b: null, p: prior.netResult, invert: false },
-        ] as const).map((k) => {
+        {((view === "B" && recActual
+          ? [
+              { label: "Recurring revenue", a: recActual.recRevenue, b: recBudget.budRecRevenue, p: recPrior?.recRevenue ?? 0, emphasize: false },
+              { label: "Recurring gross profit", a: recActual.recGrossProfit, b: null, p: recPrior?.recGrossProfit ?? 0, emphasize: false },
+              { label: "Recurring EBITDA", a: recActual.recEbitda, b: null, p: recPrior?.recEbitda ?? 0, emphasize: true },
+              { label: "Reported EBITDA", a: recActual.reportedEbitda, b: budget?.ebitdaAll ?? null, p: recPrior?.reportedEbitda ?? 0, emphasize: false },
+            ]
+          : [
+              { label: "Revenue", a: actual.revenue, b: budget?.revenue ?? null, p: prior.revenue, emphasize: false },
+              { label: "Gross margin", a: actual.grossMargin, b: budget ? budget.revenue + budget.cogs : null, p: prior.grossMargin, emphasize: false },
+              { label: "EBITDA reported", a: actual.ebitdaReported, b: budget?.ebitdaAll ?? null, p: prior.ebitdaReported, emphasize: false },
+              { label: "Net result", a: actual.netResult, b: null, p: prior.netResult, emphasize: false },
+            ]
+        ) as { label: string; a: number; b: number | null; p: number; emphasize: boolean }[]).map((k) => {
           const dP = comparePct(k.a, k.p ?? 0);
           return (
-            <Card key={k.label} className="p-4 space-y-1.5">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+            <Card
+              key={k.label}
+              className={cn(
+                "p-4 space-y-1.5",
+                k.emphasize && "border-gold/60 ring-1 ring-gold/40 bg-gold/[0.04] shadow-md",
+              )}
+            >
+              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1">
                 {k.label} <BasisBadge basis={basis} className="ml-1" />
+                {k.emphasize && <Star className="h-3 w-3 text-gold fill-gold/40" aria-hidden />}
               </p>
-              <p className="text-2xl font-heading tracking-tight tabular-nums">{fmtSAR(k.a)}</p>
+              <p className={cn("text-2xl font-heading tracking-tight tabular-nums", k.emphasize && "text-gold")}>{fmtSAR(k.a)}</p>
               <div className="text-xs text-muted-foreground space-y-0.5">
                 <p>
                   vs Budget:{" "}
-                  {k.b === null ? "n/a" : (
+                  {k.b === null ? (
+                    budgetNa ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild><span className="cursor-help">—</span></TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs text-xs">{budgetNa}</TooltipContent>
+                      </Tooltip>
+                    ) : "—"
+                  ) : (
                     <span className={deltaColor(k.a - k.b)}>{fmtDeltaSAR(k.a - k.b)}</span>
                   )}
                 </p>

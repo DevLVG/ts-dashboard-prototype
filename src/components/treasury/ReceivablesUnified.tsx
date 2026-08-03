@@ -1,21 +1,21 @@
-// Receivables — unified module (Treasury workspace, sub-tab 2/4).
+// Receivables — unified module (Treasury desk).
 //
-// SCOPE: one list of the CURRENT receivables book, bucketed per the agreed
-// 5-bucket ladder (Treasury-Decision-Rules-DRAFT-2026-07-23 §A.1: Current /
-// 1-30 / 31-60 / 61-90 / 90+), with the §A.2 amount overlays (de-minimis
-// floor SAR 200, high-value fast-track invoice≥10k / customer≥15k) surfaced
-// as badges — every one of those thresholds is a DRAFT proposal, so every
-// overlay carries the "Proposed — to confirm" badge, never presented as
-// decided policy.
+// REBUILT 2026-08-03 (fix-8-treasury, Marcello's live-review mandate: "qui
+// serve per lavorare — molto operativo"). The CURRENT book now renders as
+// Marcello's spec items 3+4 — an EXPLODABLE aging table (AgingExplodable)
+// plus the customer-lines debtors table with the reminder ladder
+// (CustomerLinesTable), which is also where the old Reminders tab's job now
+// lives (Marcello: "one operational surface, not two" — the invoice-level
+// approve/edit/hold/snooze worklist, RemindersWorklist.tsx, is retired).
 //
-// The LEGACY 2020-2021 pool (~SAR 170,000-204,000 per the rules doc's
-// working estimate) is STRICTLY SEGREGATED into its own inner tab: frozen
-// (no reminder actions run against it), flagged only, with a per-debtor
-// worksheet for the future Marcello+Arwa recover-vs-write-off call (§A.6).
-// See src/data/treasuryLive.ts useLegacyReceivables() header for why the
-// worksheet shows historical billed total alongside — not instead of — what
-// Qoyod's own status claims is unpaid: the two numbers disagree and that
-// disagreement is exactly what needs reconciling before any decision.
+// The LEGACY 2020-2021 pool (~SAR 170,000-204,000 per the Treasury-
+// Decision-Rules-DRAFT-2026-07-23 §A.6 working estimate) stays STRICTLY
+// SEGREGATED into its own inner tab, UNCHANGED from the 2026-07-29 build:
+// frozen (no reminder actions run against it), flagged only, with a
+// per-debtor worksheet for the future Marcello+Arwa recover-vs-write-off
+// call. See src/data/treasuryLive.ts useLegacyReceivables() header for why
+// the worksheet shows historical billed total alongside — not instead of —
+// what Qoyod's own status claims is unpaid.
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -24,27 +24,14 @@ import { AlertTriangle, Archive, HardHat, Snowflake, Info } from "lucide-react";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import { ProposedBadge } from "@/components/dashboard/ProposedBadge";
 import { ScrollHint } from "@/components/chrome/AlignmentChrome";
-import {
-  useArAging, AGING_BUCKET_ORDER, type AgingBucket, type ArAgingRow,
-} from "@/data/statementsLive";
+import { AgingExplodable, type ExplodableRow } from "@/components/treasury/AgingExplodable";
+import { CustomerLinesTable } from "@/components/treasury/CustomerLinesTable";
+import { useArAging, type ArAgingRow } from "@/data/statementsLive";
 import { useLegacyReceivables, type LegacyReceivableRow } from "@/data/treasuryLive";
 import { fmtSAR } from "@/lib/format";
 
 const n = (v: number | null | undefined): number => v ?? 0;
 const fmt = (v: number) => fmtSAR(Math.abs(v) < 0.5 ? 0 : v);
-
-// §A.2 amount-overlay thresholds — ALL proposed/unconfirmed defaults.
-const DE_MINIMIS_FLOOR = 200;
-const HIGH_VALUE_INVOICE = 10_000;
-const HIGH_VALUE_CUSTOMER_TOTAL = 15_000;
-
-const BUCKET_META: Record<AgingBucket, { label: string; short: string; bar: string; text: string }> = {
-  current: { label: "Current (not due)", short: "Current", bar: "bg-muted-foreground/40", text: "text-muted-foreground" },
-  "1-30": { label: "1–30 days overdue", short: "1–30", bar: "bg-sky-400/70", text: "text-foreground" },
-  "31-60": { label: "31–60 days overdue", short: "31–60", bar: "bg-warning/70", text: "text-warning" },
-  "61-90": { label: "61–90 days overdue", short: "61–90", bar: "bg-amber-500/80", text: "text-warning" },
-  ">90": { label: "90+ days overdue", short: "90+", bar: "bg-destructive/70", text: "text-destructive" },
-};
 
 // -------------------------------------------------------------- current book
 
@@ -52,40 +39,17 @@ const CurrentBook = () => {
   const ar = useArAging();
   const rows = useMemo<ArAgingRow[]>(() => (ar.data?.available ? ar.data.rows : []), [ar.data]);
 
-  // Customer-total roll-up, needed for the "customer total ≥ 15,000" overlay.
-  const customerTotals = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of rows) {
-      const key = String(r.customer_id ?? r.customer_name ?? "—");
-      m.set(key, (m.get(key) ?? 0) + n(r.residual_amount));
-    }
-    return m;
-  }, [rows]);
-
-  const byBucket = useMemo(() => {
-    const m = new Map<AgingBucket, { count: number; amount: number }>();
-    for (const b of AGING_BUCKET_ORDER) m.set(b, { count: 0, amount: 0 });
-    let total = 0;
-    for (const r of rows) {
-      const agg = m.get(r.aging_bucket)!;
-      agg.count += 1;
-      agg.amount += n(r.residual_amount);
-      total += n(r.residual_amount);
-    }
-    return { buckets: AGING_BUCKET_ORDER.map((b) => ({ bucket: b, ...m.get(b)! })), total };
-  }, [rows]);
-
-  const deMinimisCount = useMemo(
-    () => rows.filter((r) => n(r.residual_amount) > 0.5 && n(r.residual_amount) < DE_MINIMIS_FLOOR).length,
-    [rows],
-  );
-  const highValueCount = useMemo(
+  const explodableRows = useMemo<ExplodableRow[]>(
     () =>
-      rows.filter((r) => {
-        const custKey = String(r.customer_id ?? r.customer_name ?? "—");
-        return n(r.residual_amount) >= HIGH_VALUE_INVOICE || (customerTotals.get(custKey) ?? 0) >= HIGH_VALUE_CUSTOMER_TOTAL;
-      }).length,
-    [rows, customerTotals],
+      rows.map((r) => ({
+        key: String(r.qoyod_invoice_id ?? r.invoice_number ?? Math.random()),
+        partyName: r.customer_name ?? "—",
+        ref: r.invoice_number ?? "—",
+        amount: n(r.residual_amount),
+        daysOverdue: Math.max(0, n(r.days_overdue)),
+        bucket: r.aging_bucket,
+      })),
+    [rows],
   );
 
   const ready = ar.data?.available === true;
@@ -114,83 +78,14 @@ const CurrentBook = () => {
 
   return (
     <div className="space-y-6">
-      {/* Bucket summary strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        {byBucket.buckets.map((b) => {
-          const meta = BUCKET_META[b.bucket];
-          return (
-            <Card key={b.bucket} className="p-4 border-border">
-              <div className={`text-xs uppercase tracking-wider ${meta.text}`}>{meta.short}</div>
-              <div className="mt-1 text-xl font-heading tabular-nums">{b.amount > 0.5 ? fmt(b.amount) : "—"}</div>
-              <div className="text-xs text-muted-foreground">{b.count} {b.count === 1 ? "invoice" : "invoices"}</div>
-            </Card>
-          );
-        })}
-      </div>
-
-      {/* Amount-overlay summary — §A.2, all proposed */}
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5">
-          {deMinimisCount} below de-minimis floor (SAR {DE_MINIMIS_FLOOR}) <ProposedBadge detail="§A.2 de-minimis floor." />
-        </span>
-        <span className="text-border">·</span>
-        <span className="inline-flex items-center gap-1.5">
-          {highValueCount} high-value fast-track (invoice ≥ SAR {HIGH_VALUE_INVOICE.toLocaleString()} or customer ≥ SAR {HIGH_VALUE_CUSTOMER_TOTAL.toLocaleString()})
-          <ProposedBadge detail="§A.2 high-value fast-track threshold." />
-        </span>
-      </div>
-
-      <Card className="p-6 shadow-sm animate-fade-in">
-        <div className="flex items-center gap-3 mb-1 flex-wrap">
-          <h3 className="text-xl font-heading tracking-wide">RECEIVABLES — CURRENT BOOK</h3>
-          <DataSourceBadge source="live" />
-          <span className="text-xs text-muted-foreground">Supabase · ar_aging_v2 · SAR</span>
-        </div>
-        <p className="text-sm text-muted-foreground mb-4">
-          Open book <span className="text-foreground font-medium tabular-nums">{fmt(byBucket.total)}</span> SAR
-          across <span className="text-foreground font-medium">{rows.length}</span> invoices. Legacy 2020-2021
-          items are excluded here — see the Legacy pool tab.
-        </p>
-        <ScrollHint>
-          <table className="w-full min-w-[760px] text-sm">
-            <thead>
-              <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
-                <th className="text-left py-1 pr-2 font-semibold">Customer</th>
-                <th className="text-left py-1 px-2 font-semibold">Invoice</th>
-                <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Residual SAR</th>
-                <th className="text-left py-1 px-2 font-semibold">Bucket</th>
-                <th className="text-right py-1 pl-2 font-semibold">Overlay flags</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...rows]
-                .sort((a, b) => n(b.residual_amount) - n(a.residual_amount))
-                .map((r) => {
-                  const meta = BUCKET_META[r.aging_bucket];
-                  const custKey = String(r.customer_id ?? r.customer_name ?? "—");
-                  const isDeMinimis = n(r.residual_amount) > 0.5 && n(r.residual_amount) < DE_MINIMIS_FLOOR;
-                  const isHighValue =
-                    n(r.residual_amount) >= HIGH_VALUE_INVOICE || (customerTotals.get(custKey) ?? 0) >= HIGH_VALUE_CUSTOMER_TOTAL;
-                  return (
-                    <tr key={String(r.qoyod_invoice_id ?? r.invoice_number)} className="border-b border-border/10">
-                      <td className="py-1.5 pr-2 max-w-[200px] truncate" title={r.customer_name ?? ""}>{r.customer_name ?? "—"}</td>
-                      <td className="py-1.5 px-2 text-muted-foreground whitespace-nowrap">{r.invoice_number ?? "—"}</td>
-                      <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">{fmt(n(r.residual_amount))}</td>
-                      <td className={`py-1.5 px-2 whitespace-nowrap ${meta.text}`}>
-                        {meta.short}{n(r.days_overdue) > 0 && <span className="text-[10px]"> · {r.days_overdue}d</span>}
-                      </td>
-                      <td className="py-1.5 pl-2 text-right whitespace-nowrap">
-                        {isDeMinimis && <span className="text-[10px] text-muted-foreground mr-1">de-minimis</span>}
-                        {isHighValue && <span className="text-[10px] text-amber-400">fast-track</span>}
-                        {!isDeMinimis && !isHighValue && <span className="text-muted-foreground">—</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
-        </ScrollHint>
-      </Card>
+      <AgingExplodable
+        title="RECEIVABLES AGING"
+        subtitle="Supabase · ar_aging_v2 · SAR"
+        rows={explodableRows}
+        partyLabel="Customer"
+        refLabel="Invoice"
+      />
+      <CustomerLinesTable rows={rows} />
     </div>
   );
 };
@@ -379,8 +274,8 @@ export const ReceivablesUnified = () => {
       {tab === "current" && (
         <p className="text-xs text-muted-foreground flex items-start gap-1.5">
           <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-400" />
-          Ageing buckets and amount overlays follow the Treasury Decision-Rules draft — badged items are
-          pending Marcello / Arwa sign-off. No reminders are sent from this list; see the Reminders tab.
+          Ageing buckets follow the Treasury Decision-Rules draft (§A.1, standard/low-risk); the reminder
+          ladder above is Marcello's own cadence (2026-08-03), which supersedes the draft's §A.3 timings.
         </p>
       )}
     </div>

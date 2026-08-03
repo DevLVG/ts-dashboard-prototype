@@ -172,7 +172,7 @@ export const useLegacyReceivables = () =>
 
 // ------------------------------------------------------------- Treasury action log (write target, migration 059)
 
-export type TreasuryActionDomain = "REMINDER" | "CONFIRMATION";
+export type TreasuryActionDomain = "REMINDER" | "CONFIRMATION" | "DUNNING_CUSTOMER" | "PAYABLE_ESCALATION";
 
 export interface TreasuryActionLogRow {
   id: string;
@@ -231,5 +231,144 @@ export const useRecordTreasuryAction = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["treasury_action_log"] });
     },
+  });
+};
+
+// ------------------------------------------------------------- Dunning config (migration 051, extended 069)
+
+/** Parametric reminder-engine config (migration 051) + the ladder cadence /
+ * send-governance columns added by migration 070. Single row (id=1). Every
+ * *_after_days / *_grace_days field is Marcello's own cadence (2026-08-03),
+ * NOT the Treasury-Decision-Rules draft's bucket-based cadence — see the
+ * component headers for which supersedes which. */
+export interface DunningConfigRow {
+  id: number;
+  cadence_stage1_days: number;
+  cadence_stage2_days: number;
+  cadence_stage3_days: number;
+  cadence_stage4_days: number;
+  old_after_days: number;
+  escalate_after_attempts: number;
+  escalation_person: string | null;
+  is_draft: boolean;
+  notes: string | null;
+  updated_by: string | null;
+  updated_at: string;
+  // migration 070 additions
+  dunning_send_enabled: boolean;
+  ceo_escalation_notify_enabled: boolean;
+  stage2_after_days: number;
+  stage3_after_days: number;
+  escalate_grace_days: number;
+  test_send_recipient: string;
+}
+
+export const useDunningConfig = () =>
+  useQuery({
+    queryKey: ["dunning_config"],
+    queryFn: async (): Promise<AvailableResult<DunningConfigRow>> => {
+      if (!supabase) throw new Error("Supabase is not configured");
+      const { data, error } = await supabase.from("dunning_config").select("*").eq("id", 1).maybeSingle();
+      if (error) {
+        if (isMissingObjectError(error)) return { available: false, rows: [] };
+        throw toFriendlyError(error);
+      }
+      return { available: true, rows: data ? [data as DunningConfigRow] : [] };
+    },
+    staleTime: 60 * 1000,
+    enabled: isSupabaseConfigured,
+    retry: false,
+    refetchInterval: (query) => (query.state.data && !query.state.data.available ? 60_000 : false),
+  });
+
+// ------------------------------------------------------------- Contact anagrafica (customers + vendors)
+//
+// Recipient resolution for the dunning ladder (Marcello, 2026-08-03: "resolve
+// each customer's/vendor's email... where missing show 'no email on file'").
+// Scoped with `.in(...)` to only the ids actually present in the open book —
+// there are ~1,700 qoyod_customers and ~190 vendor_master rows, no reason to
+// pull the whole registry for a ~30-row debtor/vendor list.
+
+export interface CustomerContactRow {
+  qoyod_customer_id: string;
+  email: string | null;
+  phone: string | null;
+}
+
+/** Resolution order: qoyod_customers.email first, falling back to the
+ * unified `customers` registry (migration 063, Shopify/HubSpot-fed) when the
+ * Qoyod mirror has none. Returns a Map keyed by customer_id (string) for O(1)
+ * lookup from the aggregated customer-lines table. */
+export const useCustomerContacts = (customerIds: (string | number)[]) => {
+  const ids = [...new Set(customerIds.map((id) => String(id)))].filter(Boolean);
+  return useQuery({
+    queryKey: ["customer_contacts", ids.slice().sort()],
+    queryFn: async (): Promise<Map<string, CustomerContactRow>> => {
+      const out = new Map<string, CustomerContactRow>();
+      if (!supabase || ids.length === 0) return out;
+      const { data: qc, error: qcErr } = await supabase
+        .from("qoyod_customers")
+        .select("qoyod_customer_id, email, phone")
+        .in("qoyod_customer_id", ids);
+      if (qcErr && !isMissingObjectError(qcErr)) throw toFriendlyError(qcErr);
+      for (const r of (qc ?? []) as CustomerContactRow[]) {
+        out.set(r.qoyod_customer_id, { qoyod_customer_id: r.qoyod_customer_id, email: r.email ?? null, phone: r.phone ?? null });
+      }
+      const stillMissing = ids.filter((id) => !out.get(id)?.email);
+      if (stillMissing.length > 0) {
+        const { data: cu, error: cuErr } = await supabase
+          .from("customers")
+          .select("qoyod_customer_id, email, phone")
+          .in("qoyod_customer_id", stillMissing);
+        if (cuErr && !isMissingObjectError(cuErr)) throw toFriendlyError(cuErr);
+        for (const r of (cu ?? []) as { qoyod_customer_id: string | null; email: string | null; phone: string | null }[]) {
+          if (!r.qoyod_customer_id) continue;
+          const existing = out.get(r.qoyod_customer_id);
+          if (r.email && !existing?.email) {
+            out.set(r.qoyod_customer_id, { qoyod_customer_id: r.qoyod_customer_id, email: r.email, phone: existing?.phone ?? r.phone ?? null });
+          }
+        }
+      }
+      return out;
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured && ids.length > 0,
+    retry: false,
+  });
+};
+
+export interface VendorContactRow {
+  qoyod_vendor_id: number;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+}
+
+/** Vendor contact anagrafica (migration 070's new vendor_master columns —
+ * 0/193 populated at creation, see missing-emails.md). Scoped to the vendor
+ * ids present in the open AP book. */
+export const useVendorContacts = (vendorIds: (number | string)[]) => {
+  const ids = [...new Set(vendorIds.map((id) => Number(id)))].filter((id) => Number.isFinite(id));
+  return useQuery({
+    queryKey: ["vendor_contacts", ids.slice().sort((a, b) => a - b)],
+    queryFn: async (): Promise<Map<number, VendorContactRow>> => {
+      const out = new Map<number, VendorContactRow>();
+      if (!supabase || ids.length === 0) return out;
+      const { data, error } = await supabase
+        .from("vendor_master")
+        .select("qoyod_vendor_id, contact_name, contact_email, contact_phone")
+        .in("qoyod_vendor_id", ids);
+      if (error) {
+        if (isMissingObjectError(error)) return out;
+        throw toFriendlyError(error);
+      }
+      for (const r of (data ?? []) as VendorContactRow[]) {
+        if (r.qoyod_vendor_id != null) out.set(r.qoyod_vendor_id, r);
+      }
+      return out;
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured && ids.length > 0,
+    retry: false,
   });
 };

@@ -6,7 +6,7 @@
 // one click away. Information hierarchy (spec frontend #5):
 //   headline KPIs (P1 recurring YoY · P2 total YoY · P3 recurring EBITDA)
 //   → the anti-confusion devices (P6 basis & window bridge · P5 CN anomaly)
-//   → composition (P4 per-BU growth · P7 fiscal quarters)
+//   → composition (P4 per-BU growth · P7 calendar quarters)
 //   → budget story (P8) → multi-year clean series (P9).
 // Every figure arrives via queries — the traceability gate (§5.D) forbids any
 // golden number as a literal in this bundle.
@@ -98,6 +98,10 @@ const DataStateFootnote = () => (
     Dec-24/Jan-25/Feb-25 postings; the delivered package quoted the 12-Jun frozen extraction.
   </p>
 );
+
+/** "YYYY-MM" -> "Jan".."Dec", for the calendar-quarter labels (P7). */
+const monthAbbr = (key: string): string =>
+  ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(key.slice(5, 7)) - 1];
 
 // ------------------------------------------------------------- waterfall
 
@@ -255,22 +259,29 @@ export const PerformanceAnalysis = () => {
       .sort((a, b) => b.cur - a.cur);
   }, [rows, rec, recLive, basis, win, py]);
 
-  // --------------------------------------------------- fiscal quarters (P7)
+  // --------------------------------------------------- calendar quarters (P7)
+  // Marcello, live-review addendum 2026-08-03: "the fiscal year concept is
+  // DROPPED — Trio runs on the calendar year." Quarters are now plain
+  // calendar quarters (Q1=Jan-Mar · Q2=Apr-Jun · Q3=Jul-Sep · Q4=Oct-Dec),
+  // PY = same calendar quarter, prior year (unchanged: pyWin always shifts
+  // −12 months). `fiscalQuarters` itself is a generic "4 quarters from a
+  // year-start key" splitter (data/alignment.ts) — reused as-is, just fed
+  // January instead of June.
   const quarters = useMemo(() => {
     if (!rows || !recLive) return null;
-    // FY containing the window end (fiscal year starts June). If fewer than
-    // 3 months of that FY have elapsed, show the PREVIOUS fiscal year — a
-    // quarter chart with one elapsed month answers nothing.
-    const [y, m] = win.endKey.split("-").map(Number);
-    let fyStart = m >= 6 ? `${y}-06` : `${y - 1}-06`;
+    // Calendar year containing the window end. If fewer than 3 months of
+    // that year have elapsed, show the PREVIOUS calendar year — a quarter
+    // chart with one elapsed month answers nothing.
+    const [y] = win.endKey.split("-").map(Number);
+    let calYearStart = `${y}-01`;
     const elapsed = (Number(win.endKey.slice(0, 4)) * 12 + Number(win.endKey.slice(5, 7))) -
-      (Number(fyStart.slice(0, 4)) * 12 + Number(fyStart.slice(5, 7))) + 1;
-    if (elapsed < 3) fyStart = shiftMonthKey(fyStart, -12);
-    return fiscalQuarters(fyStart).map((q) => {
+      (Number(calYearStart.slice(0, 4)) * 12 + Number(calYearStart.slice(5, 7))) + 1;
+    if (elapsed < 3) calYearStart = shiftMonthKey(calYearStart, -12);
+    return fiscalQuarters(calYearStart).map((q) => {
       const cur = aggregateRecurring(rows, basis, q.win, rec);
       const prior = aggregateRecurring(rows, basis, pyWin(q.win), rec);
       return {
-        label: `${q.label} (${winLabel(q.win)})`,
+        label: `${q.label} '${q.win.startKey.slice(2, 4)} (${monthAbbr(q.win.startKey)}-${monthAbbr(q.win.endKey)})`,
         short: q.label,
         cur: cur?.recRevenue ?? 0,
         py: prior?.recRevenue ?? 0,
@@ -713,12 +724,12 @@ export const PerformanceAnalysis = () => {
           )}
         </Card>
 
-        {/* P7 — fiscal quarters + YTD momentum */}
+        {/* P7 — calendar quarters + YTD momentum */}
         <Card className="p-5 space-y-3">
           <TileHeader
-            title="Recurring revenue — fiscal quarters vs PY"
+            title="Recurring revenue — quarters vs PY"
             basis={basis}
-            hint="Fiscal year starts June: Q1=Jun-Aug · Q2=Sep-Nov · Q3=Dec-Feb · Q4=Mar-May (package convention)."
+            hint="Calendar quarters: Q1=Jan-Mar · Q2=Apr-Jun · Q3=Jul-Sep · Q4=Oct-Dec. PY = same calendar quarter, prior year."
           />
           {!quarters ? <PendingRecurrence error={recError} /> : (
             <>
@@ -728,13 +739,17 @@ export const PerformanceAnalysis = () => {
                   <XAxis dataKey="short" stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} />
                   <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={50} />
                   <RTooltip
-                    content={({ active, payload, label }) => {
+                    content={({ active, payload }) => {
                       if (!active || !payload || payload.length === 0) return null;
+                      // Full label ("Q2 '26 (Apr-Jun)") lives on the datum itself, not
+                      // the axis tick (which stays a compact "Q1".."Q4" — all four
+                      // quarters share one calendar year, so the tick doesn't need it).
+                      const fullLabel = (payload[0]?.payload as { label?: string } | undefined)?.label;
                       const cur = payload.find((p) => p.dataKey === "cur")?.value as number | undefined;
                       const prior = payload.find((p) => p.dataKey === "py")?.value as number | undefined;
                       return (
                         <div className="chart-tooltip">
-                          <p className="chart-tooltip-title">{label}</p>
+                          <p className="chart-tooltip-title">{fullLabel}</p>
                           <p className="chart-tooltip-content chart-tooltip-actual">Actual: {cur !== undefined ? fmtSAR(cur) : "—"}</p>
                           <p className="chart-tooltip-content chart-tooltip-budget">PY: {prior !== undefined ? fmtSAR(prior) : "—"}</p>
                         </div>

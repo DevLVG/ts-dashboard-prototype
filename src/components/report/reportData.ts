@@ -1,30 +1,40 @@
-// REPORT DATA — Trio Sporting CFO cockpit "Report" section (fix-6-report,
-// live-review spec 2026-08-03).
+// REPORT DATA — Trio Sporting CFO cockpit "Report" section.
 //
-// Consolidates ONE snapshot (Economics + Cash Flow + Balance Sheet) for a
-// chosen reporting period — Monthly / Quarterly / Yearly, picked
-// independently of the global window-preset selector — into the shape both
-// the on-screen preview and the branded PDF consume.
+// Consolidates ONE snapshot (Economics + Cash Flow + Balance Sheet + revenue
+// family drivers) for a chosen reporting period into the shape both the
+// on-screen preview and the branded PDF consume.
+//
+// v2 (2026-08-03, second-round fix squad — Marcello's live-review PDF v2
+// mandate): the period is now sourced from the SAME global window preset
+// (`useAlignment().preset` — MTD / YTD / TTM / a calendar month / a calendar
+// quarter) and the SAME global comparison toggle (PY | Budget) that Economics
+// and Cash Flow already use — see `periodFromPreset` below and
+// `@/components/chrome/AlignmentChrome`'s `WindowPicker` / `ComparisonToggle`,
+// which ReportPage.tsx now mounts directly. This replaces the report's own
+// bespoke Monthly/Quarterly/Yearly period model (which offered a DIFFERENT
+// set of windows than the rest of the cockpit — the live-review complaint
+// "same filters as Economics").
 //
 // NOTHING NEW IS INVENTED: every figure is produced by the SAME pure
 // aggregation functions the live Economics/Cash Flow/Balance Sheet screens
 // already call (`aggregatePL` / `aggregateBudgetWindow` from data/alignment,
-// the balance-sheet PM/PY grouping from BalanceSheetLive, the cash-flow line
-// set from CashFlowStatementLive) — just windowed to the report's own
-// period instead of the global preset. The active Comparison toggle
-// (PY | Budget, global + persisted) decides the comparison column, per
-// Marcello's spec: "the P&L macro table for the window with the active
-// comparison".
+// the balance-sheet PM/PY grouping, the cash-flow line set) — just windowed
+// to the report's own period. The revenue-family driver breakdown
+// (`buildFamilyMoves`) reuses `aggregateBudgetWindow`'s existing `bu` filter
+// and the same `BasisRow.bu` dimension the Economics MoA-family drill (fix-18)
+// already trusts — no new aggregation semantics, just a different grouping of
+// rows already being fetched.
 import { useMemo } from "react";
 import { useAlignment, type ComparisonMode } from "@/contexts/AlignmentContext";
 import {
-  useBasisRows, aggregatePL, aggregateBudgetWindow, pyWin, factMonths,
-  lastCompleteFromBasis, type Win, type PLAgg, type BudgetAgg,
+  useBasisRows, aggregatePL, aggregateBudgetWindow, pyWin, resolveWindow, windowIncludesOpenMonths,
+  lastCompleteFromBasis, type Win, type PLAgg, type BudgetAgg, type BasisRow, type WindowPresetId,
 } from "@/data/alignment";
 import {
   useBudgetMonthly, monthKey, monthKeyLabel, shiftMonthKey, endOfMonthLabel,
   LAST_CLOSED_MONTH_FALLBACK,
 } from "@/data/liveData";
+import { buFamilyName } from "@/data/moaTree";
 import {
   useCashflowMonthly, useBalanceSheet, useBankBalances,
   type CashflowMonthRow, type BalanceSheetRow, type BalanceSheetResult, type BankBalanceRow,
@@ -32,120 +42,68 @@ import {
 
 // ------------------------------------------------------------ period model
 
-export type ReportKind = "monthly" | "quarterly" | "yearly";
+/** Coarse shape of the active window — drives the PDF cover title ("Monthly
+ * Report" / "Quarterly Report" / …) and compact labels. Derived from the
+ * SAME `WindowPresetId` the global selector produces — see
+ * `periodKindFromPreset`. */
+export type ReportPeriodKind = "MTD" | "YTD" | "TTM" | "MONTH" | "QUARTER";
 
 export interface ReportPeriodOption {
-  id: string; // "M:2026-06" | "Q:2026-2" | "Y:2026"
-  label: string; // "June 2026" | "Q2 2026 (Apr–Jun)" | "2026 YTD (Jan–Aug)"
-  shortLabel: string; // compact form for PDF footers/columns
+  id: string; // the raw WindowPresetId ("MTD" | "YTD" | "TTM" | "M:2026-06" | "Q:2")
+  label: string; // resolveWindow's own name — IDENTICAL text to what Economics/Cash Flow show for this preset
+  shortLabel: string; // compact form for PDF footers/filenames
   win: Win;
+  kind: ReportPeriodKind;
   /** Reaches past the last CLOSED month — honesty badge (spec §0.3 pattern). */
   isOpen: boolean;
 }
 
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-const fullMonthLabel = (key: string): string => {
-  const [y, m] = key.split("-").map(Number);
-  return `${MONTH_NAMES[m - 1]} ${y}`;
-};
-
-const shortMonthName = (key: string): string => monthKeyLabel(key).split(" ")[0];
-
 const quarterOfMonth = (key: string): number => Math.floor((Number(key.slice(5, 7)) - 1) / 3) + 1;
-const quarterStartKey = (year: string, q: number): string => `${year}-${String((q - 1) * 3 + 1).padStart(2, "0")}`;
-const quarterEndKey = (year: string, q: number): string => `${year}-${String((q - 1) * 3 + 3).padStart(2, "0")}`;
 
-/** Every CLOSED-first month present in the live rows, newest first, plus the
- * current open month if it has synced (revenue posts live). */
-export const buildMonthlyOptions = (months: string[], lastComplete: string): ReportPeriodOption[] =>
-  [...months].reverse().map((m) => ({
-    id: `M:${m}`,
-    label: fullMonthLabel(m),
-    shortLabel: monthKeyLabel(m),
-    win: { startKey: m, endKey: m },
-    isOpen: m > lastComplete,
-  }));
-
-/** Calendar quarters (Jan–Mar / Apr–Jun / Jul–Sep / Oct–Dec) — the fiscal
- * (June-start) quarter concept was dropped from the cockpit 2026-08-03
- * (see PerformanceAnalysis commit "calendar quarters — drop fiscal-year
- * concept"); Report follows the same convention. */
-export const buildQuarterlyOptions = (months: string[], lastComplete: string): ReportPeriodOption[] => {
-  const seen = new Set<string>();
-  const opts: ReportPeriodOption[] = [];
-  for (const m of months) {
-    const year = m.slice(0, 4);
-    const q = quarterOfMonth(m);
-    const qid = `${year}-${q}`;
-    if (seen.has(qid)) continue;
-    seen.add(qid);
-    const startKey = quarterStartKey(year, q);
-    const endKey = quarterEndKey(year, q);
-    opts.push({
-      id: `Q:${qid}`,
-      label: `Q${q} ${year} (${shortMonthName(startKey)}–${shortMonthName(endKey)})`,
-      shortLabel: `Q${q} '${year.slice(-2)}`,
-      win: { startKey, endKey },
-      isOpen: endKey > lastComplete,
-    });
-  }
-  return opts.reverse();
+export const periodKindFromPreset = (preset: WindowPresetId): ReportPeriodKind => {
+  if (preset === "MTD") return "MTD";
+  if (preset === "YTD") return "YTD";
+  if (preset === "TTM") return "TTM";
+  if (preset.startsWith("Q:")) return "QUARTER";
+  return "MONTH"; // "M:YYYY-MM" and any other fallback resolveWindow itself falls back to TTM for
 };
 
-/** Calendar years present in the data, newest first. The current calendar
- * year is a YTD window (Jan → today), carrying the open-period badge —
- * exactly Marcello's "Yearly (2026 YTD)" example. Past years are the full
- * Jan–Dec window. */
-export const buildYearlyOptions = (months: string[], lastComplete: string, todayKey: string): ReportPeriodOption[] => {
-  const years = [...new Set(months.map((m) => m.slice(0, 4)))];
-  const currentYear = todayKey.slice(0, 4);
-  return years.reverse().map((y) => {
-    const isCurrent = y === currentYear;
-    const endKey = isCurrent ? todayKey : `${y}-12`;
-    const startKey = `${y}-01`;
-    return {
-      id: `Y:${y}`,
-      label: isCurrent ? `${y} YTD (Jan–${shortMonthName(endKey)})` : `${y} (Full year)`,
-      shortLabel: isCurrent ? `${y} YTD` : y,
-      win: { startKey, endKey },
-      isOpen: endKey > lastComplete,
-    };
-  });
+const shortLabelFor = (kind: ReportPeriodKind, win: Win, todayKey: string): string => {
+  if (kind === "MONTH") return monthKeyLabel(win.startKey);
+  if (kind === "QUARTER") return `Q${quarterOfMonth(win.startKey)} '${win.startKey.slice(2, 4)}`;
+  if (kind === "MTD") return `MTD ${monthKeyLabel(todayKey)}`;
+  if (kind === "YTD") return `YTD ${win.endKey.slice(0, 4)}`;
+  return `TTM ${monthKeyLabel(win.endKey)}`;
 };
 
-export const buildPeriodOptions = (
-  kind: ReportKind,
-  months: string[],
+/** Build the report's period option straight from the GLOBAL window preset
+ * (same `resolveWindow` call Economics/Cash Flow make) — the single source
+ * of truth for "what window is active" everywhere in the cockpit. */
+export const periodFromPreset = (
+  preset: WindowPresetId,
   lastComplete: string,
   todayKey: string,
-): ReportPeriodOption[] => {
-  if (kind === "monthly") return buildMonthlyOptions(months, lastComplete);
-  if (kind === "quarterly") return buildQuarterlyOptions(months, lastComplete);
-  return buildYearlyOptions(months, lastComplete, todayKey);
+): ReportPeriodOption => {
+  const { win, name } = resolveWindow(preset, lastComplete, todayKey);
+  const kind = periodKindFromPreset(preset);
+  return {
+    id: preset,
+    label: name,
+    shortLabel: shortLabelFor(kind, win, todayKey),
+    win,
+    kind,
+    isOpen: windowIncludesOpenMonths(win, lastComplete),
+  };
 };
 
-/** Default selection: the newest CLOSED period where one exists (spec:
- * "from CLOSED months where possible"), else the newest available (open,
- * carrying the honesty badge). */
-export const defaultOptionFor = (options: ReportPeriodOption[]): ReportPeriodOption | null => {
-  if (options.length === 0) return null;
-  return options.find((o) => !o.isOpen) ?? options[0];
-};
-
-/** Month list + closed-month anchor, shared by every report-kind picker. */
-export const useReportMonths = () => {
-  const { todayKey } = useAlignment();
+/** The last CLOSED month, data-driven (costs materially posted) — shared by
+ * the report snapshot and by `periodFromPreset`'s honesty-badge check. Kept
+ * independent of `useAlignment().lastComplete` (which some other page's data
+ * host sets) since Report is a standalone route — it computes its own from
+ * the same basis rows it already fetches, exactly as before. */
+export const useReportLastComplete = (): string => {
   const { data: basisData } = useBasisRows();
-  const months = useMemo(() => factMonths(basisData?.rows), [basisData]);
-  const lastComplete = useMemo(
-    () => lastCompleteFromBasis(basisData?.rows) ?? LAST_CLOSED_MONTH_FALLBACK,
-    [basisData],
-  );
-  return { months, lastComplete, todayKey };
+  return useMemo(() => lastCompleteFromBasis(basisData?.rows) ?? LAST_CLOSED_MONTH_FALLBACK, [basisData]);
 };
 
 // -------------------------------------------------------------- macro rows
@@ -228,6 +186,67 @@ export const buildMacroRows = (
     emphasis: d.emphasis,
   }));
 
+// ------------------------------------------------------ revenue family movers
+
+/** Which BU ("family") moved the revenue line, and by how much — grounds the
+ * executive commentary's "top drivers of the revenue delta" clause in real
+ * per-family aggregates instead of an invented qualitative claim. Reuses
+ * `aggregateBudgetWindow`'s existing `bu` filter for the Budget comparison, and
+ * the same `BasisRow.bu` dimension the Economics MoA-family drill (fix-18)
+ * already groups by for PY. Sorted by |delta| descending; families with no
+ * comparison figure (Budget doesn't cover this BU/window) are dropped rather
+ * than shown as a fabricated zero move. */
+export interface FamilyMove {
+  bu: string;
+  name: string;
+  actual: number;
+  comparison: number;
+  delta: number;
+}
+
+const NOISE_FLOOR_SAR = 1; // guards against reporting rounding dust as a "mover"
+
+export const buildFamilyMoves = (
+  rows: BasisRow[] | undefined,
+  budgetRows: Parameters<typeof aggregateBudgetWindow>[0],
+  win: Win,
+  comparisonMode: ComparisonMode,
+): FamilyMove[] => {
+  const sumByBu = (w: Win): Map<string, number> => {
+    const out = new Map<string, number>();
+    for (const r of rows ?? []) {
+      if (r.section !== "Revenue") continue;
+      const k = monthKey(r.period_month);
+      if (k < w.startKey || k > w.endKey) continue;
+      const key = r.bu ?? "OTHER";
+      out.set(key, (out.get(key) ?? 0) + r.amount_sar);
+    }
+    return out;
+  };
+
+  const actualByBu = sumByBu(win);
+  const comparisonByBu = new Map<string, number | null>();
+  if (comparisonMode === "BUDGET") {
+    for (const bu of actualByBu.keys()) {
+      const b = aggregateBudgetWindow(budgetRows, win, bu);
+      comparisonByBu.set(bu, b ? b.revenue : null);
+    }
+  } else {
+    const pyByBu = sumByBu(pyWin(win));
+    for (const bu of actualByBu.keys()) comparisonByBu.set(bu, pyByBu.has(bu) ? pyByBu.get(bu)! : null);
+  }
+
+  const moves: FamilyMove[] = [];
+  for (const [bu, actual] of actualByBu.entries()) {
+    const comparison = comparisonByBu.get(bu) ?? null;
+    if (comparison === null) continue; // absent comparison ≠ a zero move — drop, don't fabricate
+    const delta = actual - comparison;
+    if (Math.abs(delta) < NOISE_FLOOR_SAR) continue;
+    moves.push({ bu, name: buFamilyName(bu), actual, comparison, delta });
+  }
+  return moves.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+};
+
 // ----------------------------------------------------------- cash flow
 
 export interface CashFlowSnapshotLine { label: string; value: number; emphasis?: boolean }
@@ -239,6 +258,12 @@ export interface CashFlowSnapshot {
   liveBankTotal: number | null;
   lastSynced: string | null;
   windowRows: CashflowMonthRow[];
+  /** True only when the warehouse has actually published cash-flow rows for
+   * at least one month in the window — "absent ≠ zero" (spec pattern used
+   * elsewhere in this cockpit): an empty window renders an honest empty
+   * state in the PDF rather than a table of zeroes that looks like a
+   * genuine (if flat) statement. */
+  hasData: boolean;
 }
 
 const CF_LINE_DEFS: { label: string; value: (r: CashflowMonthRow) => number | null; emphasis?: boolean }[] = [
@@ -278,7 +303,7 @@ export const buildCashFlowSnapshot = (
   const liveBankTotal = bankRows && bankRows.length > 0 ? bankRows.reduce((s, r) => s + r.current_balance, 0) : null;
   const lastSynced = bankRows && bankRows.length > 0 ? bankRows[0].last_synced.slice(0, 10) : null;
 
-  return { lines, openingBookCash, closingBookCash, liveBankTotal, lastSynced, windowRows };
+  return { lines, openingBookCash, closingBookCash, liveBankTotal, lastSynced, windowRows, hasData: windowRows.length > 0 };
 };
 
 // -------------------------------------------------------------- balance sheet
@@ -405,6 +430,7 @@ export interface ReportSnapshot {
   macroRows: MacroRow[];
   kpi: { revenue: MacroRow; grossMargin: MacroRow; ebitda: MacroRow };
   budgetNaNote: string | null;
+  familyMoves: FamilyMove[];
   cashFlow: CashFlowSnapshot;
   balanceSheet: BalanceSheetSnapshot;
   lastComplete: string;
@@ -432,6 +458,7 @@ export const useReportSnapshot = (period: ReportPeriodOption | null): ReportSnap
     const macroRows = buildMacroRows(actual, comparisonMode, priorYear, budgetRaw);
     const find = (k: string) => macroRows.find((r) => r.key === k)!;
     const budgetNaNote = comparisonMode === "BUDGET" && !budgetRaw ? `No approved budget exists for ${period.label}.` : null;
+    const familyMoves = buildFamilyMoves(rows, budgetRows, win, comparisonMode);
     const cashFlow = buildCashFlowSnapshot(cfRows, bsData?.rows, bankRows, win);
     const balanceSheet = buildBalanceSheetSnapshot(bsData, win);
 
@@ -444,6 +471,7 @@ export const useReportSnapshot = (period: ReportPeriodOption | null): ReportSnap
       macroRows,
       kpi: { revenue: find("Revenue"), grossMargin: find("GrossMargin"), ebitda: find("EBITDAReported") },
       budgetNaNote,
+      familyMoves,
       cashFlow,
       balanceSheet,
       lastComplete,

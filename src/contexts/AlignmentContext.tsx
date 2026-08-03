@@ -41,6 +41,14 @@ const BASIS_KEY = "clever.basis";
 const PRESET_KEY = "clever.windowPreset";
 const MEMO_KEY = "clever.memoLadder";
 
+// Presets dropped from the selector per Marcello's live-review addendum
+// 2026-08-03 ("As delivered" — "non serve a nulla in prospettiva"; "Last
+// closed month" — redundant, the month itself now leads the list; "FY to
+// date" — "non esiste"). A session with one of these still in localStorage
+// falls back to TTM (always present, always a valid Select value) instead of
+// resolving to an option the picker no longer shows.
+const DEPRECATED_PRESETS = new Set(["AS_DELIVERED", "LAST_MONTH", "FY"]);
+
 export const AlignmentProvider = ({ children }: { children: ReactNode }) => {
   const [basis, setBasisState] = useState<Basis>(() => {
     const v = typeof localStorage !== "undefined" ? localStorage.getItem(BASIS_KEY) : null;
@@ -48,7 +56,7 @@ export const AlignmentProvider = ({ children }: { children: ReactNode }) => {
   });
   const [preset, setPresetState] = useState<WindowPresetId>(() => {
     const v = typeof localStorage !== "undefined" ? localStorage.getItem(PRESET_KEY) : null;
-    return v || "TTM";
+    return v && !DEPRECATED_PRESETS.has(v) ? v : "TTM";
   });
   const [lastComplete, setLastComplete] = useState<string>("2026-06");
   const [memoOn, setMemoOnState] = useState<boolean>(() => {

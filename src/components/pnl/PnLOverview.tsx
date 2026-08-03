@@ -26,7 +26,8 @@ import { BasisBadge, BasisToggle, WindowPicker, OpenMonthsBadge, CompletenessBan
 import {
   useBasisRows, useRecurrence, useModelAdjustments, aggregatePL, aggregateRecurring,
   aggregateBudgetWindow, budgetMonthsSet, monthlySeries, deriveCompleteness,
-  adjustmentLadder, factMonths, winLabel, BASIS_LABELS, type PLAgg, type Win,
+  adjustmentLadder, factMonths, winLabel, BASIS_LABELS, computeMtdProration,
+  prorateAgg, prorateRecurring, prorateBudget, type PLAgg, type Win,
 } from "@/data/alignment";
 import { useBudgetMonthly, LIVE_BU_LABELS, monthKeyLabel, shiftMonthKey } from "@/data/liveData";
 import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtCompact, pctChange, comparePct } from "@/lib/format";
@@ -198,7 +199,7 @@ export const PnLOverview = () => {
   // memoOn = the FOUNDER GATE on the model-adjustment memo layer (item 3):
   // opt-in, default OFF on load, persisted; shared with the Performance P3
   // ladder so the memo layer is never half-visible across screens.
-  const { basis, win, py, winLabelText, pyLabelText, windowName, memoOn, setMemoOn, lastComplete } = useAlignment();
+  const { basis, win, py, winLabelText, pyLabelText, windowName, memoOn, setMemoOn, lastComplete, preset, todayKey } = useAlignment();
   const { data: basisData, isLoading, isError, error } = useBasisRows();
   const { data: rec } = useRecurrence();
   const { data: budgetRows } = useBudgetMonthly();
@@ -209,15 +210,26 @@ export const PnLOverview = () => {
   const rows = basisData?.rows;
   const bu = selectedBU === "ALL" ? undefined : selectedBU;
 
+  // MTD proration (Marcello, live-review addendum 2026-08-03): a partial
+  // current month can't be honestly compared to a FULL prior-year month or a
+  // FULL month's budget — Budget and PY are linearly pro-rated to elapsed
+  // calendar days (e.g. August budget × 3/31); Actual is never touched, it
+  // already only reflects what's posted so far. `null` outside the MTD
+  // preset — every other window compares full periods as before.
+  const mtdPro = useMemo(() => (preset === "MTD" ? computeMtdProration(todayKey) : null), [preset, todayKey]);
+
   const actual = useMemo(() => aggregatePL(rows, basis, win, bu), [rows, basis, win, bu]);
-  const prior = useMemo(() => aggregatePL(rows, basis, py, bu), [rows, basis, py, bu]);
-  const budget = useMemo(() => aggregateBudgetWindow(budgetRows, win, bu), [budgetRows, win, bu]);
+  const priorRaw = useMemo(() => aggregatePL(rows, basis, py, bu), [rows, basis, py, bu]);
+  const prior = useMemo(() => (mtdPro ? prorateAgg(priorRaw, mtdPro.fraction) : priorRaw), [priorRaw, mtdPro]);
+  const budgetRaw = useMemo(() => aggregateBudgetWindow(budgetRows, win, bu), [budgetRows, win, bu]);
+  const budget = useMemo(() => (mtdPro ? prorateBudget(budgetRaw, mtdPro.fraction) : budgetRaw), [budgetRaw, mtdPro]);
   const budMonths = useMemo(() => budgetMonthsSet(budgetRows), [budgetRows]);
   const completeness = useMemo(() => deriveCompleteness(rows), [rows]);
   const flaggedKeys = useMemo(() => new Set(completeness.filter((f) => f.kind !== "lev-unbooked").map((f) => f.key)), [completeness]);
 
   const recActual = useMemo(() => aggregateRecurring(rows, basis, win, rec, bu), [rows, basis, win, rec, bu]);
-  const recPrior = useMemo(() => aggregateRecurring(rows, basis, py, rec, bu), [rows, basis, py, rec, bu]);
+  const recPriorRaw = useMemo(() => aggregateRecurring(rows, basis, py, rec, bu), [rows, basis, py, rec, bu]);
+  const recPrior = useMemo(() => (mtdPro ? prorateRecurring(recPriorRaw, mtdPro.fraction) : recPriorRaw), [recPriorRaw, mtdPro]);
 
   const buList = useMemo(() => {
     const set = new Set<string>();
@@ -271,9 +283,11 @@ export const PnLOverview = () => {
   // Budget recurring mapping rule (spec §1.1 View B): DRIFT budget line =
   // COMP-IA (non-recurring by the validated perimeter); NRP lines = GA-NRP-*
   // + MS-FFC. Shared by the View-B matrix AND the recurring headline cards so
-  // both read the identical figure.
-  const recBudget = useMemo(() => {
-    if (!budget || !budgetRows) return { budRecRevenue: null as number | null, budDrift: null as number | null };
+  // both read the identical figure. Computed off the RAW (un-prorated)
+  // budget so the drift split stays proportionally correct, then the pair is
+  // pro-rated together for MTD — never mix a prorated total with a raw slice.
+  const recBudgetRaw = useMemo(() => {
+    if (!budgetRaw || !budgetRows) return { budRecRevenue: null as number | null, budDrift: null as number | null };
     let drift = 0;
     for (const r of budgetRows) {
       const k = r.period_month.slice(0, 7);
@@ -281,8 +295,15 @@ export const PnLOverview = () => {
       if (bu && r.bu_code !== bu) continue;
       if (r.section === "Revenue" && r.moa_code.startsWith("COMP-IA")) drift += r.budget_amount_sar;
     }
-    return { budRecRevenue: budget.revenue - drift, budDrift: drift };
-  }, [budget, budgetRows, win, bu]);
+    return { budRecRevenue: budgetRaw.revenue - drift, budDrift: drift };
+  }, [budgetRaw, budgetRows, win, bu]);
+  const recBudget = useMemo(() => {
+    if (!mtdPro) return recBudgetRaw;
+    return {
+      budRecRevenue: recBudgetRaw.budRecRevenue !== null ? recBudgetRaw.budRecRevenue * mtdPro.fraction : null,
+      budDrift: recBudgetRaw.budDrift !== null ? recBudgetRaw.budDrift * mtdPro.fraction : null,
+    };
+  }, [recBudgetRaw, mtdPro]);
 
   // ------------------------------------------------------ View B rows
   // Recurring-tagged memo rows only — the ladder from as-booked to the
@@ -359,13 +380,14 @@ export const PnLOverview = () => {
     if (coverageNote) notes.push(coverageNote);
     if (budgetNa) notes.push(budgetNa);
     notes.push("Signed storage: revenue positive, costs negative; a positive delta is favourable. PY = the same window shifted -12 months, same basis and perimeter.");
+    if (mtdPro) notes.push(`Month-to-date window: Budget and PY pro-rated linearly to elapsed calendar days (day ${mtdPro.elapsedDays} of ${mtdPro.daysInMonth}, ${Math.round(mtdPro.fraction * 100)}%). Actual is not pro-rated.`);
     exportStatementCsv(
       buildPnlExport({
         displayRows,
         meta: {
           entity: "Trio Sporting Club",
           statement: `Profit & Loss — ${windowName}`,
-          period: `${windowName} · Actual ${winLabelText} vs PY ${pyLabelText}`,
+          period: `${windowName} · Actual ${winLabelText} vs PY ${mtdPro ? "same days (pro-rated)" : pyLabelText}`,
           basis: BASIS_LABELS[basis],
           structure: view === "A" ? "Statutory (as booked)" : "Management · recurring split",
           businessUnit: selectedBU === "ALL" ? "All Company" : `${LIVE_BU_LABELS[selectedBU] ?? selectedBU} (${selectedBU})`,
@@ -454,7 +476,7 @@ export const PnLOverview = () => {
               <p className={cn("text-2xl font-heading tracking-tight tabular-nums", k.emphasize && "text-gold")}>{fmtSAR(k.a)}</p>
               <div className="text-xs text-muted-foreground space-y-0.5">
                 <p>
-                  vs Budget:{" "}
+                  vs Budget{mtdPro ? ` (pro-rated ${mtdPro.elapsedDays}/${mtdPro.daysInMonth})` : ""}:{" "}
                   {k.b === null ? (
                     budgetNa ? (
                       <Tooltip>
@@ -467,7 +489,7 @@ export const PnLOverview = () => {
                   )}
                 </p>
                 <p>
-                  vs PY ({pyLabelText}):{" "}
+                  vs PY ({mtdPro ? "same days" : pyLabelText}):{" "}
                   <span className={deltaColor(k.a - k.p)}>
                     {fmtDeltaSAR(k.a - k.p)}{dP !== null ? ` · ${fmtDeltaPct(dP)}` : ""}
                   </span>
@@ -477,6 +499,14 @@ export const PnLOverview = () => {
           );
         })}
       </div>
+      {mtdPro && (
+        <p className="text-xs text-muted-foreground -mt-2 flex items-start gap-1.5">
+          <Info className="h-3.5 w-3.5 mt-px shrink-0 text-amber-400/80" />
+          Month-to-date Budget and PY are pro-rated linearly to elapsed calendar days — day{" "}
+          {mtdPro.elapsedDays} of {mtdPro.daysInMonth} ({Math.round(mtdPro.fraction * 100)}%). Actual is
+          never pro-rated: an open month's actual already reflects only what's posted so far.
+        </p>
+      )}
 
       {/* Trend charts */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -520,11 +550,23 @@ export const PnLOverview = () => {
         </p>
 
         {view === "A" && (
-          <MatrixTable rows={viewARows} winText={winLabelText} pyText={pyLabelText} budgetHeader={`Budget${budget ? ` · ${budget.versions.length > 1 ? "blend" : budget.versions[0]}` : ""}`} budgetNa={budgetNa} />
+          <MatrixTable
+            rows={viewARows}
+            winText={winLabelText}
+            pyText={mtdPro ? "same days" : pyLabelText}
+            budgetHeader={`Budget${budget ? ` · ${budget.versions.length > 1 ? "blend" : budget.versions[0]}` : ""}${mtdPro ? ` (pro-rated ${mtdPro.elapsedDays}/${mtdPro.daysInMonth})` : ""}`}
+            budgetNa={budgetNa}
+          />
         )}
         {view === "B" && (
           viewBRows ? (
-            <MatrixTable rows={viewBRows} winText={winLabelText} pyText={pyLabelText} budgetHeader="Budget" budgetNa={budgetNa} />
+            <MatrixTable
+              rows={viewBRows}
+              winText={winLabelText}
+              pyText={mtdPro ? "same days" : pyLabelText}
+              budgetHeader={`Budget${mtdPro ? ` (pro-rated ${mtdPro.elapsedDays}/${mtdPro.daysInMonth})` : ""}`}
+              budgetNa={budgetNa}
+            />
           ) : (
             <div className="rounded-md border border-border bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
               Recurring view pending recurrence dimension — the validated recurring/DRIFT perimeter

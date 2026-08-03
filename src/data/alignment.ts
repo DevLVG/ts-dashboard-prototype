@@ -270,7 +270,7 @@ export const resolveWindow = (preset: WindowPresetId, lastComplete: string, toda
   if (preset === "AS_DELIVERED") return { win: AS_DELIVERED_WIN, name: "As delivered (TTM Jun-25→May-26)" };
   if (preset === "MTD") return { win: { startKey: todayKey, endKey: todayKey }, name: `Month to date (${monthKeyLabel(todayKey)})` };
   if (preset === "LAST_MONTH") return { win: { startKey: lastComplete, endKey: lastComplete }, name: `Last closed month (${monthKeyLabel(lastComplete)})` };
-  if (preset === "TTM") return { win: { startKey: shiftMonthKey(lastComplete, -11), endKey: lastComplete }, name: `TTM (${monthKeyLabel(shiftMonthKey(lastComplete, -11))}→${monthKeyLabel(lastComplete)})` };
+  if (preset === "TTM") return { win: { startKey: shiftMonthKey(lastComplete, -11), endKey: lastComplete }, name: `TTM (last 12 months) · ${monthKeyLabel(shiftMonthKey(lastComplete, -11))}→${monthKeyLabel(lastComplete)}` };
   if (preset === "YTD") {
     const y = todayKey.slice(0, 4);
     return { win: { startKey: `${y}-01`, endKey: todayKey }, name: `YTD (Jan→${monthKeyLabel(todayKey)})` };
@@ -637,6 +637,83 @@ export const aggregateBudgetWindow = (
   out.monthsInWindow = len;
   out.versions = [...versions].sort();
   return out;
+};
+
+// --------------------------------------------------- MTD linear proration
+
+/** Elapsed-day pro-ration for the "Month to date" window (Marcello, live
+ * review addendum 2026-08-03): comparing a partial current month against a
+ * FULL prior-year month or a FULL month's budget overstates both — August
+ * 1-3 actual vs the whole of August budget/PY is not a fair comparison. The
+ * warehouse has no daily-grain P&L fact (pnl_management/v_pnl_basis are
+ * month-grain), so a true day-bounded PY query isn't available without new
+ * data plumbing; the honest, available fix is linear pro-ration of the full
+ * month's Budget/PY by elapsed calendar days — e.g. August budget × 3/31 —
+ * clearly labeled as pro-rated everywhere it's shown (never presented as a
+ * literal day-level actual). Actual itself is NEVER prorated: an open
+ * month's actual already only contains transactions posted so far. */
+export interface MtdProration { elapsedDays: number; daysInMonth: number; fraction: number }
+
+export const computeMtdProration = (todayKey: string): MtdProration => {
+  const now = new Date();
+  const elapsedDays = now.getDate();
+  const [y, m] = todayKey.split("-").map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  return { elapsedDays, daysInMonth, fraction: daysInMonth > 0 ? elapsedDays / daysInMonth : 1 };
+};
+
+export const prorateAgg = (a: PLAgg, fraction: number): PLAgg => ({
+  ...a,
+  revenue: a.revenue * fraction,
+  creditNotes: a.creditNotes * fraction,
+  cogs: a.cogs * fraction,
+  grossMargin: a.grossMargin * fraction,
+  opexGa: a.opexGa * fraction,
+  opexMs: a.opexMs * fraction,
+  opexPeople: a.opexPeople * fraction,
+  opex: a.opex * fraction,
+  ebitda5: a.ebitda5 * fraction,
+  projectCosts: a.projectCosts * fraction,
+  ebitdaReported: a.ebitdaReported * fraction,
+  da: a.da * fraction,
+  ebit: a.ebit * fraction,
+  nonOp: a.nonOp * fraction,
+  netResult: a.netResult * fraction,
+});
+
+export const prorateRecurring = (a: RecurringAgg | null, fraction: number): RecurringAgg | null => {
+  if (!a) return null;
+  return {
+    ...a,
+    recRevenue: a.recRevenue * fraction,
+    nonRecRevenue: a.nonRecRevenue * fraction,
+    totalRevenue: a.totalRevenue * fraction,
+    recDirect: a.recDirect * fraction,
+    nonRecDirect: a.nonRecDirect * fraction,
+    recGrossProfit: a.recGrossProfit * fraction,
+    recOpex: a.recOpex * fraction,
+    nonRecOpex: a.nonRecOpex * fraction,
+    nonRecOpexLines: a.nonRecOpexLines.map((l) => ({ ...l, amount: l.amount * fraction })),
+    recEbitda: a.recEbitda * fraction,
+    reportedEbitda: a.reportedEbitda * fraction,
+  };
+};
+
+export const prorateBudget = (b: BudgetAgg | null, fraction: number): BudgetAgg | null => {
+  if (!b) return null;
+  return {
+    ...b,
+    revenue: b.revenue * fraction,
+    cogs: b.cogs * fraction,
+    opexGa: b.opexGa * fraction,
+    opexMs: b.opexMs * fraction,
+    opexPeople: b.opexPeople * fraction,
+    ebitdaAll: b.ebitdaAll * fraction,
+    nonRecLines: b.nonRecLines * fraction,
+    ebitdaPreNrp: b.ebitdaPreNrp * fraction,
+    // coveredMonths / monthsInWindow / versions describe DATA PROVENANCE, not
+    // magnitude — left unscaled so coverage notes stay accurate.
+  };
 };
 
 // -------------------------------------------------- completeness (DB-7 / §1.5)

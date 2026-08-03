@@ -114,45 +114,58 @@ export const BasisToggle = ({ disabled, disabledReason }: { disabled?: boolean; 
 
 export const WindowPicker = ({ months }: { months?: string[] }) => {
   const { preset, setPreset, lastComplete, todayKey } = useAlignment();
+  // Marcello, live-review addendum 2026-08-03 — exact selector contents and
+  // order: (1) Month to date, (2) YTD, (3) TTM (last 12 CLOSED months), then
+  // (4) individual CLOSED months, newest first, down to January of the
+  // CURRENT (calendar) year — dynamic length: today Jun '26 → Jun..Jan '26
+  // (6 items); becomes Jul..Jan once July closes; resets to just the newest
+  // month every January. "As delivered", "Last closed month" (redundant —
+  // the month itself now leads the list) and "FY to date" are dropped from
+  // the picker entirely (still valid `resolveWindow` presets internally,
+  // just not offered here — see AlignmentContext's preset sanitizer for
+  // sessions with one of these persisted from before).
   const monthItems = useMemo(() => {
-    const src = months && months.length > 0
-      ? [...months].filter((m) => m <= lastComplete).slice(-18).reverse()
-      : Array.from({ length: 14 }, (_, i) => shiftMonthKey(lastComplete, -i));
-    return src;
-  }, [months, lastComplete]);
-  // Every "to date" / trend label is derived from resolveWindow — the SAME
-  // function that resolves the active window — so the menu text can never
-  // drift from what selecting it actually computes. Nothing here is
-  // hard-coded: MTD/YTD/FY track `todayKey` (today's real calendar month);
-  // TTM/Last-closed-month track `lastComplete` (the last CLOSED month) and
-  // relabel on their own once a new month's costs post (§0.2).
+    const yearStart = `${todayKey.slice(0, 4)}-01`;
+    const range: string[] = [];
+    let k = lastComplete;
+    while (k >= yearStart) {
+      range.push(k);
+      k = shiftMonthKey(k, -1);
+    }
+    if (months && months.length > 0) {
+      const have = new Set(months);
+      return range.filter((m) => have.has(m));
+    }
+    return range;
+  }, [months, lastComplete, todayKey]);
+  // Every label is derived from resolveWindow — the SAME function that
+  // resolves the active window — so menu text can never drift from what
+  // selecting it actually computes. Nothing here is hard-coded: MTD/YTD
+  // track `todayKey` (today's real calendar month); TTM tracks
+  // `lastComplete` (the last CLOSED month) and relabels on its own once a
+  // new month's costs post (§0.2).
   const mtd = useMemo(() => resolveWindow("MTD", lastComplete, todayKey), [lastComplete, todayKey]);
-  const ttm = useMemo(() => resolveWindow("TTM", lastComplete, todayKey), [lastComplete, todayKey]);
-  const lastMonth = useMemo(() => resolveWindow("LAST_MONTH", lastComplete, todayKey), [lastComplete, todayKey]);
   const ytd = useMemo(() => resolveWindow("YTD", lastComplete, todayKey), [lastComplete, todayKey]);
-  const fy = useMemo(() => resolveWindow("FY", lastComplete, todayKey), [lastComplete, todayKey]);
+  const ttm = useMemo(() => resolveWindow("TTM", lastComplete, todayKey), [lastComplete, todayKey]);
   return (
     <Select value={preset} onValueChange={setPreset}>
       <SelectTrigger className="w-[290px] bg-background font-medium">
         <SelectValue />
       </SelectTrigger>
       <SelectContent className="max-h-[340px]">
-        <SelectItem value="AS_DELIVERED">
-          <span className="inline-flex items-center gap-2">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-gold" />
-            As delivered (TTM Jun-25→May-26)
-          </span>
-        </SelectItem>
         <SelectItem value="MTD">
           <span className="inline-flex items-center gap-2">
             <Radio className="h-3 w-3 text-amber-400" />
             {mtd.name}
           </span>
         </SelectItem>
+        <SelectItem value="YTD">
+          <span className="inline-flex items-center gap-2">
+            <Radio className="h-3 w-3 text-amber-400" />
+            {ytd.name}
+          </span>
+        </SelectItem>
         <SelectItem value="TTM">{ttm.name}</SelectItem>
-        <SelectItem value="LAST_MONTH">{lastMonth.name}</SelectItem>
-        <SelectItem value="YTD">{ytd.name}</SelectItem>
-        <SelectItem value="FY">{fy.name}</SelectItem>
         {monthItems.map((m) => (
           <SelectItem key={m} value={`M:${m}`}>{monthKeyLabel(m)}</SelectItem>
         ))}

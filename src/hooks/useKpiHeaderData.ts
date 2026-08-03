@@ -128,6 +128,20 @@ export const useKpiHeaderData = (): KpiHeaderData => {
     ? `No approved budget exists for ${winLabelText}.`
     : undefined;
 
+  // "EBITDA (reported)" is ALWAYS non-comparable to Budget, regardless of
+  // window — not a coverage gap like `budgetNaReason` above, a permanent
+  // structural one: budget_2026 has no Project-Costs section at all (its
+  // moa_code vocabulary only maps Leveredge/F&F non-recurring costs onto
+  // GA-NRP-*/MS-FFC lines INSIDE OpEx-GA/OpEx-MS), while the actual's
+  // "reported" figure sits below a real, separate Project-Costs section.
+  // Diffing the two isn't "over/under budget" — it double-counts a
+  // structural booking difference as if it were performance. Found live by
+  // fix-3 (TTM/Budget showed a nonsensical -282.4% here) — this null keeps
+  // the circle honestly agreeing with the Economics table's own "—" for the
+  // identical row instead of contradicting it.
+  const EBITDA_REPORTED_BUDGET_NA =
+    "Budget has no Project-Costs line — not comparable to the actual's post-project-costs EBITDA reported figure.";
+
   const comparisonLabel = comparisonMode === "BUDGET" ? "Budget" : "Previous Year";
 
   const metrics: KpiHeaderMetric[] = useMemo(() => {
@@ -135,15 +149,15 @@ export const useKpiHeaderData = (): KpiHeaderData => {
       return [
         buildMetric("revenue", "Revenue", recActual.recRevenue, recPrior?.recRevenue ?? 0, recBudgetRevenue, comparisonMode, budgetNaReason),
         buildMetric("grossMargin", "Gross Margin", recActual.recGrossProfit, recPrior?.recGrossProfit ?? 0, null, comparisonMode, "Budget COGS is not split by recurrence."),
-        buildMetric("ebitda", "EBITDA (reported)", recActual.reportedEbitda, recPrior?.reportedEbitda ?? 0, budget?.ebitdaAll ?? null, comparisonMode, budgetNaReason),
+        buildMetric("ebitda", "EBITDA (reported)", recActual.reportedEbitda, recPrior?.reportedEbitda ?? 0, null, comparisonMode, EBITDA_REPORTED_BUDGET_NA),
       ];
     }
     return [
       buildMetric("revenue", "Revenue", actual.revenue, prior.revenue, budget?.revenue ?? null, comparisonMode, budgetNaReason),
       buildMetric("grossMargin", "Gross Margin", actual.grossMargin, prior.grossMargin, budget ? budget.revenue + budget.cogs : null, comparisonMode, budgetNaReason),
-      buildMetric("ebitda", "EBITDA (reported)", actual.ebitdaReported, prior.ebitdaReported, budget?.ebitdaAll ?? null, comparisonMode, budgetNaReason),
+      buildMetric("ebitda", "EBITDA (reported)", actual.ebitdaReported, prior.ebitdaReported, null, comparisonMode, EBITDA_REPORTED_BUDGET_NA),
     ];
-  }, [scope, recActual, recPrior, recBudgetRevenue, actual, prior, budget, comparisonMode, budgetNaReason]);
+  }, [scope, recActual, recPrior, recBudgetRevenue, actual, prior, budget, comparisonMode, budgetNaReason, EBITDA_REPORTED_BUDGET_NA]);
 
   return {
     isLoading: rowsLoading || budgetLoading,

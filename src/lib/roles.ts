@@ -3,20 +3,31 @@
 // below. To add/change access, edit this file only.
 //
 // Role map — proposed, to confirm. The email lists and the page grants below
-// reflect Marcello's mandate as given (2026-07-29); Trio has not yet
-// provisioned the ceo@ / direction@ / admin@ mailboxes as live Supabase Auth
-// logins (verified live 2026-07-29: the only real accounts are
-// marcello.piccardo@leveredge.pro, arwa@triosporting.com, office.ceo@triosporting.com,
-// and a handful of personnel test accounts) — confirm the exact addresses
-// with Trio before go-live, then create/rename the Supabase Auth users to
-// match (or update ROLE_EMAILS to match what Trio actually provisions).
+// reflect Marcello's mandate as given (2026-07-29). ceo@ / direction@ / admin@
+// have since been provisioned as live Supabase Auth logins by Trio, alongside
+// the two original go-live accounts (marcello.piccardo@leveredge.pro,
+// arwa@triosporting.com — panel-golive-2026-07-21.md) and office.ceo@triosporting.com.
+//
+// BUG FIXED 2026-08-03 (fix-12-admin, found while wiring Confirmations role
+// access — flagged by the master-checklist row naming Arwa explicitly):
+// arwa@triosporting.com — Trio's actual Chairman/CEO (Finance-Flows.md,
+// CLEVER-R1-CFO-View-Requirements.md, CLEVER-Handbook-Storyline-2026-07-21.md
+// all identify her as CEO) and one of only two users on the cockpit since its
+// very first go-live — was NOT in ROLE_EMAILS at all. Verified live against
+// clever.leveredge.pro: she resolved to "unknown" (Guest, Economics-only,
+// landing on /performance) — locked out of Treasury/Confirmations/
+// Approvals/Cash Flow/Balance Sheet entirely. Added to the ceo role below.
+// office.ceo@triosporting.com is a real Supabase Auth account too, but with no
+// documentary evidence of who uses it or what role it should carry — left
+// unmapped (resolves to "unknown", the safe default) rather than guessed;
+// confirm with Trio before adding it anywhere.
 import { PageType } from "@/types/dashboard";
 
 export type Role = "leveredge" | "ceo" | "administration" | "unknown";
 
 const ROLE_EMAILS: Record<Exclude<Role, "unknown">, string[]> = {
   leveredge: ["marcello.piccardo@leveredge.pro", "analyst@leveredge.pro"],
-  ceo: ["ceo@triosporting.com"],
+  ceo: ["ceo@triosporting.com", "arwa@triosporting.com"],
   administration: ["direction@triosporting.com", "admin@triosporting.com"],
 };
 

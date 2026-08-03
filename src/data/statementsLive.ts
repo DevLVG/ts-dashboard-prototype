@@ -90,6 +90,8 @@ export interface BalanceSheetRow {
   sort_order: number;
   is_adjustment: boolean;
   note: string | null;
+  /** Stable key (e.g. "A_BANK") — join key against v_budget_balance_sheet_monthly. */
+  line_code: string;
 }
 
 export interface BalanceSheetResult {
@@ -122,7 +124,7 @@ export const fetchBalanceSheet = async (): Promise<BalanceSheetResult> => {
   for (let from = 0; ; from += BS_PAGE_SIZE) {
     const { data, error } = await supabase
       .from("v_balance_sheet_monthly")
-      .select("month,section,subsection,line_item,amount,sort_order,is_adjustment,note")
+      .select("month,section,subsection,line_item,amount,sort_order,is_adjustment,note,line_code")
       .order("month", { ascending: true })
       .order("sort_order", { ascending: true })
       .range(from, from + BS_PAGE_SIZE - 1);
@@ -299,6 +301,67 @@ export const useApAging = () =>
     queryKey: ["ap_aging_v2"],
     queryFn: () => fetchAging<ApAgingRow>("ap_aging_v2"),
     staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data && !query.state.data.available ? 60_000 : false,
+  });
+
+// ------------------------------------------------ balance-sheet budget (v2)
+//
+// v_budget_balance_sheet_monthly (migration 068, 2026-08-03): a SIMPLE
+// DERIVED balance-sheet budget — no client-approved line-by-line BS budget
+// exists (budget_2026 covers P&L + cash flow only). Computed by
+// scripts/build_budget_balance_sheet.py as a month-by-month roll-forward
+// from the 2026-06-30 actual balance sheet, driven by the already-approved
+// P&L+CF budget; ties assets=liabilities+equity by construction (verified
+// for all 18 months before load). Full method: Budget_Load_Report_2026-07-19
+// .md addendum 2026-08-03. Covers Jul-2026 -> Dec-2027 only — any other
+// month degrades to "no budget for this month", never a fabricated figure.
+// UI label is plain "Budget" everywhere (Marcello, 2026-08-03: no
+// "derived" badges/tags) — the method is documented, not surfaced per-figure.
+export interface BudgetBalanceSheetRow {
+  period_month: string; // "YYYY-MM-01"
+  line_code: string;
+  section: "Assets" | "Liabilities" | "Equity";
+  subsection: string;
+  line_item: string;
+  budget_amount_sar: number;
+  method_note: string;
+  version_id: string;
+}
+
+export interface BudgetBalanceSheetResult {
+  /** False while the view has not been created/populated yet. */
+  available: boolean;
+  rows: BudgetBalanceSheetRow[];
+}
+
+export const fetchBudgetBalanceSheet = async (): Promise<BudgetBalanceSheetResult> => {
+  if (!supabase) throw new Error("Supabase is not configured");
+  const all: BudgetBalanceSheetRow[] = [];
+  for (let from = 0; ; from += BS_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("v_budget_balance_sheet_monthly")
+      .select("period_month,line_code,section,subsection,line_item,budget_amount_sar,method_note,version_id")
+      .order("period_month", { ascending: true })
+      .range(from, from + BS_PAGE_SIZE - 1);
+    if (error) {
+      if (isMissingViewError(error)) return { available: false, rows: [] };
+      throw toFriendlyError(error);
+    }
+    const page = (data ?? []) as BudgetBalanceSheetRow[];
+    all.push(...page);
+    if (page.length < BS_PAGE_SIZE) break;
+  }
+  return { available: true, rows: all };
+};
+
+export const useBudgetBalanceSheet = () =>
+  useQuery({
+    queryKey: ["v_budget_balance_sheet_monthly"],
+    queryFn: fetchBudgetBalanceSheet,
+    staleTime: 10 * 60 * 1000,
     enabled: isSupabaseConfigured,
     retry: false,
     refetchInterval: (query) =>

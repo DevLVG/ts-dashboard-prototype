@@ -1,257 +1,315 @@
-// Balance-Sheet screen — LIVE from Supabase v_balance_sheet_monthly.
-// Alignment additions (spec §1.4, 2026-07-21):
-//   - comparison columns: PRIOR MONTH and PY (same month −12) — no budget
-//     column ("n/a — no balance-sheet budget exists", never zero);
-//   - as-at banner: "As booked at <month-end> — book cash not yet
-//     bank-confirmed";
-//   - basis toggle DISABLED with tooltip (the BS is post-CN by nature:
-//     credit notes are booked against AR);
-//   - AR footnote (credit notes back-loaded 2026-07-21) + known-issue flags
-//     stay visible via the DB `note` field.
+// BALANCE SHEET — Marcello's live-review rebuild, 2026-08-03.
+//
+// STOCK LOGIC, NOT A FLOW WINDOW (mandate extension, same session): the
+// balance sheet is point-in-time, so this page does NOT use the shared
+// window/PY|Budget chrome (AlignmentContext / components/chrome/
+// AlignmentChrome) — that model fits Economics/Cash Flow (flow statements
+// over a window), not a snapshot as of one date. Two page-owned controls
+// (BsControls.tsx) replace it here, styled to match the shared chrome's
+// visual language so the page still FEELS symmetric: an AS-OF selector
+// (Today + every closed month-end) and a 3-way Comparison choice (Same Date
+// Last Year [default] / Start of Year / Budget). "No other views" — nothing
+// else is offered (no scope toggle: recurring/non-recurring has no meaning
+// for a balance-sheet line).
+//
+// PAGE CONTENT — everything else is REMOVED (no tags, no journal-entry
+// annotations, no verbose captions, no extra panels):
+//   1. Global controls (this page's own, see above).
+//   2. Three circles: Fixed Assets · Equity · Liabilities, delta vs the
+//      active comparison, colored literally by delta sign (azure/red).
+//   3. Two tying statements — Assets; Liabilities & Equity — current
+//      structure (section -> subsection -> line item) but cleaned: ONE
+//      comparison column (value + %), rows explode by subsection (click),
+//      always tying (footer line, honest on any discrepancy).
+//   4. Only the as-of/completeness badge + the net-of-credit-notes footnote.
+//
+// BUDGET comparison (migration 068, scripts/build_budget_balance_sheet.py):
+// a SIMPLE DERIVED balance-sheet budget — no client-approved line-by-line BS
+// budget exists in budget_2026 (P&L + cash flow only). Covers Jul-2026 ->
+// Dec-2027 only; any other as-of month shows the honest "—" (never a
+// fabricated figure). UI label is plain "Budget" everywhere — no
+// "derived"/badge wording per figure (Marcello, follow-up 2026-08-03); the
+// one explanatory tooltip lives on the Comparison toggle itself
+// (BsControls.tsx). Full method: Budget_Load_Report_2026-07-19.md addendum.
 import { Fragment, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Info, Scale, HardHat } from "lucide-react";
-import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
-import { DataFreshnessNote } from "@/components/dashboard/DataFreshnessNote";
-import { ExportButton } from "@/components/dashboard/ExportButton";
-import { BasisToggle, ScrollHint } from "@/components/chrome/AlignmentChrome";
+import { ChevronRight, ChevronDown, Scale, HardHat, ShieldCheck, CalendarClock } from "lucide-react";
+import { ScrollHint } from "@/components/chrome/AlignmentChrome";
+import { monthKey, monthKeyLabel, shiftMonthKey, endOfMonthLabel } from "@/data/liveData";
 import {
-  monthKey,
-  monthKeyLabel,
-  shiftMonthKey,
-  LAST_CLOSED_MONTH_FALLBACK,
-  isIncompleteMonth,
-  endOfMonthLabel,
-  usePnlByBu,
-  deriveLastCompleteMonth,
-} from "@/data/liveData";
-import { useBalanceSheet, type BalanceSheetRow } from "@/data/statementsLive";
-import { fmtSAR } from "@/lib/format";
-import { buildBalanceSheetExport, exportStatementCsv } from "@/lib/exportStatements";
+  useBalanceSheet, useBudgetBalanceSheet, useBankBalances,
+  type BalanceSheetRow, type BudgetBalanceSheetRow,
+} from "@/data/statementsLive";
+import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtOrDash, pctChange } from "@/lib/format";
+import { AsOfSelect, BsComparisonToggle, BS_TODAY_VALUE, type BsComparisonMode } from "@/components/balancesheet/BsControls";
+import { BsKpiCircles, type BsKpiMetric } from "@/components/balancesheet/BsKpiCircles";
 
 // Negative-zero guard: rounding a tiny negative must render "0", never "(0)".
 const fmt = (v: number) => fmtSAR(Math.abs(v) < 0.5 ? 0 : v);
 
-interface LineTriple {
-  row: BalanceSheetRow;
-  pm: number | null; // prior month
-  py: number | null; // same month −12
+interface DisplayLine {
+  key: string;
+  label: string;
+  actual: number | null; // null = budget-only line, no actual-side equivalent
+  comparison: number | null;
 }
-
 interface SubsectionGroup {
   subsection: string;
-  lines: LineTriple[];
-  total: number;
-  pmTotal: number | null;
-  pyTotal: number | null;
+  lines: DisplayLine[];
+  actualTotal: number;
+  comparisonTotal: number | null;
 }
 
-const LineRow = ({ t }: { t: LineTriple }) => (
-  <tr className="border-b border-border/10">
-    <td className="py-1.5 pr-2 pl-4 text-muted-foreground">
-      <span className="inline-flex items-center gap-1.5">
-        {t.row.line_item}
-        {t.row.is_adjustment && (
-          <span
-            className="inline-flex items-center rounded bg-amber-500/15 border border-amber-500/30 px-1 py-px text-[9px] font-bold uppercase tracking-wider text-amber-400"
-            title="Management adjustment line"
-          >
-            ADJ
-          </span>
-        )}
-        {t.row.note && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Info className="h-3.5 w-3.5 text-gold/80 cursor-help shrink-0" />
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-xs text-xs">{t.row.note}</TooltipContent>
-          </Tooltip>
-        )}
-      </span>
-    </td>
-    <td className={`py-1.5 pl-2 text-right tabular-nums whitespace-nowrap ${t.row.amount < 0 ? "text-muted-foreground" : ""}`}>
-      {fmt(t.row.amount)}
-    </td>
-    <td className="py-1.5 pl-2 text-right tabular-nums whitespace-nowrap text-muted-foreground">
-      {t.pm === null ? "—" : fmt(t.pm)}
-    </td>
-    <td className="py-1.5 pl-2 text-right tabular-nums whitespace-nowrap text-muted-foreground">
-      {t.py === null ? "—" : fmt(t.py)}
-    </td>
-  </tr>
-);
+const compKey = (r: { section: string; subsection: string; line_item: string }) =>
+  `${r.section}|${r.subsection}|${r.line_item}`;
 
-const SectionCard = ({
-  title, groups, total, pmTotal, pyTotal, pmLabel, pyLabel, asAtLabel,
+const ExpandRow = ({
+  label, actual, comparison, expandable, expanded, onToggle, emphasis, indent = 0,
+}: {
+  label: string; actual: number | null; comparison: number | null;
+  expandable: boolean; expanded: boolean; onToggle?: () => void; emphasis?: boolean; indent?: number;
+}) => {
+  const deltaAbs = comparison === null || actual === null ? null : actual - comparison;
+  const deltaPct = comparison === null || actual === null ? null : pctChange(actual, comparison);
+  const good = deltaAbs === null ? null : deltaAbs >= 0;
+  return (
+    <tr className={`border-b border-border/10 ${emphasis ? "font-semibold border-t border-t-border" : ""}`}>
+      <td className="py-1.5 pr-3">
+        <span style={{ paddingLeft: `${indent * 18}px` }} className="inline-flex items-center gap-1.5">
+          {onToggle ? (
+            <button type="button" onClick={onToggle} className="inline-flex items-center justify-center h-4 w-4 rounded hover:bg-muted/60 text-muted-foreground shrink-0">
+              {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            </button>
+          ) : indent > 0 ? <span className="inline-block h-4 w-4 shrink-0" /> : null}
+          <span>{label}</span>
+        </span>
+      </td>
+      <td className="py-1.5 px-3 text-right tabular-nums whitespace-nowrap">{actual === null ? "—" : fmt(actual)}</td>
+      <td className="py-1.5 px-3 text-right tabular-nums whitespace-nowrap text-muted-foreground">{fmtOrDash(comparison)}</td>
+      <td className={`py-1.5 px-3 text-right tabular-nums whitespace-nowrap ${good === null ? "text-muted-foreground" : good ? "text-success" : "text-destructive"}`}>
+        {deltaAbs === null ? "—" : fmtDeltaSAR(deltaAbs)}
+      </td>
+      <td className={`py-1.5 pl-3 text-right tabular-nums whitespace-nowrap font-semibold ${good === null ? "text-muted-foreground" : good ? "text-success" : "text-destructive"}`}>
+        {deltaPct === null ? "—" : fmtDeltaPct(deltaPct)}
+      </td>
+    </tr>
+  );
+};
+
+const StatementCard = ({
+  title, groups, total, comparisonTotal, comparisonLabel, expanded, onToggle, extraGrandTotals,
 }: {
   title: string;
-  groups: SubsectionGroup[];
+  groups: { key: string; subsection: string; group: SubsectionGroup }[];
   total: number;
-  pmTotal: number | null;
-  pyTotal: number | null;
-  pmLabel: string;
-  pyLabel: string;
-  asAtLabel: string;
+  comparisonTotal: number | null;
+  comparisonLabel: string;
+  expanded: Set<string>;
+  onToggle: (key: string) => void;
+  /** Extra subtotal rows to render inline (e.g. "Total Liabilities" before Equity starts). */
+  extraGrandTotals?: { afterKey: string; label: string; actual: number; comparison: number | null }[];
 }) => (
   <div>
     <h4 className="font-heading text-lg tracking-wide mb-2 text-gold">{title.toUpperCase()}</h4>
-    {/* Item 7: the 4-column section table overflows a 390px viewport — it
-        scrolls inside its own container (with a visible hint); the page body
-        never scrolls horizontally. */}
     <ScrollHint>
-    <table className="w-full min-w-[430px] text-sm">
-      <thead>
-        <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
-          <th className="text-left py-1 pr-2 font-semibold">SAR</th>
-          <th className="text-right py-1 pl-2 font-semibold whitespace-nowrap">As at ({asAtLabel})</th>
-          <th className="text-right py-1 pl-2 font-semibold whitespace-nowrap">{pmLabel}</th>
-          <th className="text-right py-1 pl-2 font-semibold whitespace-nowrap">PY ({pyLabel})</th>
-        </tr>
-      </thead>
-      <tbody>
-        {groups.map((g) => (
-          <Fragment key={g.subsection}>
-            <tr className="border-b border-border/30">
-              <td className="pt-3 pb-1 pr-2 font-semibold text-xs uppercase tracking-wider text-muted-foreground" colSpan={4}>
-                {g.subsection}
-              </td>
-            </tr>
-            {g.lines.map((t, i) => (
-              <LineRow key={`${t.row.subsection}-${t.row.line_item}-${i}`} t={t} />
-            ))}
-            <tr className="border-b border-border/40">
-              <td className="py-1.5 pr-2 font-medium">Total {g.subsection}</td>
-              <td className="py-1.5 pl-2 text-right tabular-nums font-medium whitespace-nowrap">{fmt(g.total)}</td>
-              <td className="py-1.5 pl-2 text-right tabular-nums whitespace-nowrap text-muted-foreground">{g.pmTotal === null ? "—" : fmt(g.pmTotal)}</td>
-              <td className="py-1.5 pl-2 text-right tabular-nums whitespace-nowrap text-muted-foreground">{g.pyTotal === null ? "—" : fmt(g.pyTotal)}</td>
-            </tr>
-          </Fragment>
-        ))}
-        <tr className="border-t-2 border-t-border font-semibold text-base">
-          <td className="py-2.5 pr-2">Total {title}</td>
-          <td className="py-2.5 pl-2 text-right tabular-nums whitespace-nowrap">{fmt(total)}</td>
-          <td className="py-2.5 pl-2 text-right tabular-nums whitespace-nowrap text-muted-foreground">{pmTotal === null ? "—" : fmt(pmTotal)}</td>
-          <td className="py-2.5 pl-2 text-right tabular-nums whitespace-nowrap text-muted-foreground">{pyTotal === null ? "—" : fmt(pyTotal)}</td>
-        </tr>
-      </tbody>
-    </table>
+      <table className="w-full min-w-[480px] text-sm">
+        <thead>
+          <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
+            <th className="text-left py-1 pr-2 font-semibold">SAR</th>
+            <th className="text-right py-1 px-3 font-semibold whitespace-nowrap">As of</th>
+            <th className="text-right py-1 px-3 font-semibold whitespace-nowrap">{comparisonLabel}</th>
+            <th className="text-right py-1 px-3 font-semibold whitespace-nowrap">Δ value</th>
+            <th className="text-right py-1 pl-3 font-semibold whitespace-nowrap">Δ %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map(({ key, subsection, group }) => (
+            <Fragment key={key}>
+              <ExpandRow
+                label={subsection}
+                actual={group.actualTotal}
+                comparison={group.comparisonTotal}
+                expandable
+                expanded={expanded.has(key)}
+                onToggle={() => onToggle(key)}
+              />
+              {expanded.has(key) && group.lines.map((l) => (
+                <ExpandRow key={l.key} label={l.label} actual={l.actual} comparison={l.comparison} expandable={false} expanded={false} indent={1} />
+              ))}
+              {extraGrandTotals?.filter((g) => g.afterKey === key).map((g) => (
+                <ExpandRow key={g.label} label={g.label} actual={g.actual} comparison={g.comparison} expandable={false} expanded={false} emphasis />
+              ))}
+            </Fragment>
+          ))}
+          <tr className="border-t-2 border-t-border font-semibold text-base">
+            <td className="py-2.5 pr-3">Total {title}</td>
+            <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">{fmt(total)}</td>
+            <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap text-muted-foreground">{fmtOrDash(comparisonTotal)}</td>
+            <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap" colSpan={2} />
+          </tr>
+        </tbody>
+      </table>
     </ScrollHint>
   </div>
 );
 
+const startOfYearKey = (asOfKey: string): string => `${Number(asOfKey.slice(0, 4)) - 1}-12`;
+
 export const BalanceSheetLive = () => {
   const { data, isLoading, isError, error } = useBalanceSheet();
-  const { data: pnlRows } = usePnlByBu();
-  const lastClosed = deriveLastCompleteMonth(pnlRows) ?? LAST_CLOSED_MONTH_FALLBACK;
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const { data: budgetData } = useBudgetBalanceSheet();
+  const { data: bankRows } = useBankBalances();
+
+  const [asOfSel, setAsOfSel] = useState<string>(BS_TODAY_VALUE);
+  const [comparisonMode, setComparisonMode] = useState<BsComparisonMode>("PY_DATE");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (key: string) => setExpanded((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
 
   const months = useMemo(() => {
     if (!data?.available) return [] as string[];
     return [...new Set(data.rows.map((r) => monthKey(r.month)))].sort();
   }, [data]);
+  const lastClosedKey = months.length > 0 ? months[months.length - 1] : null;
 
-  const defaultMonth = useMemo(() => {
-    if (months.length === 0) return null;
-    const closed = months.filter((m) => m <= lastClosed);
-    return closed.length > 0 ? closed[closed.length - 1] : months[months.length - 1];
-  }, [months, lastClosed]);
+  const resolvedAsOfKey = asOfSel === BS_TODAY_VALUE ? lastClosedKey : asOfSel;
+  const isToday = asOfSel === BS_TODAY_VALUE;
 
-  const activeMonth = selectedMonth && months.includes(selectedMonth) ? selectedMonth : defaultMonth;
-  const pmKey = activeMonth ? shiftMonthKey(activeMonth, -1) : null;
-  const pyKey = activeMonth ? shiftMonthKey(activeMonth, -12) : null;
+  const pyDateKey = resolvedAsOfKey ? shiftMonthKey(resolvedAsOfKey, -12) : null;
+  const startOfYearKeyResolved = resolvedAsOfKey ? startOfYearKey(resolvedAsOfKey) : null;
+  const comparisonMonthKey = comparisonMode === "PY_DATE" ? pyDateKey : comparisonMode === "START_OF_YEAR" ? startOfYearKeyResolved : null;
 
   const rowsFor = (key: string | null): BalanceSheetRow[] =>
     !data?.available || !key ? [] : data.rows.filter((r) => monthKey(r.month) === key);
 
-  const monthRows = useMemo(() => rowsFor(activeMonth).sort((a, b) => a.sort_order - b.sort_order), [data, activeMonth]);
-  const pmRows = useMemo(() => rowsFor(pmKey), [data, pmKey]);
-  const pyRows = useMemo(() => rowsFor(pyKey), [data, pyKey]);
+  const monthRows = useMemo(
+    () => rowsFor(resolvedAsOfKey).slice().sort((a, b) => a.sort_order - b.sort_order),
+    [data, resolvedAsOfKey],
+  );
+  const comparisonActualRows = useMemo(() => rowsFor(comparisonMonthKey), [data, comparisonMonthKey]);
 
-  const compMap = (rows: BalanceSheetRow[]): Map<string, number> => {
+  const comparisonActualMap = useMemo(() => {
+    if (comparisonMode === "BUDGET" || comparisonActualRows.length === 0) return null;
     const m = new Map<string, number>();
-    for (const r of rows) m.set(`${r.section}|${r.subsection}|${r.line_item}`, (m.get(`${r.section}|${r.subsection}|${r.line_item}`) ?? 0) + r.amount);
+    for (const r of comparisonActualRows) m.set(compKey(r), (m.get(compKey(r)) ?? 0) + r.amount);
     return m;
-  };
-  const pmMap = useMemo(() => compMap(pmRows), [pmRows]);
-  const pyMap = useMemo(() => compMap(pyRows), [pyRows]);
-  const pmAvailable = pmRows.length > 0;
-  const pyAvailable = pyRows.length > 0;
+  }, [comparisonActualRows, comparisonMode]);
 
-  const groupSection = (section: BalanceSheetRow["section"]): { groups: SubsectionGroup[]; total: number; pmTotal: number | null; pyTotal: number | null } => {
-    const rows = monthRows.filter((r) => r.section === section);
-    const map = new Map<string, LineTriple[]>();
-    for (const r of rows) {
-      const key = `${r.section}|${r.subsection}|${r.line_item}`;
-      const list = map.get(r.subsection) ?? [];
-      list.push({
-        row: r,
-        pm: pmAvailable ? pmMap.get(key) ?? 0 : null,
-        py: pyAvailable ? pyMap.get(key) ?? 0 : null,
-      });
-      map.set(r.subsection, list);
+  const budgetRowsForMonth = useMemo((): BudgetBalanceSheetRow[] => {
+    if (comparisonMode !== "BUDGET" || !budgetData?.available || !resolvedAsOfKey) return [];
+    return budgetData.rows.filter((r) => monthKey(r.period_month) === resolvedAsOfKey);
+  }, [budgetData, comparisonMode, resolvedAsOfKey]);
+
+  const budgetMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of budgetRowsForMonth) m.set(r.line_code, (m.get(r.line_code) ?? 0) + r.budget_amount_sar);
+    return m;
+  }, [budgetRowsForMonth]);
+
+  const isBudgetMode = comparisonMode === "BUDGET";
+  const budgetUnavailableReason = resolvedAsOfKey
+    ? `No Budget available for ${monthKeyLabel(resolvedAsOfKey)} (the derived balance-sheet budget covers Jul '26 → Dec '27 only).`
+    : undefined;
+  const budgetHasData = isBudgetMode && budgetRowsForMonth.length > 0;
+
+  // A single lookup used by both the circles and the tables: comparison
+  // value for one actual row, whichever comparison mode is active (Budget
+  // matches by line_code — the stable key shared with v_budget_balance_
+  // sheet_monthly; Same Date Last Year / Start of Year match by the
+  // section|subsection|line_item triple against the comparison month's
+  // actual rows).
+  const comparisonFor = (r: BalanceSheetRow): number | null => {
+    if (isBudgetMode) {
+      if (!budgetHasData) return null;
+      return budgetMap.get(r.line_code) ?? null;
     }
-    const groups: SubsectionGroup[] = [...map.entries()].map(([subsection, lines]) => ({
+    return comparisonActualMap ? comparisonActualMap.get(compKey(r)) ?? null : null;
+  };
+
+  /** Groups a section's rows by subsection (Map preserves first-seen order = sort_order order). */
+  const groupSection = (section: "Assets" | "Liabilities" | "Equity") => {
+    const bySubsection = new Map<string, DisplayLine[]>();
+    for (const r of monthRows) {
+      if (r.section !== section) continue;
+      const list = bySubsection.get(r.subsection) ?? [];
+      list.push({ key: r.line_code, label: r.line_item, actual: r.amount, comparison: comparisonFor(r) });
+      bySubsection.set(r.subsection, list);
+    }
+    const groups: SubsectionGroup[] = [...bySubsection.entries()].map(([subsection, lines]) => ({
       subsection,
       lines,
-      total: lines.reduce((s, t) => s + t.row.amount, 0),
-      pmTotal: pmAvailable ? lines.reduce((s, t) => s + (t.pm ?? 0), 0) : null,
-      pyTotal: pyAvailable ? lines.reduce((s, t) => s + (t.py ?? 0), 0) : null,
+      actualTotal: lines.reduce((s, l) => s + (l.actual ?? 0), 0),
+      comparisonTotal: lines.some((l) => l.comparison !== null) ? lines.reduce((s, l) => s + (l.comparison ?? 0), 0) : null,
     }));
-    return {
-      groups,
-      total: groups.reduce((s, g) => s + g.total, 0),
-      pmTotal: pmAvailable ? groups.reduce((s, g) => s + (g.pmTotal ?? 0), 0) : null,
-      pyTotal: pyAvailable ? groups.reduce((s, g) => s + (g.pyTotal ?? 0), 0) : null,
-    };
+    const actualTotal = groups.reduce((s, g) => s + g.actualTotal, 0);
+    const comparisonTotal = groups.some((g) => g.comparisonTotal !== null) ? groups.reduce((s, g) => s + (g.comparisonTotal ?? 0), 0) : null;
+    return { groups, actualTotal, comparisonTotal };
   };
 
   const assets = groupSection("Assets");
   const liabilities = groupSection("Liabilities");
   const equity = groupSection("Equity");
 
-  const checkDelta = assets.total - (liabilities.total + equity.total);
+  // Budget-only "Financing" line (L_FIN_DERIVED) has no actual-side
+  // equivalent — surfaced as its own group so Budget-mode subsection totals
+  // still add up to the Budget-mode grand total (never hidden inside an
+  // unlabeled number).
+  const financingBudgetOnly = isBudgetMode && budgetHasData ? budgetMap.get("L_FIN_DERIVED") ?? null : null;
+  const liabilitiesGroups = financingBudgetOnly !== null
+    ? [...liabilities.groups, { subsection: "Financing", lines: [{ key: "financing-budget-only", label: "Net financing (budget)", actual: null, comparison: financingBudgetOnly }], actualTotal: 0, comparisonTotal: financingBudgetOnly }]
+    : liabilities.groups;
+  const liabilitiesTotalActual = liabilities.actualTotal;
+  const liabilitiesTotalComparison = financingBudgetOnly !== null
+    ? (liabilities.comparisonTotal ?? 0) + financingBudgetOnly
+    : liabilities.comparisonTotal;
+
+  const totalLE_actual = liabilitiesTotalActual + equity.actualTotal;
+  const totalLE_comparison = liabilitiesTotalComparison !== null || equity.comparisonTotal !== null
+    ? (liabilitiesTotalComparison ?? 0) + (equity.comparisonTotal ?? 0)
+    : null;
+
+  // Tie-check — ALWAYS on the actual as-of statement, independent of the
+  // comparison mode (§3: "they must always tie").
+  const checkDelta = assets.actualTotal - totalLE_actual;
   const isBalanced = Math.abs(checkDelta) < 1;
 
-  // Audit-ready export: every line + subsection/section totals + PM/PY
-  // comparatives + the balance check, stamped with as-at, source and asOf.
-  const handleExport = () => {
-    if (!activeMonth) return;
-    exportStatementCsv(
-      buildBalanceSheetExport({
-        sections: [
-          { title: "Assets", data: assets },
-          { title: "Liabilities", data: liabilities },
-          { title: "Equity", data: equity },
-        ],
-        asAtLabel: endOfMonthLabel(activeMonth),
-        pmLabel: pmKey ? monthKeyLabel(pmKey) : "—",
-        pyLabel: pyKey ? monthKeyLabel(pyKey) : "—",
-        checkDelta,
-        isBalanced,
-        meta: {
-          entity: "Trio Sporting Club",
-          statement: `Balance Sheet — as at ${endOfMonthLabel(activeMonth)}`,
-          period: `As at ${endOfMonthLabel(activeMonth)} (as booked)`,
-          basis: "n/a — the balance sheet is post credit-notes by nature (the basis toggle applies to the P&L only)",
-          source: "Supabase · v_balance_sheet_monthly (Qoyod-certified warehouse, migration 023)",
-          dataAsOf: `${monthKeyLabel(lastClosed)} close complete`,
-        },
-        notes: [
-          "Book cash is as booked — not yet bank-confirmed.",
-          "Receivables are net of the customer credit notes back-loaded to the ledger on 2026-07-21.",
-          "Lines marked [ADJ] are management adjustments.",
-          "No budget column — no balance-sheet budget exists (n/a, not zero).",
-        ],
-      }),
-    );
-  };
+  const comparisonLabel = comparisonMode === "PY_DATE" ? "Same Date Last Year" : comparisonMode === "START_OF_YEAR" ? "Start of Year" : "Budget";
+
+  // ------------------------------------------------------------ circles
+  const fixedAssetsActual = monthRows.filter((r) => r.section === "Assets" && r.subsection === "Fixed Assets").reduce((s, r) => s + r.amount, 0);
+  const fixedAssetsComparison = isBudgetMode
+    ? (budgetHasData ? budgetRowsForMonth.filter((r) => r.section === "Assets" && r.subsection === "Fixed Assets").reduce((s, r) => s + r.budget_amount_sar, 0) : null)
+    : (comparisonActualMap ? comparisonActualRows.filter((r) => r.section === "Assets" && r.subsection === "Fixed Assets").reduce((s, r) => s + r.amount, 0) : null);
+
+  const circleMetrics: BsKpiMetric[] = [
+    {
+      key: "fixedAssets", label: "Fixed Assets", actual: fixedAssetsActual, comparison: fixedAssetsComparison,
+      comparisonUnavailableReason: isBudgetMode ? budgetUnavailableReason : undefined,
+    },
+    {
+      key: "equity", label: "Equity", actual: equity.actualTotal, comparison: equity.comparisonTotal,
+      comparisonUnavailableReason: isBudgetMode ? budgetUnavailableReason : undefined,
+    },
+    {
+      key: "liabilities", label: "Liabilities", actual: liabilitiesTotalActual, comparison: liabilitiesTotalComparison,
+      comparisonUnavailableReason: isBudgetMode ? budgetUnavailableReason : undefined,
+    },
+  ];
+
+  // ---------------------------------------------------------- live cash note
+  const liveBankTotal = useMemo(
+    () => (bankRows && bankRows.length > 0 ? bankRows.reduce((s, r) => s + r.current_balance, 0) : null),
+    [bankRows],
+  );
+  const lastSynced = bankRows && bankRows.length > 0 ? bankRows[0].last_synced.slice(0, 10) : null;
 
   if (!isLoading && !isError && data && !data.available) {
     return (
       <div className="space-y-6">
-        <DataFreshnessNote />
         <Card className="p-10 text-center space-y-3 animate-fade-in">
           <HardHat className="h-8 w-8 mx-auto text-gold/70" />
           <h3 className="text-xl font-heading tracking-wide">BALANCE SHEET — NOT YET AVAILABLE</h3>
@@ -266,138 +324,111 @@ export const BalanceSheetLive = () => {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <DataFreshnessNote
-          lastClosedKey={lastClosed}
-          showIncompleteWarning={activeMonth ? isIncompleteMonth(activeMonth, lastClosed) : false}
-        />
-        <div className="flex items-center gap-3">
-          <BasisToggle
-            disabled
-            disabledReason="The balance sheet is post-credit-notes by nature — credit notes are booked against receivables. The basis toggle applies to the P&L screens only."
-          />
-          {months.length > 0 && (
-            <Select value={activeMonth ?? undefined} onValueChange={setSelectedMonth}>
-              <SelectTrigger className="w-44 bg-background font-medium">
-                <SelectValue placeholder="Month" />
-              </SelectTrigger>
-              <SelectContent className="max-h-[300px]">
-                {[...months].reverse().map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {monthKeyLabel(m)}{isIncompleteMonth(m, lastClosed) ? " — partial" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          {months.length > 0 && <ExportButton onClick={handleExport} />}
-        </div>
+    <div className="space-y-5">
+      <div>
+        <h1 className="font-heading text-2xl tracking-wide text-foreground">Balance Sheet</h1>
+        <p className="text-xs text-muted-foreground mt-0.5">Live, point-in-time — every figure as of the selected date.</p>
       </div>
 
-      {/* As-at banner (§1.4) */}
-      {activeMonth && (
-        <div className="rounded-md border border-border bg-muted/30 px-4 py-2 text-sm">
-          <strong className="font-semibold">As booked at {endOfMonthLabel(activeMonth)}</strong>
-          <span className="text-muted-foreground"> — book cash not yet bank-confirmed. No budget column: no balance-sheet budget exists (n/a, not zero).</span>
+      {/* ---------- global controls (page-owned — see BsControls.tsx) ---------- */}
+      <div className="flex flex-wrap items-center gap-3">
+        {months.length > 0 && (
+          <AsOfSelect months={months} value={asOfSel} onChange={setAsOfSel} monthLabel={(m) => monthKeyLabel(m)} />
+        )}
+        <BsComparisonToggle value={comparisonMode} onChange={setComparisonMode} />
+      </div>
+
+      {/* As-of badge (kept per spec: completeness/as-of + net-of-credit-notes footnote, nothing else) */}
+      {resolvedAsOfKey && (
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-sm">
+            <CalendarClock className="h-3.5 w-3.5 text-gold" />
+            <strong className="font-semibold">
+              {isToday ? `Today — as of last close, ${endOfMonthLabel(resolvedAsOfKey)}` : `As at ${endOfMonthLabel(resolvedAsOfKey)}`}
+            </strong>
+          </div>
+          {isToday && liveBankTotal !== null && (
+            <span className="text-xs text-muted-foreground">
+              Live bank &amp; cash position: <span className="tabular-nums text-foreground font-medium">{fmt(liveBankTotal)}</span> SAR
+              {lastSynced ? ` (Qoyod sync ${lastSynced})` : ""} — informational only, not part of the tying statement below.
+            </span>
+          )}
         </div>
       )}
-
-      <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300">
-        <div className="flex items-center gap-3 mb-1 flex-wrap">
-          <h3 className="text-xl font-heading tracking-wide">BALANCE SHEET</h3>
-          <DataSourceBadge source="live" />
-          <span className="text-xs text-muted-foreground">
-            Supabase · v_balance_sheet_monthly · SAR
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground cursor-help w-fit">
+            <ShieldCheck className="h-3.5 w-3.5 text-sky-400/80" />
+            Figures net of customer credit notes
           </span>
-        </div>
-        {activeMonth && (
-          <p className="text-sm text-muted-foreground mb-6">
-            As of <span className="text-foreground font-medium">{endOfMonthLabel(activeMonth)}</span>
-            {pmKey && <> · prior month {monthKeyLabel(pmKey)}</>}
-            {pyKey && <> · PY {monthKeyLabel(pyKey)} (same month −12)</>}
-          </p>
-        )}
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-xs text-xs">
+          Receivables are net of the customer credit notes back-loaded to the ledger on 2026-07-21 — the conservative, fully-reconciled basis, same as the rest of the cockpit.
+        </TooltipContent>
+      </Tooltip>
 
-        {isLoading && <p className="text-sm text-muted-foreground">Loading balance sheet…</p>}
-        {isError && (
-          <p className="text-sm text-destructive">
-            {(error as Error | null)?.name === "PermissionDeniedError"
-              ? (error as Error).message
-              : "Could not load the balance sheet from Supabase."}
-          </p>
-        )}
+      {isLoading && <p className="text-sm text-muted-foreground">Loading the balance sheet…</p>}
+      {isError && (
+        <p className="text-sm text-destructive">
+          {(error as Error | null)?.name === "PermissionDeniedError" ? (error as Error).message : "Could not load the balance sheet from Supabase."}
+        </p>
+      )}
 
-        {!isLoading && !isError && monthRows.length > 0 && (
-          <>
+      {!isLoading && !isError && monthRows.length > 0 && resolvedAsOfKey && (
+        <>
+          {/* ---------- the 3 circles ---------- */}
+          <BsKpiCircles metrics={circleMetrics} comparisonLabel={comparisonLabel} />
+
+          {/* ---------- the two tying statements ---------- */}
+          <Card className="p-6 shadow-sm animate-fade-in hover:shadow-xl transition-all duration-300">
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-x-12 gap-y-8">
-              <SectionCard
+              <StatementCard
                 title="Assets"
-                groups={assets.groups}
-                total={assets.total}
-                pmTotal={assets.pmTotal}
-                pyTotal={assets.pyTotal}
-                pmLabel={pmKey ? monthKeyLabel(pmKey) : "—"}
-                pyLabel={pyKey ? monthKeyLabel(pyKey) : "—"}
-                asAtLabel={activeMonth ? monthKeyLabel(activeMonth) : "—"}
+                groups={assets.groups.map((g) => ({ key: `A::${g.subsection}`, subsection: g.subsection, group: g }))}
+                total={assets.actualTotal}
+                comparisonTotal={assets.comparisonTotal}
+                comparisonLabel={comparisonLabel}
+                expanded={expanded}
+                onToggle={toggle}
               />
-              <div className="space-y-8">
-                <SectionCard
-                  title="Liabilities"
-                  groups={liabilities.groups}
-                  total={liabilities.total}
-                  pmTotal={liabilities.pmTotal}
-                  pyTotal={liabilities.pyTotal}
-                  pmLabel={pmKey ? monthKeyLabel(pmKey) : "—"}
-                  pyLabel={pyKey ? monthKeyLabel(pyKey) : "—"}
-                  asAtLabel={activeMonth ? monthKeyLabel(activeMonth) : "—"}
-                />
-                <SectionCard
-                  title="Equity"
-                  groups={equity.groups}
-                  total={equity.total}
-                  pmTotal={equity.pmTotal}
-                  pyTotal={equity.pyTotal}
-                  pmLabel={pmKey ? monthKeyLabel(pmKey) : "—"}
-                  pyLabel={pyKey ? monthKeyLabel(pyKey) : "—"}
-                  asAtLabel={activeMonth ? monthKeyLabel(activeMonth) : "—"}
-                />
-              </div>
+              <StatementCard
+                title="Liabilities & Equity"
+                groups={[
+                  ...liabilitiesGroups.map((g) => ({ key: `L::${g.subsection}`, subsection: g.subsection, group: g })),
+                  ...equity.groups.map((g) => ({ key: `E::${g.subsection}`, subsection: g.subsection, group: g })),
+                ]}
+                total={totalLE_actual}
+                comparisonTotal={totalLE_comparison}
+                comparisonLabel={comparisonLabel}
+                expanded={expanded}
+                onToggle={toggle}
+                extraGrandTotals={[
+                  { afterKey: `L::${liabilitiesGroups[liabilitiesGroups.length - 1]?.subsection ?? ""}`, label: "Total Liabilities", actual: liabilitiesTotalActual, comparison: liabilitiesTotalComparison },
+                  { afterKey: `E::${equity.groups[equity.groups.length - 1]?.subsection ?? ""}`, label: "Total Equity", actual: equity.actualTotal, comparison: equity.comparisonTotal },
+                ]}
+              />
             </div>
 
+            {/* Tie-check footer — always on the actual as-of statement. */}
             <div
               className={`mt-8 flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
-                isBalanced
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                  : "border-amber-500/40 bg-amber-500/10 text-amber-400"
+                isBalanced ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400" : "border-destructive/40 bg-destructive/10 text-destructive"
               }`}
             >
               <Scale className="h-4 w-4" />
               {isBalanced ? (
-                <span>
-                  Balanced — Assets {fmt(assets.total)} = Liabilities {fmt(liabilities.total)} + Equity {fmt(equity.total)}
-                </span>
+                <span>Balances ✓ — Assets {fmt(assets.actualTotal)} = Liabilities + Equity {fmt(totalLE_actual)}</span>
               ) : (
-                <span>
-                  Balance check delta: {fmt(checkDelta)} SAR (Assets {fmt(assets.total)} vs L+E {fmt(liabilities.total + equity.total)})
-                </span>
+                <span>Balance check delta: {fmt(checkDelta)} SAR (Assets {fmt(assets.actualTotal)} vs L+E {fmt(totalLE_actual)})</span>
               )}
             </div>
+          </Card>
+        </>
+      )}
 
-            <p className="mt-4 text-xs text-muted-foreground">
-              Statement built from the synced Qoyod ledger (migration 023). Receivables are net of
-              the customer credit notes back-loaded to the ledger on 2026-07-21. Lines marked
-              <span className="mx-1 inline-flex items-center rounded bg-amber-500/15 border border-amber-500/30 px-1 py-px text-[9px] font-bold uppercase tracking-wider text-amber-400">ADJ</span>
-              are management adjustments; the <Info className="inline h-3 w-3 text-gold/80" /> icon
-              flags data-quality notes from the ingestion audit (known issues stay visible).
-            </p>
-          </>
-        )}
-
-        {!isLoading && !isError && data?.available && monthRows.length === 0 && (
-          <p className="text-sm text-muted-foreground">No balance-sheet data for the selected month.</p>
-        )}
-      </Card>
+      {!isLoading && !isError && data?.available && monthRows.length === 0 && (
+        <p className="text-sm text-muted-foreground">No balance-sheet data for the selected date.</p>
+      )}
     </div>
   );
 };

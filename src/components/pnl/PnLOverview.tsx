@@ -1,28 +1,35 @@
-// P&L OVERVIEW — spec §1.1 (rewired to the two-basis engine).
+// P&L OVERVIEW — spec §1.1, rewired 2026-08-03 to Marcello's live-review
+// chrome (supersedes the earlier basis-toggle / structure-toggle build):
 //
-// One P&L matrix, 5 comparison columns for the selected window:
-//   Actual · Budget · Δ Bud (SAR + %) · PY · Δ PY (SAR + %)
-// Structure toggle: View A "Statutory (as booked)" (statutory shape) · View B
-// "Management · recurring split" (the package §2 shape — DB-1 gated). Plain-
-// language labels only — the internal view keys ("A" / "B") are unchanged.
-// Budget rules (register §E): Jun-26 = "n/a — no budget exists (by design)";
-// TTM aggregates disclose coverage; basis footnote on every comparison;
-// budget is EBITDA-deep (D&A/EBIT/Net = "—").
-// Charts answer the screen's CFO question — "am I on plan, and vs last
-// year?": monthly Revenue and EBITDA, Actual bars vs Budget tick vs PY line.
+//   - Basis is PINNED to STRICT (net of customer credit notes) — no toggle,
+//     a quiet footnote instead ("una sola" — one basis, everywhere).
+//   - Comparison toggle [Versus Previous Year | Versus Budget] — ONE
+//     comparison shown at a time across KPI cards, charts and the table
+//     (never both — "fa solo casino" together). Default PY.
+//   - Scope toggle [All | Only Recurring] — absorbs the old Statutory/
+//     Management structure toggle; Only Recurring filters to the
+//     recurring-split lines (dim_recurrence gated). Default All.
+//
+// Budget rules (register §E) still apply under the Budget comparison:
+// Jun-26 = "n/a — no budget exists (by design)"; TTM aggregates disclose
+// coverage; budget is EBITDA-deep (D&A/EBIT/Net = "—"). Month-to-date
+// pro-rates whichever comparison (Budget or PY) is active, linearly to
+// elapsed calendar days — see `computeMtdProration`.
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsListPill, TabsTriggerPill } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Info, Star } from "lucide-react";
+import { Info, Star, Scale } from "lucide-react";
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
   ResponsiveContainer, ReferenceLine, Legend, Cell,
 } from "recharts";
 import { cn } from "@/lib/utils";
-import { useAlignment } from "@/contexts/AlignmentContext";
-import { BasisBadge, BasisToggle, WindowPicker, OpenMonthsBadge, CompletenessBanner, BudgetBasisFootnote, IncompleteMark, ScrollHint } from "@/components/chrome/AlignmentChrome";
+import { useAlignment, type ComparisonMode } from "@/contexts/AlignmentContext";
+import {
+  StrictBasisNote, ComparisonToggle, ScopeToggle, WindowPicker, OpenMonthsBadge,
+  CompletenessBanner, IncompleteMark, ScrollHint,
+} from "@/components/chrome/AlignmentChrome";
 import {
   useBasisRows, useRecurrence, useModelAdjustments, aggregatePL, aggregateRecurring,
   aggregateBudgetWindow, budgetMonthsSet, monthlySeries, deriveCompleteness,
@@ -58,40 +65,39 @@ interface MatrixRow {
   pctOfRevenue?: number | null;
 }
 
+// Decision #2 (2026-08-03): the table shows ONE comparison at a time —
+// Budget OR PY, never both — so it's 5 columns now, not 8.
 const MatrixTable = ({
-  rows, winText, pyText, budgetHeader, budgetNa,
+  rows, winText, mode, compHeader, compNa,
 }: {
   rows: MatrixRow[];
   winText: string;
-  pyText: string;
-  budgetHeader: string;
-  budgetNa: string | null; // non-null => whole budget column is n/a with this reason
+  mode: ComparisonMode;
+  compHeader: string;
+  compNa: string | null; // Budget mode only: non-null => whole comparison column is n/a with this reason
 }) => (
   // Layout (punch item 7): the label column is STICKY so horizontal scrolling
-  // never strands the reader; labels wrap instead of forcing column blow-out
-  // (the old nowrap labels clipped the Δ-PY columns at 1440 in View B and left
-  // only the label column visible on first paint at 390); ScrollHint adds a
-  // visible affordance whenever the table still overflows.
+  // never strands the reader; labels wrap instead of forcing column blow-out;
+  // ScrollHint adds a visible affordance whenever the table still overflows.
   <ScrollHint>
-    <table className="w-full min-w-[760px] text-sm">
+    <table className="w-full min-w-[560px] text-sm">
       <thead>
         <tr className="border-b-2 border-border text-xs uppercase tracking-wider text-muted-foreground">
           <th className="text-left py-2.5 pr-3 font-semibold sticky left-0 z-10 bg-card">SAR</th>
           <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">Actual ({winText})</th>
-          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">{budgetHeader}</th>
-          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">Δ Bud</th>
-          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">Δ Bud %</th>
-          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">PY ({pyText})</th>
-          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">Δ PY</th>
-          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">Δ PY %</th>
+          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">{compHeader}</th>
+          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">Δ</th>
+          <th className="text-right py-2.5 px-2 font-semibold whitespace-nowrap">Δ %</th>
         </tr>
       </thead>
       <tbody>
         {rows.map((r) => {
-          const dBud = r.actual !== null && r.budget !== null ? r.actual - r.budget : null;
-          const dBudPct = r.actual !== null && r.budget !== null ? comparePct(r.actual, r.budget, r.invert) : null;
-          const dPy = r.actual !== null && r.py !== null ? r.actual - r.py : null;
-          const dPyPct = r.actual !== null && r.py !== null ? comparePct(r.actual, r.py, r.invert) : null;
+          const compValue = mode === "BUDGET" ? r.budget : r.py;
+          const d = r.actual !== null && compValue !== null ? r.actual - compValue : null;
+          const dPct = r.actual !== null && compValue !== null ? comparePct(r.actual, compValue, r.invert) : null;
+          const naTooltip = mode === "BUDGET"
+            ? (compNa ?? (r.budgetNote ?? "Budget is EBITDA-deep — no budget exists below EBITDA (D&A, EBIT, non-operating, net result)."))
+            : "No prior-year figure for this window.";
           return (
             <tr
               key={r.label}
@@ -113,20 +119,15 @@ const MatrixTable = ({
               </td>
               <td className="text-right py-2 px-2 tabular-nums whitespace-nowrap">{r.actual === null ? "—" : fmtSAR(r.actual)}</td>
               <td className="text-right py-2 px-2 tabular-nums whitespace-nowrap text-muted-foreground">
-                {budgetNa !== null || r.budget === null ? (
+                {(mode === "BUDGET" && compNa !== null) || compValue === null ? (
                   <Tooltip>
-                    <TooltipTrigger asChild><span className="cursor-help">{budgetNa !== null ? "n/a" : "—"}</span></TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-xs text-xs">
-                      {budgetNa !== null ? budgetNa : (r.budgetNote ?? "Budget is EBITDA-deep — no budget exists below EBITDA (D&A, EBIT, non-operating, net result).")}
-                    </TooltipContent>
+                    <TooltipTrigger asChild><span className="cursor-help">{mode === "BUDGET" && compNa !== null ? "n/a" : "—"}</span></TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs text-xs">{naTooltip}</TooltipContent>
                   </Tooltip>
-                ) : fmtSAR(r.budget)}
+                ) : fmtSAR(compValue)}
               </td>
-              <td className={`text-right py-2 px-2 tabular-nums whitespace-nowrap ${deltaColor(dBud)}`}>{dBud === null ? "—" : fmtDeltaSAR(dBud)}</td>
-              <td className={`text-right py-2 px-2 tabular-nums whitespace-nowrap ${deltaColor(dBud)}`}>{dBudPct === null ? "—" : fmtDeltaPct(dBudPct)}</td>
-              <td className="text-right py-2 px-2 tabular-nums whitespace-nowrap text-muted-foreground">{r.py === null ? "—" : fmtSAR(r.py)}</td>
-              <td className={`text-right py-2 px-2 tabular-nums whitespace-nowrap ${deltaColor(dPy)}`}>{dPy === null ? "—" : fmtDeltaSAR(dPy)}</td>
-              <td className={`text-right py-2 px-2 tabular-nums whitespace-nowrap ${deltaColor(dPy)}`}>{dPyPct === null ? "—" : fmtDeltaPct(dPyPct)}</td>
+              <td className={`text-right py-2 px-2 tabular-nums whitespace-nowrap ${deltaColor(d)}`}>{d === null ? "—" : fmtDeltaSAR(d)}</td>
+              <td className={`text-right py-2 px-2 tabular-nums whitespace-nowrap ${deltaColor(d)}`}>{dPct === null ? "—" : fmtDeltaPct(dPct)}</td>
             </tr>
           );
         })}
@@ -137,29 +138,30 @@ const MatrixTable = ({
 
 // ------------------------------------------------------- monthly chart
 
+// Decision #2 (2026-08-03): one comparison series at a time — Budget OR PY.
 const MonthlyVarianceChart = ({
-  title, data, winText,
+  title, data, winText, mode,
 }: {
   title: string;
   data: { label: string; key: string; actual: number; budget: number | null; py: number }[];
   winText: string;
+  mode: ComparisonMode;
 }) => {
   const ChartTip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ dataKey: string; value: number | null }>; label?: string }) => {
     if (!active || !payload || payload.length === 0) return null;
     const get = (k: string) => payload.find((p) => p.dataKey === k)?.value;
     const actual = get("actual") as number | undefined;
-    const budget = get("budget") as number | null | undefined;
-    const py = get("py") as number | undefined;
+    const comp = (mode === "BUDGET" ? get("budget") : get("py")) as number | null | undefined;
+    const compLabel = mode === "BUDGET" ? "Budget" : "PY (same month −12)";
     return (
       <div className="chart-tooltip">
         <p className="chart-tooltip-title">{label}</p>
         <div className="chart-tooltip-content space-y-0.5">
           {actual !== undefined && <p className="chart-tooltip-actual">Actual: {fmtSAR(actual)}</p>}
-          <p className="chart-tooltip-budget">Budget: {budget === null || budget === undefined ? "n/a" : fmtSAR(budget)}</p>
-          {py !== undefined && <p className="chart-tooltip-budget">PY (same month −12): {fmtSAR(py)}</p>}
-          {actual !== undefined && budget !== null && budget !== undefined && (
-            <p className={actual - budget >= 0 ? "chart-tooltip-delta-positive" : "chart-tooltip-delta-negative"}>
-              Δ Bud: {fmtDeltaSAR(actual - budget)}
+          <p className="chart-tooltip-budget">{compLabel}: {comp === null || comp === undefined ? "n/a" : fmtSAR(comp)}</p>
+          {actual !== undefined && comp !== null && comp !== undefined && (
+            <p className={actual - comp >= 0 ? "chart-tooltip-delta-positive" : "chart-tooltip-delta-negative"}>
+              Δ: {fmtDeltaSAR(actual - comp)}
             </p>
           )}
         </div>
@@ -185,8 +187,11 @@ const MonthlyVarianceChart = ({
               <Cell key={i} fill={d.actual >= 0 ? "hsl(var(--gold) / 0.85)" : "hsl(0 70% 60% / 0.7)"} />
             ))}
           </Bar>
-          <Line dataKey="budget" name="Budget" stroke="hsl(var(--foreground) / 0.75)" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 2.5, fill: "hsl(var(--foreground))", strokeWidth: 0 }} connectNulls={false} isAnimationActive={false} />
-          <Line dataKey="py" name="PY (−12m)" stroke="hsl(195 75% 55% / 0.8)" strokeWidth={2} dot={false} isAnimationActive={false} />
+          {mode === "BUDGET" ? (
+            <Line dataKey="budget" name="Budget" stroke="hsl(var(--foreground) / 0.75)" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 2.5, fill: "hsl(var(--foreground))", strokeWidth: 0 }} connectNulls={false} isAnimationActive={false} />
+          ) : (
+            <Line dataKey="py" name="PY (−12m)" stroke="hsl(195 75% 55% / 0.8)" strokeWidth={2} dot={false} isAnimationActive={false} />
+          )}
         </ComposedChart>
       </ResponsiveContainer>
     </Card>
@@ -199,13 +204,15 @@ export const PnLOverview = () => {
   // memoOn = the FOUNDER GATE on the model-adjustment memo layer (item 3):
   // opt-in, default OFF on load, persisted; shared with the Performance P3
   // ladder so the memo layer is never half-visible across screens.
-  const { basis, win, py, winLabelText, pyLabelText, windowName, memoOn, setMemoOn, lastComplete, preset, todayKey } = useAlignment();
+  const {
+    basis, win, py, winLabelText, pyLabelText, windowName, memoOn, setMemoOn, lastComplete, preset, todayKey,
+    comparisonMode, scope,
+  } = useAlignment();
   const { data: basisData, isLoading, isError, error } = useBasisRows();
   const { data: rec } = useRecurrence();
   const { data: budgetRows } = useBudgetMonthly();
   const { data: adjState } = useModelAdjustments();
   const [selectedBU, setSelectedBU] = useState("ALL");
-  const [view, setView] = useState<"A" | "B">("A");
 
   const rows = basisData?.rows;
   const bu = selectedBU === "ALL" ? undefined : selectedBU;
@@ -252,7 +259,7 @@ export const PnLOverview = () => {
     : null;
 
   // ------------------------------------------------------ View A rows
-  const viewARows: MatrixRow[] = useMemo(() => {
+  const allRows: MatrixRow[] = useMemo(() => {
     const b = budget;
     const mk = (label: string, a: number, bud: number | null, p: number, opts: Partial<MatrixRow> = {}): MatrixRow => ({
       label, actual: a, budget: bud, py: p, ...opts,
@@ -309,7 +316,7 @@ export const PnLOverview = () => {
   // Recurring-tagged memo rows only — the ladder from as-booked to the
   // model's clean recurring EBITDA (spec §1.1 View B).
   const ladder = useMemo(() => adjustmentLadder(adjState, win, "recurring"), [adjState, win]);
-  const viewBRows: MatrixRow[] | null = useMemo(() => {
+  const recurringRows: MatrixRow[] | null = useMemo(() => {
     if (!recActual) return null;
     const { budRecRevenue, budDrift } = recBudget;
     const out: MatrixRow[] = [
@@ -369,16 +376,18 @@ export const PnLOverview = () => {
     });
   }, [rows, basis, chartWin, bu, budgetRows, budMonths]);
 
-  // Audit-ready export of the CURRENTLY displayed matrix (view A or B), stamped
-  // with window, basis, structure, BU, live source object and data-as-of.
+  // Audit-ready export of the CURRENTLY displayed matrix (scope: all lines
+  // or recurring-only), stamped with window, basis, structure, BU, live
+  // source object and data-as-of.
+  const displayRows = scope === "ALL" ? allRows : (recurringRows ?? []);
   const handleExport = () => {
-    const displayRows = view === "A" ? viewARows : (viewBRows ?? []);
     const notes: string[] = [];
     const flagged = [...flaggedKeys].some((k) => k >= win.startKey && k <= win.endKey);
-    if (displayRows.length === 0) notes.push("Management · recurring split view is pending the recurrence dimension — no rows to export yet.");
+    if (displayRows.length === 0) notes.push("Only-recurring scope is pending the recurrence dimension — no rows to export yet.");
     if (flagged) notes.push("Window includes months with partial or missing cost postings — see the completeness banner in the cockpit.");
-    if (coverageNote) notes.push(coverageNote);
-    if (budgetNa) notes.push(budgetNa);
+    if (comparisonMode === "BUDGET" && coverageNote) notes.push(coverageNote);
+    if (comparisonMode === "BUDGET" && budgetNa) notes.push(budgetNa);
+    notes.push(comparisonMode === "PY" ? "Comparison shown: versus Previous Year." : "Comparison shown: versus Budget.");
     notes.push("Signed storage: revenue positive, costs negative; a positive delta is favourable. PY = the same window shifted -12 months, same basis and perimeter.");
     if (mtdPro) notes.push(`Month-to-date window: Budget and PY pro-rated linearly to elapsed calendar days (day ${mtdPro.elapsedDays} of ${mtdPro.daysInMonth}, ${Math.round(mtdPro.fraction * 100)}%). Actual is not pro-rated.`);
     exportStatementCsv(
@@ -387,9 +396,9 @@ export const PnLOverview = () => {
         meta: {
           entity: "Trio Sporting Club",
           statement: `Profit & Loss — ${windowName}`,
-          period: `${windowName} · Actual ${winLabelText} vs PY ${mtdPro ? "same days (pro-rated)" : pyLabelText}`,
+          period: `${windowName} · Actual ${winLabelText} vs ${comparisonMode === "PY" ? `PY ${mtdPro ? "same days (pro-rated)" : pyLabelText}` : "Budget"}`,
           basis: BASIS_LABELS[basis],
-          structure: view === "A" ? "Statutory (as booked)" : "Management · recurring split",
+          structure: scope === "ALL" ? "All (statutory lines)" : "Only recurring (dim_recurrence)",
           businessUnit: selectedBU === "ALL" ? "All Company" : `${LIVE_BU_LABELS[selectedBU] ?? selectedBU} (${selectedBU})`,
           source: `Supabase · ${basisData?.sourceObject ?? "pnl_management"} + v_budget_monthly (Qoyod-certified warehouse)`,
           dataAsOf: `${monthKeyLabel(lastComplete)} close complete`,
@@ -409,11 +418,14 @@ export const PnLOverview = () => {
 
   return (
     <div className="space-y-5">
-      {/* Controls */}
+      {/* Controls — 2026-08-03 chrome: period selector · Comparison toggle ·
+          Scope toggle. BU filter and export sit alongside (unrelated axes,
+          untouched by this decision). */}
       <div className="flex flex-wrap items-center gap-3">
         <WindowPicker months={factMonths(rows)} />
         <OpenMonthsBadge />
-        <BasisToggle />
+        <ComparisonToggle />
+        <ScopeToggle />
         <Select value={selectedBU} onValueChange={setSelectedBU}>
           <SelectTrigger className="w-52 bg-background font-medium"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -423,13 +435,7 @@ export const PnLOverview = () => {
             ))}
           </SelectContent>
         </Select>
-        <Tabs value={view} onValueChange={(v) => setView(v as "A" | "B")}>
-          <TabsListPill>
-            <TabsTriggerPill value="A">Statutory (as booked)</TabsTriggerPill>
-            <TabsTriggerPill value="B">Management · recurring split</TabsTriggerPill>
-          </TabsListPill>
-        </Tabs>
-        {view === "B" && adjState?.available && (
+        {scope === "RECURRING" && adjState?.available && (
           <label className="inline-flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
             <input type="checkbox" checked={memoOn} onChange={(e) => setMemoOn(e.target.checked)} className="accent-[hsl(var(--gold))]" />
             Model-adjustment memo lines
@@ -441,12 +447,15 @@ export const PnLOverview = () => {
       <CompletenessBanner rows={rows} />
       {isLoading && <p className="text-sm text-muted-foreground">Loading live P&L fact rows…</p>}
 
-      {/* Headline strip — View A: statutory headline metrics. View B: the
-          recurring split, Recurring EBITDA visually emphasized (spec §1.1:
-          "make sure the recurring lines are prominent in View B"). Falls
-          back to View A cards if the recurrence dimension isn't live yet. */}
+      {/* Headline strip — Scope All: statutory headline metrics. Scope Only
+          Recurring: the recurring split, Recurring EBITDA visually
+          emphasized (spec §1.1: "make sure the recurring lines are
+          prominent"). Falls back to the statutory cards if the recurrence
+          dimension isn't live yet. Comparison toggle decides whether the
+          single comparison line under each figure reads vs PY or vs Budget
+          (decision #2 — never both at once). */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {((view === "B" && recActual
+        {((scope === "RECURRING" && recActual
           ? [
               { label: "Recurring revenue", a: recActual.recRevenue, b: recBudget.budRecRevenue, p: recPrior?.recRevenue ?? 0, emphasize: false },
               { label: "Recurring gross profit", a: recActual.recGrossProfit, b: null, p: recPrior?.recGrossProfit ?? 0, emphasize: false },
@@ -460,7 +469,12 @@ export const PnLOverview = () => {
               { label: "Net result", a: actual.netResult, b: null, p: prior.netResult, emphasize: false },
             ]
         ) as { label: string; a: number; b: number | null; p: number; emphasize: boolean }[]).map((k) => {
-          const dP = comparePct(k.a, k.p ?? 0);
+          const compValue = comparisonMode === "PY" ? k.p : k.b;
+          const d = compValue === null ? null : k.a - compValue;
+          const dPct = comparisonMode === "PY" ? comparePct(k.a, k.p ?? 0) : (compValue === null ? null : comparePct(k.a, compValue));
+          const compLabel = comparisonMode === "PY"
+            ? `vs PY (${mtdPro ? "same days" : pyLabelText})`
+            : `vs Budget${mtdPro ? ` (pro-rated ${mtdPro.elapsedDays}/${mtdPro.daysInMonth})` : ""}`;
           return (
             <Card
               key={k.label}
@@ -470,29 +484,25 @@ export const PnLOverview = () => {
               )}
             >
               <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1">
-                {k.label} <BasisBadge basis={basis} className="ml-1" />
+                {k.label}
                 {k.emphasize && <Star className="h-3 w-3 text-gold fill-gold/40" aria-hidden />}
               </p>
               <p className={cn("text-2xl font-heading tracking-tight tabular-nums", k.emphasize && "text-gold")}>{fmtSAR(k.a)}</p>
-              <div className="text-xs text-muted-foreground space-y-0.5">
+              <div className="text-xs text-muted-foreground">
                 <p>
-                  vs Budget{mtdPro ? ` (pro-rated ${mtdPro.elapsedDays}/${mtdPro.daysInMonth})` : ""}:{" "}
-                  {k.b === null ? (
-                    budgetNa ? (
+                  {compLabel}:{" "}
+                  {compValue === null ? (
+                    comparisonMode === "BUDGET" && budgetNa ? (
                       <Tooltip>
                         <TooltipTrigger asChild><span className="cursor-help">—</span></TooltipTrigger>
                         <TooltipContent side="top" className="max-w-xs text-xs">{budgetNa}</TooltipContent>
                       </Tooltip>
                     ) : "—"
                   ) : (
-                    <span className={deltaColor(k.a - k.b)}>{fmtDeltaSAR(k.a - k.b)}</span>
+                    <span className={deltaColor(d)}>
+                      {fmtDeltaSAR(d as number)}{dPct !== null ? ` · ${fmtDeltaPct(dPct)}` : ""}
+                    </span>
                   )}
-                </p>
-                <p>
-                  vs PY ({mtdPro ? "same days" : pyLabelText}):{" "}
-                  <span className={deltaColor(k.a - k.p)}>
-                    {fmtDeltaSAR(k.a - k.p)}{dP !== null ? ` · ${fmtDeltaPct(dP)}` : ""}
-                  </span>
                 </p>
               </div>
             </Card>
@@ -502,22 +512,24 @@ export const PnLOverview = () => {
       {mtdPro && (
         <p className="text-xs text-muted-foreground -mt-2 flex items-start gap-1.5">
           <Info className="h-3.5 w-3.5 mt-px shrink-0 text-amber-400/80" />
-          Month-to-date Budget and PY are pro-rated linearly to elapsed calendar days — day{" "}
-          {mtdPro.elapsedDays} of {mtdPro.daysInMonth} ({Math.round(mtdPro.fraction * 100)}%). Actual is
-          never pro-rated: an open month's actual already reflects only what's posted so far.
+          Month-to-date {comparisonMode === "PY" ? "PY" : "Budget"} is pro-rated linearly to elapsed
+          calendar days — day {mtdPro.elapsedDays} of {mtdPro.daysInMonth} ({Math.round(mtdPro.fraction * 100)}%).
+          Actual is never pro-rated: an open month's actual already reflects only what's posted so far.
         </p>
       )}
 
       {/* Trend charts */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <MonthlyVarianceChart
-          title="REVENUE — ACTUAL vs BUDGET vs PY"
+          title={`REVENUE — ACTUAL vs ${comparisonMode === "PY" ? "PY" : "BUDGET"}`}
           winText={winLabel(chartWin)}
+          mode={comparisonMode}
           data={chartData.map((d) => ({ key: d.key, label: d.label, actual: d.actual, budget: d.budget, py: d.py }))}
         />
         <MonthlyVarianceChart
-          title="EBITDA REPORTED — ACTUAL vs BUDGET vs PY"
+          title={`EBITDA REPORTED — ACTUAL vs ${comparisonMode === "PY" ? "PY" : "BUDGET"}`}
           winText={winLabel(chartWin)}
+          mode={comparisonMode}
           data={chartData.map((d) => ({ key: d.key, label: d.label, actual: d.actualEbitda, budget: d.budgetEbitda, py: d.pyEbitda }))}
         />
       </div>
@@ -526,8 +538,8 @@ export const PnLOverview = () => {
       <Card className="p-6 shadow-sm">
         <div className="flex items-center gap-3 mb-1 flex-wrap">
           <h3 className="text-xl font-heading tracking-wide">P&amp;L — {windowName.toUpperCase()}</h3>
-          <BasisBadge basis={basis} />
-          {budget && (
+          <StrictBasisNote />
+          {comparisonMode === "BUDGET" && budget && (
             <span className="inline-flex items-center rounded bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground border border-border">
               Budget · {budget.versions.join(" + ")}
             </span>
@@ -540,45 +552,61 @@ export const PnLOverview = () => {
         {/* Provenance note (Fix A, live review 2026-08-03): the budget series
             spans two vintages plus a documented gap — spelled out once, near
             the badge, so "no budget" in Jun-26 reads as by-design rather than
-            a bug. */}
-        <p className="text-[11px] text-muted-foreground/80 mb-2">
-          Budget: approved 16 Jul (from Jul '26) · historical to May '26 · Jun '26: no approved budget.
-        </p>
+            a bug. Only relevant under the Budget comparison. */}
+        {comparisonMode === "BUDGET" && (
+          <p className="text-[11px] text-muted-foreground/80 mb-2">
+            Budget: approved 16 Jul (from Jul '26) · historical to May '26 · Jun '26: no approved budget.
+          </p>
+        )}
         <p className="text-xs text-muted-foreground mb-4">
-          {view === "A" ? "Statutory shape — as booked in the ledger." : "Management shape — the validated package structure (recurring lens)."}
+          {scope === "ALL" ? "Statutory shape — as booked in the ledger." : "Recurring shape — recurring/DRIFT split per the validated perimeter."}
           {" "}Every column header names its window; PY is the same window shifted −12 months, same basis, same perimeter.
         </p>
 
-        {view === "A" && (
+        {scope === "ALL" && (
           <MatrixTable
-            rows={viewARows}
+            rows={allRows}
             winText={winLabelText}
-            pyText={mtdPro ? "same days" : pyLabelText}
-            budgetHeader={`Budget${budget ? ` · ${budget.versions.length > 1 ? "blend" : budget.versions[0]}` : ""}${mtdPro ? ` (pro-rated ${mtdPro.elapsedDays}/${mtdPro.daysInMonth})` : ""}`}
-            budgetNa={budgetNa}
+            mode={comparisonMode}
+            compHeader={
+              comparisonMode === "PY"
+                ? `PY (${mtdPro ? "same days" : pyLabelText})`
+                : `Budget${budget ? ` · ${budget.versions.length > 1 ? "blend" : budget.versions[0]}` : ""}${mtdPro ? ` (pro-rated ${mtdPro.elapsedDays}/${mtdPro.daysInMonth})` : ""}`
+            }
+            compNa={comparisonMode === "BUDGET" ? budgetNa : null}
           />
         )}
-        {view === "B" && (
-          viewBRows ? (
+        {scope === "RECURRING" && (
+          recurringRows ? (
             <MatrixTable
-              rows={viewBRows}
+              rows={recurringRows}
               winText={winLabelText}
-              pyText={mtdPro ? "same days" : pyLabelText}
-              budgetHeader={`Budget${mtdPro ? ` (pro-rated ${mtdPro.elapsedDays}/${mtdPro.daysInMonth})` : ""}`}
-              budgetNa={budgetNa}
+              mode={comparisonMode}
+              compHeader={
+                comparisonMode === "PY"
+                  ? `PY (${mtdPro ? "same days" : pyLabelText})`
+                  : `Budget${mtdPro ? ` (pro-rated ${mtdPro.elapsedDays}/${mtdPro.daysInMonth})` : ""}`
+              }
+              compNa={comparisonMode === "BUDGET" ? budgetNa : null}
             />
           ) : (
             <div className="rounded-md border border-border bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
-              Recurring view pending recurrence dimension — the validated recurring/DRIFT perimeter
-              (dim_recurrence) has not landed in the warehouse yet. This view activates automatically
-              when it does; no reload needed.
+              Recurring scope pending recurrence dimension — the validated recurring/DRIFT perimeter
+              (dim_recurrence) has not landed in the warehouse yet. This activates automatically when it
+              does; no reload needed.
             </div>
           )
         )}
 
         <div className="mt-4 space-y-1.5">
-          {coverageNote && <p className="text-xs text-amber-300/90">{coverageNote}</p>}
-          <BudgetBasisFootnote />
+          {comparisonMode === "BUDGET" && coverageNote && <p className="text-xs text-amber-300/90">{coverageNote}</p>}
+          {comparisonMode === "BUDGET" && (
+            <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+              <Scale className="h-3.5 w-3.5 mt-px shrink-0 text-gold/70" />
+              Budget is net of VAT and has no credit-note concept; actuals here are net of credit notes
+              (conservative vs budget).
+            </p>
+          )}
           {bu && (
             <p className="text-xs text-muted-foreground">
               BU view: revenue and directly-attributed costs only — budget costs largely unallocated
@@ -587,8 +615,8 @@ export const PnLOverview = () => {
           )}
           <p className="text-xs text-muted-foreground">
             Source: {basisData?.sourceObject ?? "…"} + v_budget_monthly (live warehouse). Drill to MoA
-            leaf on the Drill screen — the drill inherits the active basis (credit-note rows excluded
-            on Validated, netted off on Strict, with an on-screen count either way).
+            leaf on the Drill screen — the drill inherits the active basis (credit-note rows netted off,
+            with an on-screen count).
           </p>
         </div>
       </Card>

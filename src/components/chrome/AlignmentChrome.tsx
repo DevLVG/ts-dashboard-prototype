@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, Scale, Lock, Archive, ChevronsRight, Info, Radio } from "lucide-react";
+import { AlertTriangle, Scale, Archive, ChevronsRight, Radio, ShieldCheck, TrendingUp, Wallet, Layers, Repeat } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAlignment } from "@/contexts/AlignmentContext";
+import { useAlignment, type ComparisonMode, type Scope } from "@/contexts/AlignmentContext";
 import {
   BASIS_LABELS, deriveCompleteness, useCompletenessMonthly, resolveWindow,
   flagsFromCompletenessView, type Basis, type BasisRow,
@@ -36,77 +36,90 @@ export const BasisBadge = ({ basis, className }: { basis: Basis; className?: str
 
 // ------------------------------------------------------------ basis toggle
 
-// Plain-language basis labels (Marcello: the old "Validated/Strict · pre-CN/
-// net-CN" jargon was opaque). The internal enum (VALIDATED/STRICT) and every
-// underlying figure are UNCHANGED — this relabels the two buttons only.
-const BASIS_PLAIN_LABEL: Record<Basis, string> = {
-  VALIDATED: "Before credit notes",
-  STRICT: "Net of credit notes",
-};
+/** REMOVED 2026-08-03 (Marcello, live review — "una sola: net of credit
+ * notes, niente toggle"). Kept as a no-op export so any not-yet-migrated
+ * screen that still renders `<BasisToggle />` compiles and simply shows
+ * nothing, rather than needing a coordinated multi-file edit to land this
+ * decision. Use `StrictBasisNote` for the plain-language footnote instead. */
+export const BasisToggle = (_props: { disabled?: boolean; disabledReason?: string }) => null;
 
-export const BasisToggle = ({ disabled, disabledReason }: { disabled?: boolean; disabledReason?: string }) => {
-  const { basis, setBasis } = useAlignment();
-  const seg = (b: Basis, label: string) => (
+/** The single-basis footnote (spec decision 2026-08-03): no toggle, just a
+ * quiet statement of what the numbers already are. */
+export const StrictBasisNote = ({ className }: { className?: string }) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <span className={cn("inline-flex items-center gap-1.5 text-xs text-muted-foreground cursor-help", className)}>
+        <ShieldCheck className="h-3.5 w-3.5 text-sky-400/80" />
+        Figures net of customer credit notes
+      </span>
+    </TooltipTrigger>
+    <TooltipContent side="bottom" className="max-w-xs text-xs">
+      A credit note reverses part of an invoice after it was booked (refund, discount, billing
+      correction). Every figure here already has credit notes subtracted — the conservative,
+      fully-reconciled basis. {BASIS_LABELS.STRICT}
+    </TooltipContent>
+  </Tooltip>
+);
+
+// ------------------------------------------------------- comparison toggle
+
+/** Decision #2 (2026-08-03): ONE comparison shown at a time everywhere — KPI
+ * cards, charts, the P&L table — never both PY and Budget together ("fa solo
+ * casino" together). Global + persisted, default "Versus Previous Year". */
+export const ComparisonToggle = () => {
+  const { comparisonMode, setComparisonMode } = useAlignment();
+  const seg = (m: ComparisonMode, label: string, Icon: typeof TrendingUp) => (
     <button
       type="button"
-      onClick={() => !disabled && setBasis(b)}
-      disabled={disabled}
-      aria-pressed={basis === b}
+      onClick={() => setComparisonMode(m)}
+      aria-pressed={comparisonMode === m}
       className={cn(
-        "px-3 py-1.5 text-xs font-semibold rounded-md transition-colors min-h-[36px]",
-        basis === b && !disabled
-          ? b === "VALIDATED"
-            ? "bg-gold text-gold-foreground shadow-sm"
-            : "bg-sky-500 text-white shadow-sm"
+        "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors min-h-[36px]",
+        comparisonMode === m
+          ? "bg-gold text-gold-foreground shadow-sm"
           : "text-muted-foreground hover:text-foreground",
-        disabled && "opacity-50 cursor-not-allowed",
       )}
-      title={BASIS_LABELS[b]}
     >
+      <Icon className="h-3.5 w-3.5" />
       {label}
     </button>
   );
-  const control = (
-    <div className="inline-flex items-center gap-1.5">
-      <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
-        {seg("VALIDATED", BASIS_PLAIN_LABEL.VALIDATED)}
-        {seg("STRICT", BASIS_PLAIN_LABEL.STRICT)}
-        {disabled && <Lock className="h-3.5 w-3.5 text-muted-foreground mr-1" />}
-      </div>
-      {!disabled && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="What are credit notes?"
-              className="inline-flex items-center justify-center h-6 w-6 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
-            >
-              <Info className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="max-w-xs text-xs space-y-1">
-            <p>
-              A <strong>credit note</strong> reverses part of an invoice after it was booked — a refund,
-              a discount, or a billing correction. It reduces the revenue that invoice originally showed.
-            </p>
-            <p>
-              <strong>Before credit notes</strong> matches the delivered performance package (the numbers
-              everyone already validated). <strong>Net of credit notes</strong> is the stricter view where
-              those reversals are subtracted — same underlying data, more conservative revenue.
-            </p>
-          </TooltipContent>
-        </Tooltip>
-      )}
+  return (
+    <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
+      {seg("PY", "Versus Previous Year", TrendingUp)}
+      {seg("BUDGET", "Versus Budget", Wallet)}
     </div>
   );
-  if (!disabled) return control;
+};
+
+// ------------------------------------------------------------- scope toggle
+
+/** Decision #3 (2026-08-03): absorbs the old Statutory/Management structure
+ * toggle — "Only Recurring" filters the statement to recurring lines only
+ * (dim_recurrence). Global + persisted, default "All". */
+export const ScopeToggle = () => {
+  const { scope, setScope } = useAlignment();
+  const seg = (s: Scope, label: string, Icon: typeof Layers) => (
+    <button
+      type="button"
+      onClick={() => setScope(s)}
+      aria-pressed={scope === s}
+      className={cn(
+        "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors min-h-[36px]",
+        scope === s
+          ? "bg-gold text-gold-foreground shadow-sm"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{control}</TooltipTrigger>
-      <TooltipContent side="bottom" className="max-w-sm text-xs">
-        {disabledReason ?? "The basis toggle does not apply to this statement."}
-      </TooltipContent>
-    </Tooltip>
+    <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
+      {seg("ALL", "All", Layers)}
+      {seg("RECURRING", "Only Recurring", Repeat)}
+    </div>
   );
 };
 

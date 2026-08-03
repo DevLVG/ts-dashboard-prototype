@@ -230,7 +230,7 @@ export const resolveRecurrence = (
 /** Inclusive month-key window. */
 export interface Win { startKey: string; endKey: string }
 
-export type WindowPresetId = "AS_DELIVERED" | "LAST_MONTH" | "TTM" | "YTD" | "FY" | string; // "M:YYYY-MM"
+export type WindowPresetId = "AS_DELIVERED" | "MTD" | "LAST_MONTH" | "TTM" | "YTD" | "FY" | string; // "M:YYYY-MM"
 
 /** The pinned package window (§0.2) — a WINDOW DEFINITION, not a figure. */
 export const AS_DELIVERED_WIN: Win = { startKey: "2025-06", endKey: "2026-05" };
@@ -246,25 +246,46 @@ export const shiftWin = (w: Win, months: number): Win => ({
 /** PY = the same window shifted −12 months (§0.2). Never anything else. */
 export const pyWin = (w: Win): Win => shiftWin(w, -12);
 
-export const resolveWindow = (preset: WindowPresetId, lastComplete: string): { win: Win; name: string } => {
+/** A window "includes open months" whenever it reaches past the last CLOSED
+ * month (`lastComplete`, derived from actual cost postings — see
+ * `lastCompleteFromBasis`). "To date" windows (Month to date / YTD / FY to
+ * date) are anchored to TODAY, not to the last close, so they routinely
+ * extend into a month that hasn't fully posted yet — that's the honesty-rule
+ * case (§0.3) the inline badge exists for. */
+export const windowIncludesOpenMonths = (w: Win, lastComplete: string): boolean => w.endKey > lastComplete;
+
+/**
+ * Resolve a window preset to an actual month range + display name.
+ *
+ * `lastComplete` = the last CLOSED month (data-driven — costs materially
+ * posted). Used by TTM / "Last closed month", which must stay 12 CLOSED
+ * months for trend comparability, never open ones.
+ *
+ * `todayKey` = today's real calendar month (device clock, see
+ * `todayMonthKey()` — never hard-coded). Used by "to date" windows (Month to
+ * date / YTD / FY to date) per the founder's request: these must track the
+ * actual calendar, not freeze at whatever month the data last closed.
+ */
+export const resolveWindow = (preset: WindowPresetId, lastComplete: string, todayKey: string): { win: Win; name: string } => {
   if (preset === "AS_DELIVERED") return { win: AS_DELIVERED_WIN, name: "As delivered (TTM Jun-25→May-26)" };
+  if (preset === "MTD") return { win: { startKey: todayKey, endKey: todayKey }, name: `Month to date (${monthKeyLabel(todayKey)})` };
   if (preset === "LAST_MONTH") return { win: { startKey: lastComplete, endKey: lastComplete }, name: `Last closed month (${monthKeyLabel(lastComplete)})` };
   if (preset === "TTM") return { win: { startKey: shiftMonthKey(lastComplete, -11), endKey: lastComplete }, name: `TTM (${monthKeyLabel(shiftMonthKey(lastComplete, -11))}→${monthKeyLabel(lastComplete)})` };
   if (preset === "YTD") {
-    const y = lastComplete.slice(0, 4);
-    return { win: { startKey: `${y}-01`, endKey: lastComplete }, name: `YTD (Jan→${monthKeyLabel(lastComplete)})` };
+    const y = todayKey.slice(0, 4);
+    return { win: { startKey: `${y}-01`, endKey: todayKey }, name: `YTD (Jan→${monthKeyLabel(todayKey)})` };
   }
   if (preset === "FY") {
-    // Fiscal year starts June (§0.2).
-    const [y, m] = lastComplete.split("-").map(Number);
+    // Fiscal year starts June (§0.2) — anchored to TODAY, not the last close.
+    const [y, m] = todayKey.split("-").map(Number);
     const fyStart = m >= 6 ? `${y}-06` : `${y - 1}-06`;
-    return { win: { startKey: fyStart, endKey: lastComplete }, name: `FY to date (${monthKeyLabel(fyStart)}→${monthKeyLabel(lastComplete)})` };
+    return { win: { startKey: fyStart, endKey: todayKey }, name: `FY to date (${monthKeyLabel(fyStart)}→${monthKeyLabel(todayKey)})` };
   }
   if (preset.startsWith("M:")) {
     const k = preset.slice(2);
     return { win: { startKey: k, endKey: k }, name: monthKeyLabel(k) };
   }
-  return resolveWindow("TTM", lastComplete);
+  return resolveWindow("TTM", lastComplete, todayKey);
 };
 
 /** Fiscal quarters of the FY containing/ending at the anchor (Q1=Jun-Aug). */

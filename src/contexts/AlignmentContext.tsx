@@ -4,7 +4,8 @@
 // with an explanatory tooltip (cash/BS are basis-independent by nature).
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Basis, WindowPresetId, Win } from "@/data/alignment";
-import { resolveWindow, pyWin, winLabel } from "@/data/alignment";
+import { resolveWindow, pyWin, winLabel, windowIncludesOpenMonths } from "@/data/alignment";
+import { todayMonthKey } from "@/data/liveData";
 
 interface AlignmentState {
   basis: Basis;
@@ -20,6 +21,12 @@ interface AlignmentState {
   /** Last complete month (set by the data host once rows load). */
   lastComplete: string;
   setLastComplete: (k: string) => void;
+  /** Today's real calendar month (device clock, refreshed hourly) — anchors
+   * "to date" windows (Month to date / YTD / FY to date). Never hard-coded. */
+  todayKey: string;
+  /** True when the ACTIVE window reaches past the last closed month — i.e.
+   * it contains at least one still-open month (revenue live, costs partial). */
+  includesOpenMonths: boolean;
   /** Founder gate (spec §1.1 / punch item 3): the model-adjustment memo
    * ladder is OPT-IN for client viewing — default OFF on load, persisted.
    * One switch governs both the P&L View-B memo lines and the P3 tile
@@ -49,21 +56,32 @@ export const AlignmentProvider = ({ children }: { children: ReactNode }) => {
     const v = typeof localStorage !== "undefined" ? localStorage.getItem(MEMO_KEY) : null;
     return v === "on";
   });
+  // Today's calendar month, read from the device clock — refreshed hourly so
+  // a cockpit left open overnight rolls MTD/YTD/FYTD to the new month/year on
+  // its own, with no reload and nothing hard-coded (Marcello: "il 'to date'
+  // non può essere June — deve essere aggiornato costantemente alla data
+  // odierna").
+  const [todayKey, setTodayKey] = useState<string>(() => todayMonthKey());
+  useEffect(() => {
+    const id = setInterval(() => setTodayKey(todayMonthKey()), 60 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const setBasis = (b: Basis) => { setBasisState(b); try { localStorage.setItem(BASIS_KEY, b); } catch { /* private mode */ } };
   const setPreset = (p: WindowPresetId) => { setPresetState(p); try { localStorage.setItem(PRESET_KEY, p); } catch { /* private mode */ } };
   const setMemoOn = (v: boolean) => { setMemoOnState(v); try { localStorage.setItem(MEMO_KEY, v ? "on" : "off"); } catch { /* private mode */ } };
 
   const value = useMemo<AlignmentState>(() => {
-    const { win, name } = resolveWindow(preset, lastComplete);
+    const { win, name } = resolveWindow(preset, lastComplete, todayKey);
     const py = pyWin(win);
     return {
       basis, setBasis, preset, setPreset, win, windowName: name, py,
       winLabelText: winLabel(win), pyLabelText: winLabel(py),
       lastComplete, setLastComplete,
+      todayKey, includesOpenMonths: windowIncludesOpenMonths(win, lastComplete),
       memoOn, setMemoOn,
     };
-  }, [basis, preset, lastComplete, memoOn]);
+  }, [basis, preset, lastComplete, memoOn, todayKey]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 };

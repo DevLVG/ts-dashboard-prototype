@@ -20,7 +20,7 @@ import {
   ResponsiveContainer, ReferenceLine, Legend, Cell,
 } from "recharts";
 import { useAlignment } from "@/contexts/AlignmentContext";
-import { BasisBadge, BasisToggle, WindowPicker, CompletenessBanner, BudgetBasisFootnote, IncompleteMark, ScrollHint } from "@/components/chrome/AlignmentChrome";
+import { BasisBadge, BasisToggle, WindowPicker, OpenMonthsBadge, CompletenessBanner, BudgetBasisFootnote, IncompleteMark, ScrollHint } from "@/components/chrome/AlignmentChrome";
 import {
   useBasisRows, useRecurrence, useModelAdjustments, aggregatePL, aggregateRecurring,
   aggregateBudgetWindow, budgetMonthsSet, monthlySeries, deriveCompleteness,
@@ -386,6 +386,7 @@ export const PnLOverview = () => {
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3">
         <WindowPicker months={factMonths(rows)} />
+        <OpenMonthsBadge />
         <BasisToggle />
         <Select value={selectedBU} onValueChange={setSelectedBU}>
           <SelectTrigger className="w-52 bg-background font-medium"><SelectValue /></SelectTrigger>

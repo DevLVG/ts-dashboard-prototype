@@ -269,6 +269,16 @@ const n = (v: number | null | undefined): number => v ?? 0;
 /** "YYYY-MM" key from a date string */
 export const monthKey = (date: string): string => date.slice(0, 7);
 
+/** "YYYY-MM" key for the CURRENT calendar month, read from the device clock
+ * at call time — never hard-coded. This anchors "to date" windows (Month to
+ * date / YTD / FY to date) to today, per the founder's request that these
+ * windows update on their own instead of freezing at whatever month they
+ * were last wired to. */
+export const todayMonthKey = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+
 /** Shift a "YYYY-MM" key by +/- months */
 export const shiftMonthKey = (key: string, months: number): string => {
   const [y, m] = key.split("-").map(Number);

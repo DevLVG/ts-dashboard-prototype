@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, Scale, Lock, Archive, ChevronsRight } from "lucide-react";
+import { AlertTriangle, Scale, Lock, Archive, ChevronsRight, Radio } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlignment } from "@/contexts/AlignmentContext";
 import {
-  BASIS_LABELS, deriveCompleteness, useCompletenessMonthly,
+  BASIS_LABELS, deriveCompleteness, useCompletenessMonthly, resolveWindow,
   flagsFromCompletenessView, type Basis, type BasisRow,
 } from "@/data/alignment";
 import { monthKeyLabel, shiftMonthKey } from "@/data/liveData";
@@ -79,13 +79,24 @@ export const BasisToggle = ({ disabled, disabledReason }: { disabled?: boolean; 
 // ---------------------------------------------------------- window picker
 
 export const WindowPicker = ({ months }: { months?: string[] }) => {
-  const { preset, setPreset, lastComplete } = useAlignment();
+  const { preset, setPreset, lastComplete, todayKey } = useAlignment();
   const monthItems = useMemo(() => {
     const src = months && months.length > 0
       ? [...months].filter((m) => m <= lastComplete).slice(-18).reverse()
       : Array.from({ length: 14 }, (_, i) => shiftMonthKey(lastComplete, -i));
     return src;
   }, [months, lastComplete]);
+  // Every "to date" / trend label is derived from resolveWindow — the SAME
+  // function that resolves the active window — so the menu text can never
+  // drift from what selecting it actually computes. Nothing here is
+  // hard-coded: MTD/YTD/FY track `todayKey` (today's real calendar month);
+  // TTM/Last-closed-month track `lastComplete` (the last CLOSED month) and
+  // relabel on their own once a new month's costs post (§0.2).
+  const mtd = useMemo(() => resolveWindow("MTD", lastComplete, todayKey), [lastComplete, todayKey]);
+  const ttm = useMemo(() => resolveWindow("TTM", lastComplete, todayKey), [lastComplete, todayKey]);
+  const lastMonth = useMemo(() => resolveWindow("LAST_MONTH", lastComplete, todayKey), [lastComplete, todayKey]);
+  const ytd = useMemo(() => resolveWindow("YTD", lastComplete, todayKey), [lastComplete, todayKey]);
+  const fy = useMemo(() => resolveWindow("FY", lastComplete, todayKey), [lastComplete, todayKey]);
   return (
     <Select value={preset} onValueChange={setPreset}>
       <SelectTrigger className="w-[290px] bg-background font-medium">
@@ -98,15 +109,47 @@ export const WindowPicker = ({ months }: { months?: string[] }) => {
             As delivered (TTM Jun-25→May-26)
           </span>
         </SelectItem>
-        <SelectItem value="TTM">{`TTM (${monthKeyLabel(shiftMonthKey(lastComplete, -11))}→${monthKeyLabel(lastComplete)})`}</SelectItem>
-        <SelectItem value="LAST_MONTH">{`Last closed month (${monthKeyLabel(lastComplete)})`}</SelectItem>
-        <SelectItem value="YTD">{`YTD (Jan→${monthKeyLabel(lastComplete)})`}</SelectItem>
-        <SelectItem value="FY">FY to date (fiscal year starts June)</SelectItem>
+        <SelectItem value="MTD">
+          <span className="inline-flex items-center gap-2">
+            <Radio className="h-3 w-3 text-amber-400" />
+            {mtd.name}
+          </span>
+        </SelectItem>
+        <SelectItem value="TTM">{ttm.name}</SelectItem>
+        <SelectItem value="LAST_MONTH">{lastMonth.name}</SelectItem>
+        <SelectItem value="YTD">{ytd.name}</SelectItem>
+        <SelectItem value="FY">{fy.name}</SelectItem>
         {monthItems.map((m) => (
           <SelectItem key={m} value={`M:${m}`}>{monthKeyLabel(m)}</SelectItem>
         ))}
       </SelectContent>
     </Select>
+  );
+};
+
+// ------------------------------------------------------- open-months badge
+
+/** Spec §0.3 honesty rule: any window reaching past the last closed month
+ * carries this badge — revenue is live, costs may still be partial. Reuses
+ * the same "closed vs open" signal as the completeness banner so certified
+ * and open data are never silently mixed without a visible flag. */
+export const OpenMonthsBadge = () => {
+  const { includesOpenMonths } = useAlignment();
+  if (!includesOpenMonths) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-amber-300 cursor-help">
+          <Radio className="h-3 w-3" />
+          Includes open months
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-xs text-xs">
+        This window reaches into a month that hasn't closed yet: revenue is live and up to date, but
+        supplier bills and other costs may still be partially posted. See the completeness banner below
+        for which month(s) and why.
+      </TooltipContent>
+    </Tooltip>
   );
 };
 

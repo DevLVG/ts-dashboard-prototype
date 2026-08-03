@@ -12,9 +12,10 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-// Root ("/") redirect, role-aware: not every role lands on /overview (e.g.
-// administration has no P&L access — see src/lib/roles.ts) — send each
-// signed-in user straight to the first page their role can see.
+// Root ("/") redirect, role-aware: not every role lands on /performance
+// (e.g. administration has no Economics access, only Treasury + Cash Flow —
+// see src/lib/roles.ts) — send each signed-in user straight to the first
+// page their role can see.
 const RootRedirect = () => {
   const { session } = useAuth();
   const role = resolveRole(session?.user?.email);
@@ -40,21 +41,28 @@ const App = () => {
               {/* EVERYTHING below sits behind the auth guard */}
               <Route element={<RequireAuth />}>
                 <Route path="/" element={<RootRedirect />} />
-                <Route path="/overview" element={<Index />} />
+                {/* P&L Overview and Drill retired from the nav (live review
+                    #2, 2026-08-03) — /performance ("Economics") replaces
+                    both. Hard redirect, not a route to <Index/>: neither
+                    path should ever render, even by direct URL/bookmark.
+                    The PnLOverview/EconomicAnalysis components and the
+                    "overview"/"analysis" PageType values are left in the
+                    codebase untouched — nav + routing only. */}
+                <Route path="/overview" element={<Navigate to="/performance" replace />} />
                 <Route path="/performance" element={<Index />} />
                 <Route path="/cash" element={<Index />} />
                 <Route path="/treasury" element={<Index />} />
                 <Route path="/payments" element={<Index />} />
                 <Route path="/balance" element={<Index />} />
-                <Route path="/analysis" element={<Index />} />
+                <Route path="/analysis" element={<Navigate to="/performance" replace />} />
                 <Route path="/catalog" element={<Index />} />
                 <Route path="/media" element={<Index />} />
                 <Route path="/copy" element={<Index />} />
                 <Route path="/competitions" element={<Index />} />
                 <Route path="/instructors" element={<Index />} />
                 {/* Legacy routes from the pre-alignment IA */}
-                <Route path="/ratios" element={<Navigate to="/overview" replace />} />
-                <Route path="/statements" element={<Navigate to="/overview" replace />} />
+                <Route path="/ratios" element={<Navigate to="/performance" replace />} />
+                <Route path="/statements" element={<Navigate to="/performance" replace />} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Route>

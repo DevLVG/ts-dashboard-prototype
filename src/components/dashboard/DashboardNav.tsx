@@ -7,13 +7,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  LayoutDashboard,
   TrendingUp,
   Banknote,
   Wallet,
   Stamp,
   Scale,
-  ListTree,
   LogOut,
   Package,
   Image,
@@ -44,12 +42,16 @@ interface NavPage {
 
 // Every page the shell knows about. Grouping/order for display lives in
 // NAV_GROUPS below — this is just the id -> label/icon/path lookup.
+// "overview" and "analysis" are gone from the nav entirely (live review #2,
+// 2026-08-03): the "performance" page — relabeled "Economics" — replaces
+// both (its explodable table covers what Drill was for). The page
+// components and the PageType values themselves are untouched for now;
+// /overview and /analysis just redirect to /performance at the router
+// level (see App.tsx) so they're never reachable, not even hidden-but-live.
 const ALL_PAGES: NavPage[] = [
-  { id: "overview", label: "P&L Overview", icon: LayoutDashboard, path: "/overview" },
-  { id: "performance", label: "Performance", icon: TrendingUp, path: "/performance" },
+  { id: "performance", label: "Economics", icon: TrendingUp, path: "/performance" },
   { id: "cash", label: "Cash Flow", icon: Banknote, path: "/cash" },
   { id: "balance", label: "Balance Sheet", icon: Scale, path: "/balance" },
-  { id: "analysis", label: "Drill", icon: ListTree, path: "/analysis" },
   { id: "treasury", label: "Treasury", icon: Wallet, path: "/treasury" },
   { id: "payments", label: "Approvals", icon: Stamp, path: "/payments" },
   { id: "catalog", label: "Catalogue", icon: Package, path: "/catalog" },
@@ -60,20 +62,28 @@ const ALL_PAGES: NavPage[] = [
   { id: "slot-priority", label: "Calendario slot", icon: CalendarClock, path: "/slot-priority" },
 ];
 
-// Top nav regroup (Marcello, live review #1, 2026-08-03): three sections —
-// Performance (statements + the Drill tool), Treasury (kept apart), and
-// Marketing (the CMS admin pages, labeled "Marketing" per his call). Adding
-// a page later only means adding its id to one of the lists below; role
-// gating (src/lib/roles.ts) still decides what's actually visible.
+// Top nav IA (Marcello, live review #2, 2026-08-03): Performance (Economics
+// default + Cash Flow + Balance Sheet), Admin (Treasury default + Approvals
+// — renamed from "Treasury" so the group label and its default item aren't
+// the same word), Marketing (CMS pages, unchanged). Adding a page later
+// only means adding its id to one of the lists below; role gating
+// (src/lib/roles.ts) still decides what's actually visible.
 interface NavGroup {
   id: string;
   label: string;
   pageIds: PageType[];
+  /** If set, clicking the group's own label navigates straight here — the
+   * chevron still opens the dropdown listing every page in pageIds. Groups
+   * without a default (Marketing) render as a plain click/hover-to-open
+   * trigger with no independent navigation of their own. Meaningless once
+   * a group collapses to its single-item form (that always links directly
+   * to whichever one page survived role-filtering). */
+  defaultPageId?: PageType;
 }
 
 const NAV_GROUPS: NavGroup[] = [
-  { id: "performance-group", label: "Performance", pageIds: ["overview", "performance", "cash", "balance", "analysis"] },
-  { id: "treasury-group", label: "Treasury", pageIds: ["treasury", "payments"] },
+  { id: "performance-group", label: "Performance", defaultPageId: "performance", pageIds: ["performance", "cash", "balance"] },
+  { id: "admin-group", label: "Admin", defaultPageId: "treasury", pageIds: ["treasury", "payments"] },
   { id: "marketing-group", label: "Marketing", pageIds: ["catalog", "media", "copy", "competitions", "instructors", "slot-priority"] },
 ];
 
@@ -181,6 +191,76 @@ export const DashboardNav = ({ currentPage }: DashboardNavProps) => {
                 );
               }
 
+              const dropdownContent = (
+                <DropdownMenuContent
+                  align="start"
+                  className="min-w-[200px]"
+                  onMouseEnter={() => openOnHover(group.id)}
+                  onMouseLeave={closeOnHover}
+                >
+                  {group.pages.map((page) => (
+                    <DropdownMenuItem key={page.id} asChild className="cursor-pointer">
+                      <NavLink
+                        to={page.path}
+                        className={cn(
+                          "flex items-center gap-2",
+                          currentPage === page.id && "bg-accent/70 text-accent-foreground font-semibold",
+                        )}
+                      >
+                        <page.icon className="h-4 w-4" />
+                        {page.label}
+                      </NavLink>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              );
+
+              // Group has a default item (Performance → Economics, Admin →
+              // Treasury): split button — the label itself is a plain link
+              // to the default page, a separate small chevron button opens
+              // the dropdown with every page in the group. Both halves share
+              // one active/ghost look so they read as a single pill.
+              if (group.defaultPageId) {
+                const defaultPage =
+                  group.pages.find((page) => page.id === group.defaultPageId) ?? group.pages[0];
+                return (
+                  <DropdownMenu
+                    key={group.id}
+                    modal={false}
+                    open={openGroup === group.id}
+                    onOpenChange={(open) => setOpenGroup(open ? group.id : null)}
+                  >
+                    <div className="flex items-center" onMouseEnter={() => openOnHover(group.id)} onMouseLeave={closeOnHover}>
+                      <NavLink to={defaultPage.path}>
+                        <Button
+                          variant={isGroupActive ? "default" : "ghost"}
+                          size="sm"
+                          className="gap-1.5 rounded-r-none transition-colors"
+                        >
+                          {group.label}
+                        </Button>
+                      </NavLink>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant={isGroupActive ? "default" : "ghost"}
+                          size="sm"
+                          className={cn(
+                            "rounded-l-none border-l px-1.5 transition-colors",
+                            isGroupActive ? "border-primary-foreground/20" : "border-border/60",
+                          )}
+                          aria-label={`${group.label} — more pages`}
+                        >
+                          <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      {dropdownContent}
+                    </div>
+                  </DropdownMenu>
+                );
+              }
+
+              // No default (Marketing): plain click/hover-to-open trigger,
+              // the whole pill is just the dropdown toggle.
               return (
                 <DropdownMenu
                   key={group.id}
@@ -204,27 +284,7 @@ export const DashboardNav = ({ currentPage }: DashboardNavProps) => {
                         <ChevronDown className="h-3.5 w-3.5 opacity-70" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      align="start"
-                      className="min-w-[200px]"
-                      onMouseEnter={() => openOnHover(group.id)}
-                      onMouseLeave={closeOnHover}
-                    >
-                      {group.pages.map((page) => (
-                        <DropdownMenuItem key={page.id} asChild className="cursor-pointer">
-                          <NavLink
-                            to={page.path}
-                            className={cn(
-                              "flex items-center gap-2",
-                              currentPage === page.id && "bg-accent/70 text-accent-foreground font-semibold",
-                            )}
-                          >
-                            <page.icon className="h-4 w-4" />
-                            {page.label}
-                          </NavLink>
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
+                    {dropdownContent}
                   </div>
                 </DropdownMenu>
               );

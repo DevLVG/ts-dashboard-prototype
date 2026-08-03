@@ -21,7 +21,7 @@ const ROLE_EMAILS: Record<Exclude<Role, "unknown">, string[]> = {
 };
 
 /** Resolve a signed-in user's role from their email. Unmatched (or no)
- * email → "unknown" (P&L Overview only — the safe, minimal default for any
+ * email → "unknown" (Economics only — the safe, minimal default for any
  * authenticated user not yet on the role map). Case-insensitive exact match. */
 export const resolveRole = (email?: string | null): Role => {
   if (!email) return "unknown";
@@ -32,9 +32,17 @@ export const resolveRole = (email?: string | null): Role => {
   return "unknown";
 };
 
-const CMS_PAGES: PageType[] = ["catalog", "media", "copy", "competitions", "instructors"];
+const CMS_PAGES: PageType[] = ["catalog", "media", "copy", "competitions", "instructors", "slot-priority"];
+// "overview" and "analysis" are retired from the nav (live review #2,
+// 2026-08-03) — the "performance" page ("Economics" in the nav; see
+// DashboardNav.tsx) replaces both, and /overview + /analysis hard-redirect
+// to /performance at the router level (App.tsx). Deliberately left out of
+// ALL_PAGES/BUSINESS_PAGES below: nothing should be granted role access to
+// a destination that no longer exists. The PageType values and page
+// components themselves are untouched for now — this is an access-list
+// change only.
 const ALL_PAGES: PageType[] = [
-  "overview", "performance", "cash", "treasury", "payments", "balance", "analysis",
+  "performance", "cash", "treasury", "payments", "balance",
   ...CMS_PAGES,
 ];
 /** "Everything business" = every screen except the CMS admin tabs. */
@@ -43,9 +51,9 @@ const BUSINESS_PAGES: PageType[] = ALL_PAGES.filter((p) => !CMS_PAGES.includes(p
 /** Pages each role may see. First entry is that role's landing page. */
 export const ROLE_PAGES: Record<Role, PageType[]> = {
   leveredge: ALL_PAGES,                    // everything, incl. CMS admin
-  ceo: BUSINESS_PAGES,                     // all statements + Treasury + Approvals + Drill; not CMS
+  ceo: BUSINESS_PAGES,                     // Economics + Cash Flow + Balance Sheet + Treasury + Approvals; not CMS
   administration: ["treasury", "cash"],    // Treasury workspace (4 sub-tabs) + Cash Flow only
-  unknown: ["overview"],                   // P&L Overview only
+  unknown: ["performance"],                // Economics only, read-only default landing
 };
 
 export const ROLE_LABELS: Record<Role, string> = {

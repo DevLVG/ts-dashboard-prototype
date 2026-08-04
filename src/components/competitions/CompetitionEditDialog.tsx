@@ -32,6 +32,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { CheckCircle2, Loader2, Trash2, Wand2, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { shopifyImageThumb } from "@/lib/imageThumb";
 import {
   type Competition, type CompetitionStatus, type EditableField, STATUS_LABEL,
   useUpdateCompetitionField, useCreateCompetition, useDeleteCompetition, cartUrlFromVariant,
@@ -558,7 +559,13 @@ export const CompetitionEditDialog = ({ open, onOpenChange, competition, actor }
             <Input id="heroImage" value={f.hero_image_url} onChange={(e) => onFieldChange("hero_image_url", e.target.value)} className="mt-1" />
             {f.hero_image_url && (
               <div className="mt-2 h-24 w-40 rounded-md border bg-muted/30 overflow-hidden">
-                <img src={f.hero_image_url} alt="Hero preview" className="h-full w-full object-cover" />
+                <img
+                  src={shopifyImageThumb(f.hero_image_url, { width: 320 }) ?? f.hero_image_url}
+                  alt="Hero preview"
+                  loading="lazy"
+                  decoding="async"
+                  className="h-full w-full object-cover"
+                />
               </div>
             )}
           </div>

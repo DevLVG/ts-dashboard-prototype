@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArrowDown, ArrowUp, ImageOff, Plus, X } from "lucide-react";
+import { shopifyImageThumb } from "@/lib/imageThumb";
 import { MediaLibraryPickerButton } from "./MediaLibraryPickerButton";
 import { move, uid, type GalleryRow } from "./ticketTierFormat";
 
@@ -31,7 +32,13 @@ export const GalleryRepeater = ({ rows, onChange }: Props) => {
         <div key={row.id} className="flex items-center gap-2">
           <div className="h-10 w-10 rounded-md border bg-muted/30 flex items-center justify-center overflow-hidden shrink-0">
             {row.url ? (
-              <img src={row.url} alt="Gallery preview" className="h-full w-full object-cover" />
+              <img
+                src={shopifyImageThumb(row.url, { width: 80 }) ?? row.url}
+                alt="Gallery preview"
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover"
+              />
             ) : (
               <ImageOff className="h-4 w-4 text-muted-foreground" />
             )}

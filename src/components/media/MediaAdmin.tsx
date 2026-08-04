@@ -8,7 +8,7 @@
 // now auto-triggers sync_media_to_theme.py (via the new media_sync_api.py
 // wrapper) — same debounce + per-item status pattern as the Catalogue.
 // Always the DRAFT theme, never live — see mediaLive.ts header comment.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ImageIcon, Video, FileText, Search, Pencil, ShieldAlert, AlertTriangle, Loader2, CheckCircle2, XCircle, ShieldQuestion } from "lucide-react";
+import { ImageIcon, Video, FileText, Search, Pencil, ShieldAlert, AlertTriangle, Loader2, CheckCircle2, XCircle, ShieldQuestion, ChevronDown } from "lucide-react";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -103,6 +103,15 @@ const BACKEND_TONE: Record<string, string> = {
   supabase: "border-sky-500/40 text-sky-400",
 };
 
+// fix-29-cms-perf (2026-08-04): the grid used to mount every filtered asset
+// at once — up to all 108 rows, each an eagerly-fetched image from the
+// Media Library's Vercel-hosted static host (no resize endpoint available
+// there, unlike the Catalogue's Supabase Storage images — see imageThumb.ts
+// header comment). Cold load measured 22-37s to network-idle. Paginating
+// the DOM (not just the query) keeps the number of <img> tags — and
+// therefore in-flight requests — bounded regardless of library size.
+const PAGE_SIZE = 18;
+
 const fmtBytes = (n: number | null) => {
   if (n == null) return "—";
   if (n < 1024) return `${n} B`;
@@ -121,6 +130,7 @@ export const MediaAdmin = () => {
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [reviewOnly, setReviewOnly] = useState(false);
   const [editing, setEditing] = useState<SiteMediaAsset | null>(null);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const pageOptions = useMemo(() => {
     const set = new Set((assets ?? []).map((a) => a.page));
@@ -144,6 +154,13 @@ export const MediaAdmin = () => {
   }, [assets, search, pageFilter, typeFilter, reviewOnly]);
 
   const reviewCount = (assets ?? []).filter((a) => a.needs_review).length;
+
+  // Reset pagination whenever the visible set changes underneath it — same
+  // "load more" pattern regardless of which filter narrowed the results.
+  useEffect(() => setVisibleCount(PAGE_SIZE), [search, pageFilter, typeFilter, reviewOnly]);
+
+  const paged = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+  const hasMore = filtered.length > paged.length;
 
   return (
     <div className="space-y-6">
@@ -203,7 +220,7 @@ export const MediaAdmin = () => {
           <p className="text-sm text-muted-foreground">No assets match this filter.</p>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3" data-testid="media-grid">
-            {filtered.map((a) => (
+            {paged.map((a) => (
               <button key={a.media_key} onClick={() => setEditing(a)}
                 className="group relative rounded-md border overflow-hidden bg-muted/20 text-left hover:border-gold/60 transition-colors">
                 <div className="aspect-square w-full flex items-center justify-center bg-muted/30 overflow-hidden">
@@ -239,7 +256,14 @@ export const MediaAdmin = () => {
             ))}
           </div>
         )}
-        <p className="text-xs text-muted-foreground mt-3">{filtered.length} of {assets?.length ?? 0} assets shown</p>
+        {hasMore && (
+          <div className="flex justify-center mt-4">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}>
+              <ChevronDown className="h-3.5 w-3.5" /> Load {Math.min(PAGE_SIZE, filtered.length - paged.length)} more
+            </Button>
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground mt-3">{paged.length} of {filtered.length} matching · {assets?.length ?? 0} assets total</p>
       </Card>
 
       <MediaAuditLog />

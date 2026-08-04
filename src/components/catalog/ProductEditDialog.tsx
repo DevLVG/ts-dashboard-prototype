@@ -19,9 +19,10 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { Loader2, ImagePlus, Trash2, AlertTriangle, CheckCircle2, XCircle, FileClock } from "lucide-react";
+import { Loader2, ImagePlus, Trash2, AlertTriangle, CheckCircle2, XCircle, FileClock, Maximize2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { supabaseImageThumb } from "@/lib/imageThumb";
 import {
   type CatalogProduct, type EditableField, DERIVED_PRICE_SKUS,
   useUpdateCatalogField, useCreateCatalogProduct, useDeleteCatalogProduct, uploadCatalogImage,
@@ -439,9 +440,29 @@ export const ProductEditDialog = ({ open, onOpenChange, product, actor }: Props)
           <div>
             <Label>Image</Label>
             <div className="mt-1 flex items-center gap-3">
-              <div className="h-20 w-20 rounded-md border bg-muted/30 flex items-center justify-center overflow-hidden shrink-0">
+              <div className="relative h-20 w-20 rounded-md border bg-muted/30 flex items-center justify-center overflow-hidden shrink-0 group">
                 {imagePreview ? (
-                  <img src={imagePreview} alt="Product preview" className="h-full w-full object-cover" />
+                  <>
+                    <img
+                      src={supabaseImageThumb(imagePreview, { width: 200 }) ?? imagePreview}
+                      alt="Product preview"
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full object-cover"
+                    />
+                    {/* Grid/preview always shows a resized copy (see imageThumb.ts —
+                        the original AI-bridge PNGs run up to ~3.4MB); this is the one
+                        deliberate way to reach the untouched full-resolution original. */}
+                    <a
+                      href={imagePreview}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="View full-resolution image"
+                      className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/40 opacity-0 group-hover:opacity-100 transition-all"
+                    >
+                      <Maximize2 className="h-4 w-4 text-white" />
+                    </a>
+                  </>
                 ) : (
                   <ImagePlus className="h-6 w-6 text-muted-foreground" />
                 )}

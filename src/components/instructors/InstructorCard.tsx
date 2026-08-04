@@ -110,7 +110,13 @@ export const InstructorCard = ({ row, actor }: Props) => {
         <div className="flex items-center gap-3">
           <div className="h-16 w-16 rounded-full border bg-muted/30 flex items-center justify-center overflow-hidden shrink-0">
             {photoPreview ? (
-              <img src={photoPreview} alt={name || "Instructor photo"} className="h-full w-full object-cover" />
+              <img
+                src={photoPreview}
+                alt={name || "Instructor photo"}
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover"
+              />
             ) : (
               <ImagePlus className="h-5 w-5 text-muted-foreground" />
             )}

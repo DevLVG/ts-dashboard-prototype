@@ -62,7 +62,13 @@ export const MediaLibraryPickerButton = ({ onSelect, mediaType, label = "Browse 
                   {a.media_type === "video" ? (
                     <VideoIcon className="h-4 w-4 text-muted-foreground" />
                   ) : a.media_type === "image" ? (
-                    <img src={a.asset_url} alt={a.alt_text ?? a.media_key} className="h-full w-full object-cover" />
+                    <img
+                      src={a.asset_url}
+                      alt={a.alt_text ?? a.media_key}
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full object-cover"
+                    />
                   ) : (
                     <ImageIcon className="h-4 w-4 text-muted-foreground" />
                   )}

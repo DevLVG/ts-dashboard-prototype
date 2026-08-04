@@ -17,6 +17,7 @@ import { ScrollHint } from "@/components/chrome/AlignmentChrome";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCompetitions, type Competition, type CompetitionStatus, STATUS_LABEL } from "@/data/competitionsLive";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
+import { shopifyImageThumb } from "@/lib/imageThumb";
 import { CompetitionEditDialog } from "@/components/competitions/CompetitionEditDialog";
 import { CompetitionsAuditLog } from "@/components/competitions/CompetitionsAuditLog";
 
@@ -134,7 +135,13 @@ export const CompetitionsAdmin = () => {
                     <TableCell>
                       <div className="h-10 w-10 rounded-md border bg-muted/30 flex items-center justify-center overflow-hidden">
                         {c.hero_image_url ? (
-                          <img src={c.hero_image_url} alt={c.name} className="h-full w-full object-cover" />
+                          <img
+                            src={shopifyImageThumb(c.hero_image_url, { width: 96 }) ?? c.hero_image_url}
+                            alt={c.name}
+                            loading="lazy"
+                            decoding="async"
+                            className="h-full w-full object-cover"
+                          />
                         ) : (
                           <ImageOff className="h-4 w-4 text-muted-foreground" />
                         )}

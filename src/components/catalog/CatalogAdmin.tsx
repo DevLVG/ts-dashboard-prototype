@@ -27,6 +27,7 @@ import {
   type CatalogProduct, type ProductSyncStatus,
 } from "@/data/catalogLive";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
+import { supabaseImageThumb } from "@/lib/imageThumb";
 import { ProductEditDialog } from "@/components/catalog/ProductEditDialog";
 import { SyncToShopifyDialog } from "@/components/catalog/SyncToShopifyDialog";
 import { CatalogHistoryPanel } from "@/components/catalog/CatalogHistoryPanel";
@@ -233,7 +234,13 @@ export const CatalogAdmin = () => {
                     <TableCell>
                       <div className="h-10 w-10 rounded-md border bg-muted/30 flex items-center justify-center overflow-hidden">
                         {p.image_url ? (
-                          <img src={p.image_url} alt={p.service_name ?? p.sku} className="h-full w-full object-cover" />
+                          <img
+                            src={supabaseImageThumb(p.image_url, { width: 96 }) ?? p.image_url}
+                            alt={p.service_name ?? p.sku}
+                            loading="lazy"
+                            decoding="async"
+                            className="h-full w-full object-cover"
+                          />
                         ) : (
                           <ImageOff className="h-4 w-4 text-muted-foreground" />
                         )}

@@ -35,6 +35,20 @@ const fmtTime = (iso?: string) => (iso ? new Date(iso).toLocaleTimeString([], { 
 
 const PAGE_ORDER_HINT = ["index", "header-group", "footer-group", "footer.liquid"]; // pinned to the top of the picker
 
+// fix-29-cms-perf (2026-08-04): 1,522 strings total across the site. Two
+// unbounded-mount paths made the panel feel like it "takes forever":
+//   1. Selecting a page used to open EVERY section by default (up to 228
+//      rows x 2 textareas + 3 state hooks + 3 effects each, for the biggest
+//      page, all mounted on page-select) — now only the first section opens
+//      by default; the rest mount on demand when a staff member expands
+//      them (Radix Accordion.Content doesn't render closed items' children
+//      at all, so this is real virtualization, not just a visual collapse).
+//   2. Free-text search ran across all 1,522 rows with no cap — a short/
+//      common query could match hundreds of rows and mount all of them,
+//      fully expanded, at once. Capped to the first N matches with a
+//      "narrow your search" hint instead.
+const MAX_SEARCH_RESULTS = 60;
+
 /** Replaces the old "Sync to site" button — a no-op-styled status readout
  * for the currently selected page, per Marcello's approval. Retry is the
  * one manual control (plus "Advanced sync…" for dry-run review). */
@@ -116,7 +130,7 @@ export const SiteCopyAdmin = () => {
 
   const isSearching = search.trim().length > 0;
 
-  const visibleRows = useMemo(() => {
+  const matchedRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     let base = rows ?? [];
     if (isSearching) {
@@ -131,6 +145,16 @@ export const SiteCopyAdmin = () => {
     if (needsArOnly) base = base.filter((r) => !r.ar);
     return base;
   }, [rows, search, isSearching, selectedPage, needsArOnly]);
+
+  // Search results are capped so a short/generic query can't mount hundreds
+  // of fully-expanded rows at once. Page view isn't capped here — it's kept
+  // bounded instead by only auto-expanding the first section (see Accordion
+  // defaultValue below).
+  const visibleRows = useMemo(
+    () => (isSearching ? matchedRows.slice(0, MAX_SEARCH_RESULTS) : matchedRows),
+    [matchedRows, isSearching],
+  );
+  const searchTruncated = isSearching && matchedRows.length > visibleRows.length;
 
   // group -> page -> section -> rows[]
   const grouped = useMemo(() => {
@@ -206,6 +230,12 @@ export const SiteCopyAdmin = () => {
           </Badge>
         </div>
 
+        {searchTruncated && (
+          <p className="text-xs text-amber-500 mb-2">
+            Showing the first {MAX_SEARCH_RESULTS} of {matchedRows.length} matches — narrow your search to see the rest.
+          </p>
+        )}
+
         {!isSupabaseConfigured ? (
           <p className="text-sm text-destructive">Supabase is not configured — site copy cannot load.</p>
         ) : isError ? (
@@ -221,7 +251,15 @@ export const SiteCopyAdmin = () => {
                 {isSearching && (
                   <h4 className="text-sm font-semibold text-muted-foreground">{pageLabel(page)}</h4>
                 )}
-                <Accordion type="multiple" defaultValue={Array.from(sections.keys())} className="space-y-2">
+                {/* Page view: only the first section starts expanded — the rest
+                    mount on demand when clicked (Accordion.Content doesn't render
+                    closed items' children). Search view stays fully expanded since
+                    results are already capped above. */}
+                <Accordion
+                  type="multiple"
+                  defaultValue={isSearching ? Array.from(sections.keys()) : Array.from(sections.keys()).slice(0, 1)}
+                  className="space-y-2"
+                >
                   {Array.from(sections.entries()).map(([sectionId, sectionRows]) => (
                     <AccordionItem key={sectionId} value={sectionId} className="border rounded-md px-3">
                       <AccordionTrigger className="text-sm hover:no-underline">
@@ -247,7 +285,10 @@ export const SiteCopyAdmin = () => {
             ))}
           </div>
         )}
-        <p className="text-xs text-muted-foreground mt-3">{visibleRows.length} of {rows?.length ?? 0} strings shown</p>
+        <p className="text-xs text-muted-foreground mt-3">
+          {visibleRows.length} of {isSearching ? matchedRows.length : rows?.length ?? 0} strings shown
+          {!isSearching && ` (${rows?.length ?? 0} total)`}
+        </p>
       </Card>
 
       <SiteCopyAuditLog />

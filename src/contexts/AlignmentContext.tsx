@@ -75,13 +75,32 @@ const SCOPE_KEY = "clever.scope";
 // resolving to an option the picker no longer shows.
 const DEPRECATED_PRESETS = new Set(["AS_DELIVERED", "LAST_MONTH", "FY"]);
 
+// One-time defaults reset (fix-25, 2026-08-04 — CEO Cockpit chrome cleanup,
+// Marcello): window default flips Last 12 months -> Year to date, scope
+// default flips All -> Only Recurring (comparison stays Versus Previous
+// Year, already the default — untouched). Without this, a preference
+// persisted under the OLD defaults (incl. Marcello's own browser) would
+// silently keep winning forever. Version-stamped so it runs exactly once per
+// browser: clears ONLY the two changed keys, then any choice made AFTER this
+// stamp persists normally again.
+const DEFAULTS_VERSION_KEY = "clever.defaultsVersion";
+const DEFAULTS_VERSION = "2026-08-04-ytd-recurring";
+if (typeof localStorage !== "undefined" && localStorage.getItem(DEFAULTS_VERSION_KEY) !== DEFAULTS_VERSION) {
+  try {
+    localStorage.removeItem(PRESET_KEY);
+    localStorage.removeItem(SCOPE_KEY);
+    localStorage.setItem(DEFAULTS_VERSION_KEY, DEFAULTS_VERSION);
+  } catch { /* private mode */ }
+}
+
 export const AlignmentProvider = ({ children }: { children: ReactNode }) => {
   // Basis is pinned — no state, no localStorage, no toggle (2026-08-03).
   const basis: Basis = "STRICT";
   const setBasis = () => { /* removed — only STRICT basis is shown anywhere */ };
   const [preset, setPresetState] = useState<WindowPresetId>(() => {
     const v = typeof localStorage !== "undefined" ? localStorage.getItem(PRESET_KEY) : null;
-    return v && !DEPRECATED_PRESETS.has(v) ? v : "TTM";
+    // Default: Year to date (fix-25, 2026-08-04 — was Last 12 months / TTM).
+    return v && !DEPRECATED_PRESETS.has(v) ? v : "YTD";
   });
   const [lastComplete, setLastComplete] = useState<string>("2026-06");
   const [memoOn, setMemoOnState] = useState<boolean>(() => {
@@ -95,7 +114,8 @@ export const AlignmentProvider = ({ children }: { children: ReactNode }) => {
   });
   const [scope, setScopeState] = useState<Scope>(() => {
     const v = typeof localStorage !== "undefined" ? localStorage.getItem(SCOPE_KEY) : null;
-    return v === "RECURRING" ? "RECURRING" : "ALL"; // All is the DEFAULT (decision #3)
+    // Only Recurring is the DEFAULT (fix-25, 2026-08-04 — was All).
+    return v === "ALL" ? "ALL" : "RECURRING";
   });
   // Today's calendar month, read from the device clock — refreshed hourly so
   // a cockpit left open overnight rolls MTD/YTD/FYTD to the new month/year on

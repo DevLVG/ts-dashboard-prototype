@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, Scale, Archive, ChevronsRight, Radio, ShieldCheck, TrendingUp, Wallet, Layers, Repeat } from "lucide-react";
+import { AlertTriangle, Scale, Archive, ChevronsRight, Radio, TrendingUp, Wallet, Layers, Repeat } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlignment, type ComparisonMode, type Scope } from "@/contexts/AlignmentContext";
 import {
@@ -44,23 +44,14 @@ export const BasisBadge = ({ basis, className }: { basis: Basis; className?: str
  * decision. Use `StrictBasisNote` for the plain-language footnote instead. */
 export const BasisToggle = (_props: { disabled?: boolean; disabledReason?: string }) => null;
 
-/** The single-basis footnote (spec decision 2026-08-03): no toggle, just a
- * quiet statement of what the numbers already are. */
-export const StrictBasisNote = ({ className }: { className?: string }) => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <span className={cn("inline-flex items-center gap-1.5 text-xs text-muted-foreground cursor-help", className)}>
-        <ShieldCheck className="h-3.5 w-3.5 text-sky-400/80" />
-        Figures net of customer credit notes
-      </span>
-    </TooltipTrigger>
-    <TooltipContent side="bottom" className="max-w-xs text-xs">
-      A credit note reverses part of an invoice after it was booked (refund, discount, billing
-      correction). Every figure here already has credit notes subtracted — the conservative,
-      fully-reconciled basis. {BASIS_LABELS.STRICT}
-    </TooltipContent>
-  </Tooltip>
-);
+/** REMOVED (fix-25, 2026-08-04, Marcello — CEO Cockpit chrome cleanup): the
+ * "Figures net of customer credit notes" footnote is retired from the shared
+ * chrome — STRICT basis is already the only basis shown anywhere (2026-08-03
+ * decision above), restating it on every screen was noise. No-op export kept
+ * so existing `<StrictBasisNote />` call sites (Economics; the retired P&L
+ * Overview) compile unchanged and simply render nothing — same pattern as
+ * `BasisToggle` above. Does NOT touch `OpenMonthsBadge` below, which stays. */
+export const StrictBasisNote = (_props: { className?: string }) => null;
 
 // ------------------------------------------------------- comparison toggle
 

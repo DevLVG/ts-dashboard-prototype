@@ -191,7 +191,7 @@ export const DashboardNav = ({ currentPage }: DashboardNavProps) => {
                   squeezed md-but-not-lg band (768–1023px) where the
                   desktop nav groups need the space most. */}
               <p className="md:hidden lg:block mt-0.5 text-sm text-foreground/80 font-normal tracking-wide whitespace-nowrap">
-                CFO Cockpit — Management Control
+                CEO Cockpit
               </p>
             </div>
           </div>

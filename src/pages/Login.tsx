@@ -62,7 +62,7 @@ const Login = () => {
           <h1 className="font-heading text-4xl tracking-widest">TRIO SPORTING</h1>
           <div className="mt-2 h-px w-16 bg-gold/60" />
           <p className="mt-3 text-xs uppercase tracking-[0.3em] text-muted-foreground">
-            CLEVER · Management Cockpit
+            CLEVER · CEO Cockpit
           </p>
         </div>
 

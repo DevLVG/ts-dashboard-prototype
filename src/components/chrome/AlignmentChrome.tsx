@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, Scale, Archive, ChevronsRight, Radio, TrendingUp, Wallet, Layers, Repeat } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { AlertTriangle, Scale, Archive, ChevronsRight, Radio, TrendingUp, Wallet, Layers, Repeat, CalendarRange } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlignment, type ComparisonMode, type Scope } from "@/contexts/AlignmentContext";
 import {
@@ -117,8 +118,8 @@ export const ScopeToggle = () => {
 
 // ---------------------------------------------------------- window picker
 
-export const WindowPicker = ({ months: _legacyMonths }: { months?: string[] }) => {
-  const { preset, setPreset, lastComplete, todayKey } = useAlignment();
+export const WindowPicker = ({ months }: { months?: string[] }) => {
+  const { preset, setPreset, lastComplete, todayKey, windowName } = useAlignment();
   // Marcello (CEO), live-review — FINAL shape of the shared period selector
   // (2026-08-03), one control for Economics AND Cash Flow. Exact contents,
   // in this exact order, nothing else:
@@ -139,15 +140,30 @@ export const WindowPicker = ({ months: _legacyMonths }: { months?: string[] }) =
   //      ("indipendentemente dal fatto che sia alimentato o no"); a quarter
   //      with no data renders the page's honest empty state, it is never
   //      hidden from the picker.
+  //   6. "Custom…" (fix-25, 2026-08-04, live request — Marcello), pinned at
+  //      the BOTTOM, below a separator. Opens a small popover with two
+  //      Start/End month inputs instead of committing a value straight from
+  //      the dropdown — picking it does NOT change the active window until
+  //      "Apply". Resolves through the exact same `resolveWindow` path as
+  //      every other item (preset `"CUSTOM:YYYY-MM:YYYY-MM"`), so PY (-12mo
+  //      shift), Budget aggregation and the open-months badge all fall out
+  //      for free with zero extra code. Month-key grain, same as every other
+  //      window here — the warehouse has no daily P&L fact (see the MTD
+  //      proration note elsewhere in this file's sibling module), so day
+  //      inputs would either silently round to the containing month (fine)
+  //      or fabricate a same-day precision the data can't actually support
+  //      (not fine) — month inputs make the real grain honest and obvious
+  //      instead of quietly rounding a day the user typed.
   // Item labels stay CLEAN -- no "(Jul '25->Jun '26)" window annotations
   // cluttering the visible text; the full window detail moves to a hover
   // tooltip (native `title`) on each option instead. "As delivered", "Last
   // closed month" and "FY to date" stay dropped from the picker (still valid
   // internal `resolveWindow` presets -- see AlignmentContext's sanitizer for
-  // sessions with one persisted from before). The `months` prop is legacy
-  // and no longer used to filter -- the calendar is now the sole source of
-  // truth for which months/quarters are offered; kept only so existing call
-  // sites compile unchanged.
+  // sessions with one persisted from before). The `months` prop (fact months
+  // actually present in the warehouse, fed by the page) now bounds the
+  // Custom start/end inputs to real data history — it is NOT used to filter
+  // the calendar/quarter items above, which stay calendar-driven per the
+  // 2026-08-03 decision.
   const monthItems = useMemo(() => {
     const yearStart = `${todayKey.slice(0, 4)}-01`;
     const top = lastFinishedCalendarMonth(todayKey);
@@ -170,35 +186,164 @@ export const WindowPicker = ({ months: _legacyMonths }: { months?: string[] }) =
   const mtd = useMemo(() => resolveWindow("MTD", lastComplete, todayKey), [lastComplete, todayKey]);
   const ytd = useMemo(() => resolveWindow("YTD", lastComplete, todayKey), [lastComplete, todayKey]);
   const ttm = useMemo(() => resolveWindow("TTM", lastComplete, todayKey), [lastComplete, todayKey]);
+
+  // ------------------------------------------------------- Custom range
+  const isCustom = preset.startsWith("CUSTOM:");
+  const [customOpen, setCustomOpen] = useState(false);
+  const [draftStart, setDraftStart] = useState("");
+  const [draftEnd, setDraftEnd] = useState("");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // "Within data history" (spec, fix-25): bound the two inputs to the
+  // earliest/latest month the warehouse actually has fact rows for, fed by
+  // the page via `months`. Falls back to a generous, never-blocking range
+  // if the page hasn't loaded rows yet (first paint) so the inputs are
+  // always usable, never stuck disabled on a slow connection.
+  const monthBounds = useMemo(() => {
+    const sorted = (months ?? []).filter(Boolean).sort();
+    return { min: sorted[0] ?? "2020-01", max: sorted[sorted.length - 1] ?? todayKey };
+  }, [months, todayKey]);
+
+  const openCustomPicker = () => {
+    if (isCustom) {
+      const [, s, e] = preset.split(":");
+      setDraftStart(s ?? monthBounds.max);
+      setDraftEnd(e ?? monthBounds.max);
+    } else if (!draftStart || !draftEnd) {
+      // Sensible default seed the first time: trailing 3 full months.
+      setDraftStart(shiftMonthKey(monthBounds.max, -2));
+      setDraftEnd(monthBounds.max);
+    }
+    setCustomOpen(true);
+  };
+
+  const draftInvalid = !draftStart || !draftEnd || draftStart > draftEnd;
+  const applyCustom = () => {
+    if (draftInvalid) return;
+    setPreset(`CUSTOM:${draftStart}:${draftEnd}`);
+    setCustomOpen(false);
+  };
+
+  // Click-outside + Escape to close — a plain conditional panel (NOT a
+  // second Radix portal primitive) deliberately: an earlier version used
+  // <Popover> anchored to the Select, but closing/opening the Popover in the
+  // same tick as `setPreset`'s page-wide re-render raced Radix's own
+  // portal/anchor bookkeeping and threw a DOM removeChild error (two
+  // portal-based primitives mounting/unmounting off the same state change).
+  // A plain div has no competing imperative DOM tracking, so it can't race.
+  useEffect(() => {
+    if (!customOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setCustomOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setCustomOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [customOpen]);
+
   return (
-    <Select value={preset} onValueChange={setPreset}>
-      <SelectTrigger className="w-[290px] bg-background font-medium">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent className="max-h-[420px]">
-        <SelectItem value="MTD" title={mtd.name}>
-          <span className="inline-flex items-center gap-2">
-            <Radio className="h-3 w-3 text-amber-400" />
-            Month to date
-          </span>
-        </SelectItem>
-        <SelectItem value="YTD" title={ytd.name}>
-          <span className="inline-flex items-center gap-2">
-            <Radio className="h-3 w-3 text-amber-400" />
-            Year to date
-          </span>
-        </SelectItem>
-        <SelectItem value="TTM" title={ttm.name}>Last 12 months</SelectItem>
-        <SelectSeparator />
-        {monthItems.map((m) => (
-          <SelectItem key={m} value={`M:${m}`}>{monthKeyLabel(m)}</SelectItem>
-        ))}
-        <SelectSeparator />
-        {quarterItems.map((q) => (
-          <SelectItem key={q.id} value={q.id} title={winLabel(q.win)}>{q.label}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <div ref={containerRef} className="relative">
+      <Select
+        value={preset}
+        onValueChange={(v) => {
+          if (v === "CUSTOM_PICK") { openCustomPicker(); return; }
+          setPreset(v);
+        }}
+      >
+        <SelectTrigger className="w-[290px] bg-background font-medium">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="max-h-[420px]">
+          <SelectItem value="MTD" title={mtd.name}>
+            <span className="inline-flex items-center gap-2">
+              <Radio className="h-3 w-3 text-amber-400" />
+              Month to date
+            </span>
+          </SelectItem>
+          <SelectItem value="YTD" title={ytd.name}>
+            <span className="inline-flex items-center gap-2">
+              <Radio className="h-3 w-3 text-amber-400" />
+              Year to date
+            </span>
+          </SelectItem>
+          <SelectItem value="TTM" title={ttm.name}>Last 12 months</SelectItem>
+          <SelectSeparator />
+          {monthItems.map((m) => (
+            <SelectItem key={m} value={`M:${m}`}>{monthKeyLabel(m)}</SelectItem>
+          ))}
+          <SelectSeparator />
+          {quarterItems.map((q) => (
+            <SelectItem key={q.id} value={q.id} title={winLabel(q.win)}>{q.label}</SelectItem>
+          ))}
+          <SelectSeparator />
+          {/* Live custom value gets its OWN item (matching `value={preset}`
+              exactly) so Radix's normal value->label lookup resolves it —
+              deliberately NOT done via a `<SelectValue>` children override,
+              which triggered a Radix Select portal removeChild crash on the
+              live YTD-> Custom transition (root-caused during fix-25 QA;
+              worked fine on a fresh mount, only broke on a live value swap —
+              see git history for the debugging trail). */}
+          {isCustom && (
+            <SelectItem value={preset} title={windowName}>
+              <span className="inline-flex items-center gap-2">
+                <CalendarRange className="h-3.5 w-3.5 text-gold/80" />
+                {windowName}
+              </span>
+            </SelectItem>
+          )}
+          <SelectItem value="CUSTOM_PICK" title="Pick a start and end month">
+            <span className="inline-flex items-center gap-2">
+              <CalendarRange className="h-3.5 w-3.5 text-gold/80" />
+              Custom…
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      {customOpen && (
+        <div
+          role="dialog"
+          aria-label="Custom range"
+          className="absolute left-0 top-full z-50 mt-2 w-72 space-y-3 rounded-md border border-border bg-popover p-4 text-popover-foreground shadow-md"
+        >
+          <p className="text-xs font-semibold text-foreground">Custom range</p>
+          <div className="space-y-1.5">
+            <label htmlFor="custom-range-start" className="text-xs text-muted-foreground">Start month</label>
+            <input
+              id="custom-range-start"
+              type="month"
+              value={draftStart}
+              min={monthBounds.min}
+              max={draftEnd || monthBounds.max}
+              onChange={(e) => setDraftStart(e.target.value)}
+              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm text-foreground"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="custom-range-end" className="text-xs text-muted-foreground">End month</label>
+            <input
+              id="custom-range-end"
+              type="month"
+              value={draftEnd}
+              min={draftStart || monthBounds.min}
+              max={monthBounds.max}
+              onChange={(e) => setDraftEnd(e.target.value)}
+              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm text-foreground"
+            />
+          </div>
+          {draftStart && draftEnd && draftStart > draftEnd && (
+            <p className="text-xs text-destructive">Start must be on or before end.</p>
+          )}
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setCustomOpen(false)}>Cancel</Button>
+            <Button type="button" size="sm" disabled={draftInvalid} onClick={applyCustom}>Apply</Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 

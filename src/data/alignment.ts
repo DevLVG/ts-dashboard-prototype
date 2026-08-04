@@ -237,7 +237,7 @@ export const resolveRecurrence = (
 /** Inclusive month-key window. */
 export interface Win { startKey: string; endKey: string }
 
-export type WindowPresetId = "AS_DELIVERED" | "MTD" | "LAST_MONTH" | "TTM" | "YTD" | "FY" | string; // "M:YYYY-MM" (a single month) | "Q:1".."Q:4" (a calendar quarter of the current year)
+export type WindowPresetId = "AS_DELIVERED" | "MTD" | "LAST_MONTH" | "TTM" | "YTD" | "FY" | string; // "M:YYYY-MM" (a single month) | "Q:1".."Q:4" (a calendar quarter of the current year) | "CUSTOM:YYYY-MM:YYYY-MM" (user-picked month range, fix-25 2026-08-04 — see WindowPicker)
 
 /** The pinned package window (§0.2) — a WINDOW DEFINITION, not a figure. */
 export const AS_DELIVERED_WIN: Win = { startKey: "2025-06", endKey: "2026-05" };
@@ -326,6 +326,18 @@ export const resolveWindow = (preset: WindowPresetId, lastComplete: string, toda
     const y = todayKey.slice(0, 4);
     const win = quarterWin(y, q);
     return { win, name: `Q${q} ${y} (${winLabel(win)})` };
+  }
+  if (preset.startsWith("CUSTOM:")) {
+    // User-picked month range (fix-25, 2026-08-04, live request — Marcello).
+    // Month-key grain, same as every other window: the warehouse has no
+    // daily P&L fact (see MTD proration note above), so a "day picker" UI
+    // resolves to the CONTAINING months rather than fabricating day-level
+    // precision. Defensive swap if the two keys arrive reversed.
+    const [, s, e] = preset.split(":");
+    if (s && e) {
+      const win = s <= e ? { startKey: s, endKey: e } : { startKey: e, endKey: s };
+      return { win, name: `Custom (${monthKeyLabel(win.startKey)}→${monthKeyLabel(win.endKey)})` };
+    }
   }
   return resolveWindow("TTM", lastComplete, todayKey);
 };

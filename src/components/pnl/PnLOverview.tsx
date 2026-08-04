@@ -34,7 +34,7 @@ import {
   useBasisRows, useRecurrence, useModelAdjustments, aggregatePL, aggregateRecurring,
   aggregateBudgetWindow, budgetMonthsSet, monthlySeries, deriveCompleteness,
   adjustmentLadder, factMonths, winLabel, BASIS_LABELS, computeMtdProration,
-  prorateAgg, prorateRecurring, prorateBudget, type PLAgg, type Win,
+  prorateAgg, prorateRecurring, prorateBudget, LEV_FLAG_KINDS, type PLAgg, type Win,
 } from "@/data/alignment";
 import { useBudgetMonthly, LIVE_BU_LABELS, monthKeyLabel, shiftMonthKey } from "@/data/liveData";
 import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtCompact, pctChange, comparePct } from "@/lib/format";
@@ -232,7 +232,7 @@ export const PnLOverview = () => {
   const budget = useMemo(() => (mtdPro ? prorateBudget(budgetRaw, mtdPro.fraction) : budgetRaw), [budgetRaw, mtdPro]);
   const budMonths = useMemo(() => budgetMonthsSet(budgetRows), [budgetRows]);
   const completeness = useMemo(() => deriveCompleteness(rows), [rows]);
-  const flaggedKeys = useMemo(() => new Set(completeness.filter((f) => f.kind !== "lev-unbooked").map((f) => f.key)), [completeness]);
+  const flaggedKeys = useMemo(() => new Set(completeness.filter((f) => !LEV_FLAG_KINDS.has(f.kind)).map((f) => f.key)), [completeness]);
 
   const recActual = useMemo(() => aggregateRecurring(rows, basis, win, rec, bu), [rows, basis, win, rec, bu]);
   const recPriorRaw = useMemo(() => aggregateRecurring(rows, basis, py, rec, bu), [rows, basis, py, rec, bu]);

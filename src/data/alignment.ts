@@ -808,14 +808,99 @@ export const prorateBudget = (b: BudgetAgg | null, fraction: number): BudgetAgg 
 export interface CompletenessFlag {
   key: string;
   label: string;
-  kind: "costs-partial" | "costs-missing" | "lev-unbooked";
+  kind: "costs-partial" | "costs-missing" | "lev-unbooked" | "lev-not-invoiced" | "lev-awaiting-entry";
   detail: string;
 }
+
+/** All "lev-*" kinds describe the Project-Costs (Leveredge/F&F) gap at the
+ * BANNER level, not a specific P&L cell — callers marking individual cells
+ * (e.g. flaggedKeys in PnLOverview) must exclude all three, not just
+ * "lev-unbooked". */
+export const LEV_FLAG_KINDS = new Set<CompletenessFlag["kind"]>(["lev-unbooked", "lev-not-invoiced", "lev-awaiting-entry"]);
+
+/** Manually-confirmed invoicing status per month for the Leveredge
+ * project-cost gap (Marcello, 2026-08-04 — fix-31 verification against
+ * Qoyod/JK & Partners records). The warehouse only knows "posted" or
+ * "not posted"; it has no concept of *why* a month has no postings yet.
+ * This map supplies that human context for the CURRENT gap so the banner
+ * doesn't read as a data error when it's actually a business decision
+ * (not invoiced) or a known in-flight step (invoice issued, not yet
+ * entered in Qoyod). Any month NOT listed here — including future months
+ * as they open — falls back to the plain "no postings yet, status TBD"
+ * wording, i.e. genuinely unresolved. Prune/extend this map as invoicing
+ * catches up; it never overrides what the warehouse reports as booked. */
+const LEV_MONTH_CONTEXT: Record<string, { kind: "lev-not-invoiced" | "lev-awaiting-entry"; note: string }> = {
+  "2026-05": { kind: "lev-not-invoiced", note: "not invoiced (by decision) — nothing missing" },
+  "2026-06": { kind: "lev-not-invoiced", note: "not invoiced (by decision) — nothing missing" },
+  "2026-07": { kind: "lev-awaiting-entry", note: "invoice issued — entry into Qoyod pending" },
+};
+
+/** Static context on the F&F side of Project-Costs: F&F (Fortress & Flare
+ * / Camel and Partners) invoicing was last through January 2026 and none
+ * is expected after — i.e. F&F is not part of any gap shown here. This is
+ * a business status per Leveredge/JK & Partners records, not a warehouse
+ * figure — Trio's synced ledger carries no F&F-tagged postings to check
+ * it against (fix-31 verification), so it is stated as status, not as a
+ * booked amount. */
+const FF_STATUS_NOTE = "F&F (Fortress & Flare): invoiced through January 2026, none expected since — no gap on this line.";
+
+/** Short, plain-English summary of why the given months have no
+ * Project-Costs (Leveredge/F&F) postings — shares LEV_MONTH_CONTEXT with
+ * the completeness banner above so every screen tells the same story
+ * about the same gap. Falls back to "status TBD" for anything not in the
+ * map (fix-31, 2026-08-04). Used by PerformanceAnalysis's own honesty
+ * note, which computes its own window-scoped missing-months list rather
+ * than reusing buildLevFlags (that one is keyed to the trailing-13-month
+ * banner recency window, not an arbitrary user-picked window). */
+export const levGapSummary = (missingKeys: string[]): string => {
+  const sorted = [...missingKeys].sort();
+  const notInvoiced = sorted.filter((k) => LEV_MONTH_CONTEXT[k]?.kind === "lev-not-invoiced");
+  const awaiting = sorted.filter((k) => LEV_MONTH_CONTEXT[k]?.kind === "lev-awaiting-entry");
+  const tbd = sorted.filter((k) => !LEV_MONTH_CONTEXT[k]);
+  const parts: string[] = [];
+  if (notInvoiced.length) parts.push(`${notInvoiced.map(monthKeyLabel).join("/")} not invoiced (by decision)`);
+  if (awaiting.length) parts.push(`${awaiting.map(monthKeyLabel).join("/")} invoice issued, Qoyod entry pending`);
+  if (tbd.length) parts.push(`${tbd.map(monthKeyLabel).join("/")} status TBD`);
+  return parts.join(" · ");
+};
+
+/** Turns a sorted list of month-keys with no Project-Costs postings into
+ * banner flags: months with known context (above) get their explained
+ * kind/wording, unlisted months fall back to plain "status TBD". Always
+ * appends the F&F status note alongside so it never reads as if F&F were
+ * part of the gap. */
+const buildLevFlags = (missingKeys: string[], lastPostedKey: string | null): CompletenessFlag[] => {
+  if (missingKeys.length === 0) return [];
+  const groups: Partial<Record<CompletenessFlag["kind"], string[]>> = {};
+  for (const k of missingKeys) {
+    const kind = LEV_MONTH_CONTEXT[k]?.kind ?? "lev-unbooked";
+    (groups[kind] ??= []).push(k);
+  }
+  const labelsFor = (keys: string[]) => keys.map((k) => monthKeyLabel(k)).join(", ");
+  const flags: CompletenessFlag[] = [];
+  if (groups["lev-not-invoiced"]) {
+    const keys = groups["lev-not-invoiced"];
+    flags.push({ key: keys[0], label: labelsFor(keys), kind: "lev-not-invoiced", detail: `${labelsFor(keys)}: ${LEV_MONTH_CONTEXT[keys[0]].note}` });
+  }
+  if (groups["lev-awaiting-entry"]) {
+    const keys = groups["lev-awaiting-entry"];
+    flags.push({ key: keys[0], label: labelsFor(keys), kind: "lev-awaiting-entry", detail: `${labelsFor(keys)}: ${LEV_MONTH_CONTEXT[keys[0]].note}` });
+  }
+  if (groups["lev-unbooked"]) {
+    const keys = groups["lev-unbooked"];
+    const lp = lastPostedKey ? ` (last posted ${monthKeyLabel(lastPostedKey)})` : "";
+    flags.push({ key: keys[0], label: labelsFor(keys), kind: "lev-unbooked", detail: `${labelsFor(keys)}: no Leveredge project-fee postings yet — status TBD${lp}` });
+  }
+  flags.push({ key: missingKeys[0], label: "F&F", kind: "lev-not-invoiced", detail: FF_STATUS_NOTE });
+  return flags;
+};
 
 /** Warehouse-driven completeness heuristic (spec §1.5): flags months whose
  * cost postings are materially below the trailing norm, months with revenue
  * but zero cost rows, and the Project-Costs (LEV fees) series stopping. NO
- * hardcoded month list — derived from the fetched rows on every load. */
+ * hardcoded month list — derived from the fetched rows on every load (the
+ * lev-status wording above is the one deliberate exception: it explains a
+ * detected gap, it does not decide whether the gap exists). */
 export const deriveCompleteness = (rows: BasisRow[] | undefined): CompletenessFlag[] => {
   if (!rows || rows.length === 0) return [];
   const months = factMonths(rows);
@@ -846,18 +931,13 @@ export const deriveCompleteness = (rows: BasisRow[] | undefined): CompletenessFl
       flags.push({ key: m, label: monthKeyLabel(m), kind: "costs-partial", detail: `${monthKeyLabel(m)}: costs partial (${Math.round((cost / norm) * 100)}% of trailing norm)` });
     }
   }
-  // Project-costs (Leveredge fees) series stopping before the revenue horizon.
+  // Project-costs (Leveredge/F&F) series stopping before the revenue horizon.
   const lastTpc = months.filter((m) => (tpcByMonth.get(m) ?? 0) > 0).pop();
   if (lastTpc && lastRevMonth && lastTpc < lastRevMonth) {
     let k = shiftMonthKey(lastTpc, 1);
     const missing: string[] = [];
-    while (k <= lastRevMonth) { missing.push(monthKeyLabel(k)); k = shiftMonthKey(k, 1); }
-    if (missing.length > 0) {
-      flags.push({
-        key: shiftMonthKey(lastTpc, 1), label: missing.join(", "), kind: "lev-unbooked",
-        detail: `Leveredge/project fees unbooked ${missing.join(", ")} (last posted ${monthKeyLabel(lastTpc)})`,
-      });
-    }
+    while (k <= lastRevMonth) { missing.push(k); k = shiftMonthKey(k, 1); }
+    flags.push(...buildLevFlags(missing, lastTpc));
   }
   return flags;
 };
@@ -894,20 +974,17 @@ export const useCompletenessMonthly = () =>
 /** Flags from the DB-7 view (contract §1.5). */
 export const flagsFromCompletenessView = (rows: CompletenessViewRow[]): CompletenessFlag[] => {
   const flags: CompletenessFlag[] = [];
-  const levMonths: string[] = [];
+  const levMissing: string[] = [];
+  let lastPosted: string | null = null;
   for (const r of rows) {
     const k = monthKey(r.period_month);
     const label = monthKeyLabel(k);
     if (r.costs_missing) flags.push({ key: k, label, kind: "costs-missing", detail: `${label}: revenue synced, zero cost rows` });
     else if (r.costs_partial) flags.push({ key: k, label, kind: "costs-partial", detail: `${label}: costs partial` });
-    if (r.lev_fees_missing) levMonths.push(label);
+    if (r.lev_fees_missing) levMissing.push(k);
+    else if (r.project_costs_present) lastPosted = k;
   }
-  if (levMonths.length > 0) {
-    flags.push({
-      key: levMonths[0], label: levMonths.join(", "), kind: "lev-unbooked",
-      detail: `Leveredge/project fees unbooked ${levMonths.join(", ")}`,
-    });
-  }
+  flags.push(...buildLevFlags(levMissing, lastPosted));
   return flags;
 };
 

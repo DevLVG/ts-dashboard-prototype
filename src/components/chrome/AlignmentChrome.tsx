@@ -10,7 +10,7 @@ import { useAlignment, type ComparisonMode, type Scope } from "@/contexts/Alignm
 import {
   BASIS_LABELS, deriveCompleteness, useCompletenessMonthly, resolveWindow,
   flagsFromCompletenessView, calendarQuarters, lastFinishedCalendarMonth, winLabel,
-  type Basis, type BasisRow,
+  LEV_FLAG_KINDS, type Basis, type BasisRow,
 } from "@/data/alignment";
 import { monthKeyLabel, shiftMonthKey } from "@/data/liveData";
 
@@ -386,10 +386,12 @@ export const CompletenessBanner = ({ rows }: { rows: BasisRow[] | undefined }) =
       : deriveCompleteness(rows);
     // Recency filter: the banner is about the CURRENT close state — keep the
     // trailing 13 months (historical partial closes live in the fix reports).
-    const monthFlags = all.filter((f) => f.kind !== "lev-unbooked");
+    // The lev-* flags (unbooked / not-invoiced / awaiting-entry / F&F note)
+    // are always current-status, not subject to the trailing window.
+    const monthFlags = all.filter((f) => !LEV_FLAG_KINDS.has(f.kind));
     const maxKey = monthFlags.reduce((m, f) => (f.key > m ? f.key : m), "");
     const cutoff = maxKey ? shiftMonthKey(maxKey, -12) : "";
-    return all.filter((f) => f.kind === "lev-unbooked" || f.key >= cutoff);
+    return all.filter((f) => LEV_FLAG_KINDS.has(f.kind) || f.key >= cutoff);
   }, [viewState, rows]);
   if (flags.length === 0) return null;
   return (
@@ -397,7 +399,7 @@ export const CompletenessBanner = ({ rows }: { rows: BasisRow[] | undefined }) =
       <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-amber-400" />
       <div className="space-y-0.5">
         <p className="font-semibold text-amber-300">
-          Data completeness — certified figures are as-booked; supplier bills and LEV fees outstanding.
+          Data completeness — certified figures are as-booked; some recent months are pending entry.
         </p>
         <p className="text-amber-300/90">
           {flags.map((f) => f.detail).join(" · ")}

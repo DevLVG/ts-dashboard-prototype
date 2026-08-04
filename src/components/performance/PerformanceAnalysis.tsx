@@ -105,7 +105,7 @@ import { KpiCircles } from "@/components/overview/KpiCircles";
 import { ComparisonHistogram } from "@/components/overview/ComparisonHistogram";
 import {
   useBasisRows, useRecurrence, resolveRecurrence, aggregateBudgetWindow,
-  computeMtdProration, prorateBudget, factMonths,
+  computeMtdProration, prorateBudget, factMonths, levGapSummary,
   type BasisRow, type Win, type RecurrenceState, type BudgetAgg,
 } from "@/data/alignment";
 import { useBudgetMonthly, monthKeyLabel } from "@/data/liveData";
@@ -569,16 +569,59 @@ export const PerformanceAnalysis = () => {
     ? `No data posted yet for ${windowName} — every line below shows "—" until this period is fed.`
     : null;
 
+  // Project-Costs (Leveredge/F&F) months missing within the CURRENT window
+  // — same per-month scan `deriveCompleteness` runs globally in
+  // data/alignment.ts, just scoped to `win` so the note below only talks
+  // about months actually in view. Revenue>0 gates it to real, fed months
+  // (mirrors the tpcByMonth/revByMonth logic used for the retired
+  // completeness banner, kept local here for the same reason
+  // monthsCoveredInWin is local — see its comment above).
+  const missingLevMonths = useMemo(() => {
+    if (!rows) return [];
+    const revByMonth = new Map<string, number>();
+    const tpcByMonth = new Map<string, number>();
+    for (const r of rows) {
+      const k = monthKey(r.period_month);
+      if (!inWin(k, win)) continue;
+      if (r.section === "Revenue" && r.source !== "credit_note") revByMonth.set(k, (revByMonth.get(k) ?? 0) + r.amount_sar);
+      if (r.section === "Project-Costs") tpcByMonth.set(k, (tpcByMonth.get(k) ?? 0) + Math.abs(r.amount_sar));
+    }
+    return [...revByMonth.keys()].filter((k) => (revByMonth.get(k) ?? 0) > 0 && (tpcByMonth.get(k) ?? 0) === 0);
+  }, [rows, win]);
+
   // Partial-window honesty note (2026-08-04, owner-audit #3/#4): the window
   // itself has SOME data (revenue live), but at least one cost section
   // hasn't been posted yet, so EBITDA/EBITDA (reported)/EBIT/Net income are
   // not yet computable — mirrors Cash Flow's equivalent banner so the same
   // "figures aren't final for an open period" signal appears in both places.
+  // fix-31 (2026-08-04, Marcello — CEO facts on the Leveredge/F&F gap):
+  // when Project-Costs is specifically the (only) blocker — the common
+  // case today — name it and say why per month, instead of the generic
+  // "some cost lines" wording, which read as an unexplained data error.
+  // Gated to scope === "ALL": every Project-Costs leaf is non-recurring by
+  // definition, so "Only Recurring" scope always reads Project-Costs as
+  // empty regardless of booking status — that's the filter working as
+  // designed, not a gap, and must not be mislabeled as one. (The generic
+  // fallback below still fires as before in that scope — pre-existing
+  // behaviour, unchanged by this fix, not specific to Leveredge/F&F.)
+  // Also fires when hasEbitdaReported is already TRUE but the window still
+  // has missing months: Project-Costs having ANY data anywhere in a
+  // multi-month window (e.g. Jan-Apr booked) makes the coarse whole-window
+  // gate pass and print a real number for EBITDA (reported) — a number
+  // that silently under-counts the still-missing months. Surfacing that
+  // here (as a caveat on a real number, wording adjusted accordingly) is a
+  // strict honesty improvement — it changes no computed figure.
   const partialDataNote = useMemo(() => {
     if (noActualData || isBudgetMode) return null;
+    if (scope === "ALL" && actualSub.hasEbitda5 && missingLevMonths.length > 0) {
+      const suffix = actualSub.hasEbitdaReported
+        ? "figures below include only the months posted so far — EBITDA (reported) / EBIT / Net income are understated until the rest is booked."
+        : 'EBITDA (reported) / EBIT / Net income show "—" until booked.';
+      return `Project costs (Leveredge/F&F) not fully posted for ${windowName} — ${levGapSummary(missingLevMonths)}. ${suffix}`;
+    }
     if (actualSub.hasEbitdaReported) return null;
     return `Some cost lines are not fully posted yet for ${windowName} — EBITDA / EBITDA (reported) / EBIT / Net income show "—" until costs are booked.`;
-  }, [noActualData, isBudgetMode, actualSub, windowName]);
+  }, [noActualData, isBudgetMode, actualSub, missingLevMonths, windowName, scope]);
 
   // ------------------------------------------------------------ row build
   //

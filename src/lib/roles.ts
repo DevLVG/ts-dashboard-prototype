@@ -21,13 +21,18 @@
 // documentary evidence of who uses it or what role it should carry — left
 // unmapped (resolves to "unknown", the safe default) rather than guessed;
 // confirm with Trio before adding it anywhere.
+//
+// UPDATED 2026-08-04 (evening, Marcello's order): ceo@triosporting.com is the
+// internal review/test login (not Arwa) — moved from role "ceo" to role
+// "leveredge" so it gets full access incl. Content Studio/CMS; Arwa
+// (arwa@triosporting.com) is unchanged and stays on role "ceo".
 import { PageType } from "@/types/dashboard";
 
 export type Role = "leveredge" | "ceo" | "administration" | "unknown";
 
 const ROLE_EMAILS: Record<Exclude<Role, "unknown">, string[]> = {
-  leveredge: ["marcello.piccardo@leveredge.pro", "analyst@leveredge.pro"],
-  ceo: ["ceo@triosporting.com", "arwa@triosporting.com"],
+  leveredge: ["marcello.piccardo@leveredge.pro", "analyst@leveredge.pro", "ceo@triosporting.com"],
+  ceo: ["arwa@triosporting.com"],
   administration: ["direction@triosporting.com", "admin@triosporting.com"],
 };
 

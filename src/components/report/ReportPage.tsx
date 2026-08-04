@@ -35,7 +35,7 @@ import { useAlignment } from "@/contexts/AlignmentContext";
 import { resolveRole } from "@/lib/roles";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
 import { WindowPicker, ComparisonToggle, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
-import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtOrDash, pctChange } from "@/lib/format";
+import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtOrDash, comparePct } from "@/lib/format";
 import { periodFromPreset, useReportLastComplete, useReportSnapshot, type MacroRow } from "./reportData";
 import { buildEconomicsCommentary } from "./reportCommentary";
 import { generateReportPdf } from "./reportPdf";
@@ -50,7 +50,12 @@ const KpiTile = ({ label, row, comparisonLabel }: { label: string; row: MacroRow
   // posted for an open window) — the delta/tile must go honestly blank, not
   // silently treat the missing figure as a comparable number.
   const deltaAbs = row.actual === null || row.comparison === null ? null : row.actual - row.comparison;
-  const deltaPct = row.actual === null || row.comparison === null ? null : pctChange(row.actual, row.comparison);
+  // comparePct (not pctChange): 2026-08-04, owner-audit recheck fix-22 — a
+  // comparison base that's negative/near-zero (loss-to-profit swing on
+  // Gross Margin, e.g.) must render "—" (deltaPct === null below), never a
+  // clean-looking but meaningless +1026.2%-style artifact. Same guard
+  // PerformanceAnalysis.tsx already applies on /performance (owner-audit #7).
+  const deltaPct = row.actual === null || row.comparison === null ? null : comparePct(row.actual, row.comparison);
   return (
     <div className="flex flex-col items-center gap-1 rounded-xl border border-border bg-background/40 p-4 text-center">
       <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>

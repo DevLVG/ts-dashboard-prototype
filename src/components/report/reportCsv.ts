@@ -9,7 +9,7 @@
 // Δ / Δ%) doesn't match the old three-way Actual/Budget/PY P&L Overview
 // export it would otherwise borrow from.
 import { exportStatementCsv, buildCashFlowExport, buildBalanceSheetExport } from "@/lib/exportStatements";
-import { pctChange } from "@/lib/format";
+import { comparePct } from "@/lib/format";
 import type { ReportSnapshot } from "./reportData";
 
 const ENTITY = "Trio Sporting Club";
@@ -30,7 +30,10 @@ export const downloadReportCsvs = (snapshot: ReportSnapshot): void => {
     rows: snapshot.macroRows.map((r) => {
       // owner-audit #14 (2026-08-04): r.actual can be null (not yet posted).
       const deltaAbs = r.actual === null || r.comparison === null ? null : r.actual - r.comparison;
-      const deltaPct = r.actual === null || r.comparison === null ? null : pctChange(r.actual, r.comparison);
+      // comparePct (not pctChange): 2026-08-04, owner-audit recheck fix-22 —
+      // same guard as the on-screen preview / PDF; a sign-flip or near-zero
+      // comparison base exports blank, never a +1026.2%-style artifact cell.
+      const deltaPct = r.actual === null || r.comparison === null ? null : comparePct(r.actual, r.comparison);
       return [r.label, r.actual, r.comparison, deltaAbs, deltaPct];
     }),
     notes: snapshot.budgetNaNote ? [snapshot.budgetNaNote] : undefined,

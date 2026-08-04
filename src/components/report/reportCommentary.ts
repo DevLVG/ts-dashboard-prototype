@@ -18,10 +18,22 @@
 // fallback-month caveat) only appear when the corresponding condition is
 // true, so a section naturally lands in the 3-6 sentence range without
 // padding for its own sake.
-import { fmtSAR, fmtDeltaSAR, fmtPct, fmtDeltaPct, pctChange } from "@/lib/format";
+import { fmtSAR, fmtDeltaSAR, fmtPct, fmtDeltaPct, comparePct } from "@/lib/format";
 import type { ReportSnapshot } from "./reportData";
 
 const MATERIAL_SAR = 1000; // below this, a delta reads as "broadly flat" / "in line with", not a move
+
+/** True when actual/comparison sit on opposite sides of zero — the exact
+ * condition under which `comparePct` returns null as a SIGN FLIP (not just a
+ * near-zero base): a % against an opposite-sign base is meaningless (e.g.
+ * a loss of SAR 50k swinging to a profit of SAR 80k is not "+260%"). Used to
+ * pick a dollar-only "swung from a loss to a profit" sentence instead of
+ * either quoting an artifact percentage or silently dropping the clause
+ * (2026-08-04, owner-audit recheck fix-22 — the exact Gross Margin
+ * PY-loss-to-profit scenario the /report PDF was still printing as
+ * "+1026.2%"). */
+const isSignFlip = (actual: number, comparison: number): boolean =>
+  actual !== 0 && comparison !== 0 && (actual >= 0) !== (comparison >= 0);
 
 // ---------------------------------------------------------------- economics
 
@@ -43,10 +55,18 @@ export const buildEconomicsCommentary = (s: ReportSnapshot): string[] => {
     );
   } else {
     const delta = rev.actual - rev.comparison;
-    const pct = pctChange(rev.actual, rev.comparison);
+    // comparePct (not pctChange): sign-flip/near-zero base -> null, never a
+    // meaningless +1026.2%-style artifact percentage (owner-audit recheck
+    // fix-22).
+    const pct = comparePct(rev.actual, rev.comparison);
     if (Math.abs(delta) < MATERIAL_SAR) {
       sentences.push(
         `Gross revenue for ${period.label} was SAR ${fmtSAR(rev.actual)}, broadly flat versus ${comparisonLabel} (SAR ${fmtSAR(rev.comparison)}).`,
+      );
+    } else if (isSignFlip(rev.actual, rev.comparison)) {
+      sentences.push(
+        `Gross revenue for ${period.label} was SAR ${fmtSAR(rev.actual)}, a swing from a negative SAR ${fmtSAR(Math.abs(rev.comparison))} ` +
+          `versus ${comparisonLabel}.`,
       );
     } else {
       sentences.push(
@@ -84,11 +104,23 @@ export const buildEconomicsCommentary = (s: ReportSnapshot): string[] => {
     const gmPctActual = (gm.actual / rev.actual) * 100;
     let marginSentence = `Gross margin was SAR ${fmtSAR(gm.actual)}, ${fmtPct(gmPctActual)} of revenue`;
     if (gm.comparison !== null && rev.comparison !== null && Math.abs(rev.comparison) > 1) {
-      const gmPctComparison = (gm.comparison / rev.comparison) * 100;
-      const ppDelta = gmPctActual - gmPctComparison;
-      marginSentence += Math.abs(ppDelta) < 0.15
-        ? `, in line with ${comparisonLabel} (${fmtPct(gmPctComparison)})`
-        : `, ${ppDelta > 0 ? "up" : "down"} ${Math.abs(ppDelta).toFixed(1)} points versus ${comparisonLabel} (${fmtPct(gmPctComparison)})`;
+      // owner-audit recheck fix-22 (2026-08-04): a PY loss -> profit (or
+      // profit -> loss) swing on Gross Margin is the exact scenario the
+      // TTM report was still printing as "GROSS MARGIN +2,984,269 ·
+      // +1026.2%" — the % delta is meaningless against an opposite-sign
+      // base, so narrate the dollar swing instead of a "points" figure that
+      // would itself straddle a sign change.
+      if (isSignFlip(gm.actual, gm.comparison)) {
+        marginSentence += gm.comparison < 0
+          ? `, a swing from a loss of SAR ${fmtSAR(Math.abs(gm.comparison))} versus ${comparisonLabel} to a profit this window`
+          : `, a swing from a profit of SAR ${fmtSAR(gm.comparison)} versus ${comparisonLabel} to a loss this window`;
+      } else {
+        const gmPctComparison = (gm.comparison / rev.comparison) * 100;
+        const ppDelta = gmPctActual - gmPctComparison;
+        marginSentence += Math.abs(ppDelta) < 0.15
+          ? `, in line with ${comparisonLabel} (${fmtPct(gmPctComparison)})`
+          : `, ${ppDelta > 0 ? "up" : "down"} ${Math.abs(ppDelta).toFixed(1)} points versus ${comparisonLabel} (${fmtPct(gmPctComparison)})`;
+      }
     }
     sentences.push(`${marginSentence}.`);
   }
@@ -104,9 +136,12 @@ export const buildEconomicsCommentary = (s: ReportSnapshot): string[] => {
   } else {
     const d = ebitda.actual - ebitda.comparison;
     sentences.push(
-      Math.abs(d) < MATERIAL_SAR
-        ? `EBITDA (reported) came in at SAR ${fmtSAR(ebitda.actual)}, in line with ${comparisonLabel}.`
-        : `EBITDA (reported) came in at SAR ${fmtSAR(ebitda.actual)}, ${d > 0 ? "up" : "down"} SAR ${fmtSAR(Math.abs(d))} versus ${comparisonLabel}.`,
+      isSignFlip(ebitda.actual, ebitda.comparison)
+        ? `EBITDA (reported) came in at SAR ${fmtSAR(ebitda.actual)}, a swing from a ${ebitda.comparison < 0 ? "loss" : "profit"} of ` +
+          `SAR ${fmtSAR(Math.abs(ebitda.comparison))} versus ${comparisonLabel}.`
+        : Math.abs(d) < MATERIAL_SAR
+          ? `EBITDA (reported) came in at SAR ${fmtSAR(ebitda.actual)}, in line with ${comparisonLabel}.`
+          : `EBITDA (reported) came in at SAR ${fmtSAR(ebitda.actual)}, ${d > 0 ? "up" : "down"} SAR ${fmtSAR(Math.abs(d))} versus ${comparisonLabel}.`,
     );
   }
 

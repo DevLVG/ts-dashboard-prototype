@@ -32,7 +32,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { ReportSnapshot, ReportPeriodKind } from "./reportData";
-import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtOrDash, pctChange } from "@/lib/format";
+import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtOrDash, comparePct } from "@/lib/format";
 import { buildEconomicsCommentary, buildCashFlowCommentary, buildBalanceSheetCommentary, buildWatchItems } from "./reportCommentary";
 import bebasUrl from "@/assets/fonts/BebasNeue-Regular.ttf?url";
 import nunitoRegUrl from "@/assets/fonts/Nunito-Regular.ttf?url";
@@ -308,7 +308,12 @@ const drawKpiRow = (
     // computing a delta against a missing figure.
     const notPosted = item.row.actual === null;
     const deltaAbs = item.row.actual === null || item.row.comparison === null ? null : item.row.actual - item.row.comparison;
-    const deltaPct = item.row.actual === null || item.row.comparison === null ? null : pctChange(item.row.actual, item.row.comparison);
+    // comparePct (not pctChange): 2026-08-04, owner-audit recheck fix-22 —
+    // same guard as the Economics table below / PerformanceAnalysis.tsx on
+    // /performance (owner-audit #7): a sign-flip or near-zero comparison
+    // base renders "—", never a +1026.2%-style artifact on the cover-page
+    // KPI circles.
+    const deltaPct = item.row.actual === null || item.row.comparison === null ? null : comparePct(item.row.actual, item.row.comparison);
     const tone = notPosted ? MUTED : toneColor(deltaAbs);
 
     setBody(doc, fonts, 7, MUTED, "semibold");
@@ -600,7 +605,9 @@ const drawEconomicsTable = (flow: Flow, fonts: FontSet, snapshot: ReportSnapshot
   const body = rows.map((r) => {
     if (skipComparisonCols) return [r.label, fmtOrDash(r.actual)];
     const deltaAbs = r.actual === null || r.comparison === null ? null : r.actual - r.comparison;
-    const deltaPct = r.actual === null || r.comparison === null ? null : pctChange(r.actual, r.comparison);
+    // comparePct (not pctChange): 2026-08-04, owner-audit recheck fix-22 —
+    // same guard as the KPI circles above.
+    const deltaPct = r.actual === null || r.comparison === null ? null : comparePct(r.actual, r.comparison);
     return [
       r.label,
       fmtOrDash(r.actual),

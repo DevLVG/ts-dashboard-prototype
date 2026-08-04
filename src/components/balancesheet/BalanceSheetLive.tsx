@@ -21,7 +21,13 @@
 //      structure (section -> subsection -> line item) but cleaned: ONE
 //      comparison column (value + %), rows explode by subsection (click),
 //      always tying (footer line, honest on any discrepancy).
-//   4. Only the as-of/completeness badge + the net-of-credit-notes footnote.
+//   4. Only the as-of/completeness badge, plus (Budget mode only, when
+//      relevant) the one-line horizon explainer — see the fallback note
+//      below. The net-of-credit-notes footnote is REMOVED (fix-25,
+//      2026-08-04, Marcello — CEO Cockpit chrome cleanup): STRICT basis is
+//      the only basis shown anywhere, restating it here was noise; this page
+//      had its own hardcoded copy left behind when the shared chrome's
+//      `StrictBasisNote` was retired — removed to match.
 //
 // BUDGET comparison (migration 068, scripts/build_budget_balance_sheet.py):
 // a SIMPLE DERIVED balance-sheet budget — no client-approved line-by-line BS
@@ -31,12 +37,34 @@
 // "derived"/badge wording per figure (Marcello, follow-up 2026-08-03); the
 // one explanatory tooltip lives on the Comparison toggle itself
 // (BsControls.tsx). Full method: Budget_Load_Report_2026-07-19.md addendum.
+//
+// BUDGET FALLBACK for "Today" (fix-27, 2026-08-04): as-of "Today" resolves
+// to the last CLOSED month (July isn't accounting-closed yet -> resolves to
+// 30 Jun '26), which sits before the budget horizon starts (Jul '26) -> a
+// literal same-month lookup is always empty here, so Budget mode looked dead
+// ("—" everywhere, no explanation on-screen). Root-caused via authenticated
+// Playwright repro against clever.leveredge.pro (2026-08-04): production
+// already renders honest "—" dashes, not fabricated zeros (that part was
+// already correct) — the bug is that the comparison had NO useful fallback
+// and NO on-screen explanation, so it read as broken/empty at a glance.
+// Fix: when as-of is "Today" AND the last-closed month predates the horizon,
+// compare last-close ACTUALS against the CURRENT CALENDAR month's PLAN
+// (today: 30-Jun actual vs Aug '26 plan) instead of showing nothing — every
+// column/circle that uses this fallback is explicitly relabeled ("Actual —
+// last close 30 Jun '26" / "Plan — Aug '26") so it can never read as a
+// same-date comparison, plus a permanent one-line on-screen explainer (not
+// hover-only) states the mechanism. Scoped to isToday only: an explicitly
+// selected past closed month (e.g. picking "May 2026" from the as-of
+// dropdown) keeps the honest "—" — substituting today's plan for an
+// arbitrary historical actual the user deliberately chose would misrepresent
+// the comparison they asked for, not clarify it. Once July closes in the
+// books, resolvedAsOfKey lands inside the horizon on its own and the exact
+// same-month match below takes over automatically — no extra gating needed.
 import { Fragment, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ChevronRight, ChevronDown, Scale, HardHat, ShieldCheck, CalendarClock } from "lucide-react";
+import { ChevronRight, ChevronDown, Scale, HardHat, Info, CalendarClock } from "lucide-react";
 import { ScrollHint } from "@/components/chrome/AlignmentChrome";
-import { monthKey, monthKeyLabel, shiftMonthKey, endOfMonthLabel } from "@/data/liveData";
+import { monthKey, monthKeyLabel, shiftMonthKey, endOfMonthLabel, todayMonthKey } from "@/data/liveData";
 import {
   useBalanceSheet, useBudgetBalanceSheet, useBankBalances,
   type BalanceSheetRow, type BudgetBalanceSheetRow,
@@ -136,13 +164,17 @@ const ExpandRow = ({
 };
 
 const StatementCard = ({
-  title, groups, total, comparisonTotal, comparisonLabel, expanded, onToggle, extraGrandTotals,
+  title, groups, total, comparisonTotal, comparisonLabel, asOfLabel = "As of", expanded, onToggle, extraGrandTotals,
 }: {
   title: string;
   groups: { key: string; subsection: string; group: SubsectionGroup }[];
   total: number;
   comparisonTotal: number | null;
   comparisonLabel: string;
+  /** Overrides the "As of" header — used by the Budget-fallback comparison
+   *  (fix-27, 2026-08-04) so the actual-side column reads "Actual — last
+   *  close 30 Jun '26" instead of the ambiguous default. */
+  asOfLabel?: string;
   expanded: Set<string>;
   onToggle: (key: string) => void;
   /** Extra subtotal rows to render inline (e.g. "Total Liabilities" before Equity starts). */
@@ -155,7 +187,7 @@ const StatementCard = ({
         <thead>
           <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
             <th className="text-left py-1 pr-2 font-semibold">SAR</th>
-            <th className="text-right py-1 px-3 font-semibold whitespace-nowrap">As of</th>
+            <th className="text-right py-1 px-3 font-semibold whitespace-nowrap">{asOfLabel}</th>
             <th className="text-right py-1 px-3 font-semibold whitespace-nowrap">{comparisonLabel}</th>
             <th className="text-right py-1 px-3 font-semibold whitespace-nowrap">Δ value</th>
             <th className="text-right py-1 pl-3 font-semibold whitespace-nowrap">Δ %</th>
@@ -237,10 +269,27 @@ export const BalanceSheetLive = () => {
     return m;
   }, [comparisonActualRows, comparisonMode]);
 
-  const budgetRowsForMonth = useMemo((): BudgetBalanceSheetRow[] => {
-    if (comparisonMode !== "BUDGET" || !budgetData?.available || !resolvedAsOfKey) return [];
+  const isBudgetMode = comparisonMode === "BUDGET";
+
+  // Exact same-month match — the normal path once resolvedAsOfKey falls
+  // inside the Jul '26 -> Dec '27 budget horizon (see fallback note above).
+  const budgetRowsExact = useMemo((): BudgetBalanceSheetRow[] => {
+    if (!isBudgetMode || !budgetData?.available || !resolvedAsOfKey) return [];
     return budgetData.rows.filter((r) => monthKey(r.period_month) === resolvedAsOfKey);
-  }, [budgetData, comparisonMode, resolvedAsOfKey]);
+  }, [budgetData, isBudgetMode, resolvedAsOfKey]);
+
+  // Fallback: as-of "Today" resolving to a last-closed month before the
+  // horizon -> compare against the CURRENT calendar month's plan instead of
+  // showing a dead "—". Only engages when the exact match above is empty.
+  const currentCalendarMonthKey = todayMonthKey();
+  const budgetRowsFallback = useMemo((): BudgetBalanceSheetRow[] => {
+    if (!isBudgetMode || !isToday || !resolvedAsOfKey || !budgetData?.available || budgetRowsExact.length > 0) return [];
+    if (currentCalendarMonthKey === resolvedAsOfKey) return []; // already covered by the exact match
+    return budgetData.rows.filter((r) => monthKey(r.period_month) === currentCalendarMonthKey);
+  }, [budgetData, isBudgetMode, isToday, budgetRowsExact, currentCalendarMonthKey, resolvedAsOfKey]);
+
+  const budgetFallbackActive = isBudgetMode && budgetRowsExact.length === 0 && budgetRowsFallback.length > 0;
+  const budgetRowsForMonth = budgetFallbackActive ? budgetRowsFallback : budgetRowsExact;
 
   const budgetMap = useMemo(() => {
     const m = new Map<string, number>();
@@ -248,11 +297,32 @@ export const BalanceSheetLive = () => {
     return m;
   }, [budgetRowsForMonth]);
 
-  const isBudgetMode = comparisonMode === "BUDGET";
   const budgetUnavailableReason = resolvedAsOfKey
-    ? `No Budget available for ${monthKeyLabel(resolvedAsOfKey)} (the derived balance-sheet budget covers Jul '26 → Dec '27 only).`
+    ? `No Budget available for ${monthKeyLabel(resolvedAsOfKey)} (the derived balance-sheet budget covers Jul '26 → Dec '27 only)${
+        isToday ? "" : " — try \"Today\", which compares against the current month's plan instead."
+      }`
     : undefined;
   const budgetHasData = isBudgetMode && budgetRowsForMonth.length > 0;
+
+  // Column/circle labels — plain "Budget"/"As of" for the normal case;
+  // explicit dated labels the moment the fallback is active so it can never
+  // be mistaken for a same-date comparison (Marcello, mandate 2026-08-04).
+  const budgetAsOfColumnLabel = budgetFallbackActive && resolvedAsOfKey
+    ? `Actual — last close ${endOfMonthLabel(resolvedAsOfKey)}`
+    : "As of";
+  const budgetComparisonColumnLabel = budgetFallbackActive
+    ? `Plan — ${monthKeyLabel(currentCalendarMonthKey)}`
+    : "Budget";
+
+  // On-screen (never hover-only) one-line explainer — shown whenever Budget
+  // mode isn't doing a plain same-month comparison, i.e. exactly when the
+  // horizon boundary is actually relevant to what's on screen (mandate
+  // point 3, 2026-08-04).
+  const budgetHorizonExplainer = isBudgetMode && budgetRowsExact.length === 0 && resolvedAsOfKey
+    ? budgetFallbackActive
+      ? `Budget horizon starts Jul '26 — comparing last-close actuals (${endOfMonthLabel(resolvedAsOfKey)}) against the ${monthKeyLabel(currentCalendarMonthKey)} plan. Full same-month comparison activates automatically once July closes in the books.`
+      : `Budget horizon starts Jul '26 → Dec '27 — no plan exists for ${monthKeyLabel(resolvedAsOfKey)}. Full same-month comparison activates automatically once July closes in the books.`
+    : undefined;
 
   // A single lookup used by both the circles and the tables: comparison
   // value for one actual row, whichever comparison mode is active (Budget
@@ -360,7 +430,7 @@ export const BalanceSheetLive = () => {
   const checkDelta = assets.actualTotal - totalLE_actual;
   const isBalanced = Math.abs(checkDelta) < 1;
 
-  const comparisonLabel = comparisonMode === "PY_DATE" ? "Same Date Last Year" : comparisonMode === "START_OF_YEAR" ? "Start of Year" : "Budget";
+  const comparisonLabel = comparisonMode === "PY_DATE" ? "Same Date Last Year" : comparisonMode === "START_OF_YEAR" ? "Start of Year" : budgetComparisonColumnLabel;
 
   // ------------------------------------------------------------ circles
   const fixedAssetsActual = monthRows.filter((r) => r.section === "Assets" && r.subsection === "Fixed Assets").reduce((s, r) => s + r.amount, 0);
@@ -432,7 +502,9 @@ export const BalanceSheetLive = () => {
         <BsComparisonToggle value={comparisonMode} onChange={setComparisonMode} />
       </div>
 
-      {/* As-of badge (kept per spec: completeness/as-of + net-of-credit-notes footnote, nothing else) */}
+      {/* As-of badge (completeness/as-of, nothing else — the net-of-credit-
+          notes footnote was removed 2026-08-04, fix-25/fix-27: STRICT basis
+          is the only basis shown anywhere now, restating it here was noise) */}
       {resolvedAsOfKey && (
         <div className="flex flex-wrap items-center gap-3">
           <div className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-sm">
@@ -449,17 +521,18 @@ export const BalanceSheetLive = () => {
           )}
         </div>
       )}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground cursor-help w-fit">
-            <ShieldCheck className="h-3.5 w-3.5 text-sky-400/80" />
-            Figures net of customer credit notes
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="max-w-xs text-xs">
-          Receivables are net of the customer credit notes back-loaded to the ledger on 2026-07-21 — the conservative, fully-reconciled basis, same as the rest of the cockpit.
-        </TooltipContent>
-      </Tooltip>
+
+      {/* Budget-horizon explainer — ON-SCREEN, not hover-only (mandate point
+          3, 2026-08-04): only rendered when it's actually relevant, i.e.
+          Budget mode is selected and the plain same-month match came up
+          empty (either the fallback engaged, or there's genuinely no plan
+          for the selected month at all). */}
+      {budgetHorizonExplainer && (
+        <p className="inline-flex items-start gap-1.5 text-xs text-muted-foreground max-w-2xl">
+          <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-gold/80" />
+          <span>{budgetHorizonExplainer}</span>
+        </p>
+      )}
 
       {isLoading && <p className="text-sm text-muted-foreground">Loading the balance sheet…</p>}
       {isError && (
@@ -482,6 +555,7 @@ export const BalanceSheetLive = () => {
                 total={assets.actualTotal}
                 comparisonTotal={assets.comparisonTotal}
                 comparisonLabel={comparisonLabel}
+                asOfLabel={budgetAsOfColumnLabel}
                 expanded={expanded}
                 onToggle={toggle}
               />
@@ -494,6 +568,7 @@ export const BalanceSheetLive = () => {
                 total={totalLE_actual}
                 comparisonTotal={totalLE_comparison}
                 comparisonLabel={comparisonLabel}
+                asOfLabel={budgetAsOfColumnLabel}
                 expanded={expanded}
                 onToggle={toggle}
                 extraGrandTotals={[

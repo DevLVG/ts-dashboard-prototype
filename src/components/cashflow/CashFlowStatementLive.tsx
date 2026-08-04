@@ -12,7 +12,14 @@
 //   meaningful").
 //   -> big cash circle + cash-by-bank-account split (this squad's mount —
 //      matches fix-4-kpi's KpiCircles visual language exactly)
-//   -> ONE interactive, expandable cash-flow statement table (built here)
+//   -> ONE interactive, expandable cash-flow statement table (built here) —
+//      the manager statement ONLY (fix-26, 2026-08-04): Operating (cash
+//      collected / cash paid out) -> Investing (named movements) ->
+//      Financing (owner & capital / Family Office) -> Other -> Net change
+//      -> Opening -> Closing. The accounting-ledger reconciliation that used
+//      to render underneath is gone from the screen entirely — see
+//      useCashFlowPageData.ts header for why and where it still lives as an
+//      internal check.
 //
 // REMOVED from the old page (Marcello, live review):
 //   - Working Capital section — lives ONLY in Treasury -> "Cash & Working

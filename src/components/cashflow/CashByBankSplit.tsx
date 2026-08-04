@@ -6,6 +6,16 @@
 // a stale badge appears honestly when the sync is more than 36h old (bank
 // statements are a known open item with the client).
 //
+// fix-26 (2026-08-04, CEO review — "abbiamo meno soldi di quanto avrei
+// voluto, verificalo"): the 36h staleness check above only proves the SYNC
+// ran — it says nothing about whether the underlying Qoyod ledger has
+// actually moved. `data.booksUnmovedSince` is a second, independently
+// computed signal (see useCashFlowPageData.ts): when the live total ties
+// EXACTLY to the last CLOSED month's book-cash snapshot, no bank/cash
+// posting has hit the ledger since that close, however fresh the sync
+// timestamp reads — surfaced here as its own explicit line, never folded
+// silently into the "as of" badge.
+//
 // One hue (gold), light -> proportional bar length only (magnitude, not
 // identity) — a composition of ONE total, not a categorical comparison, so
 // a single sequential hue is the correct encoding (dataviz: sequential =
@@ -16,6 +26,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import type { BankSplitData } from "@/hooks/useCashFlowPageData";
 import { fmtSAR } from "@/lib/format";
+import { monthKeyLabel } from "@/data/liveData";
 
 const fmtAsOf = (iso: string): string => {
   const d = new Date(iso);
@@ -23,7 +34,7 @@ const fmtAsOf = (iso: string): string => {
 };
 
 export const CashByBankSplit = ({ data, note, className }: { data: BankSplitData; note: string | null; className?: string }) => {
-  const { accounts, total, asOfIso, stale } = data;
+  const { accounts, total, asOfIso, stale, booksUnmovedSince } = data;
   const maxBalance = accounts.reduce((m, a) => Math.max(m, Math.abs(a.balance)), 0);
 
   return (
@@ -84,6 +95,15 @@ export const CashByBankSplit = ({ data, note, className }: { data: BankSplitData
         <span className="text-sm font-heading tabular-nums text-gold">{total === null ? "—" : fmtSAR(total)}</span>
       </div>
 
+      {booksUnmovedSince && (
+        <p className="inline-flex items-start gap-1.5 text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-md px-2.5 py-1.5">
+          <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" aria-hidden />
+          <span>
+            Unchanged from the {monthKeyLabel(booksUnmovedSince)} book close — no bank/cash postings recorded in Qoyod since then.
+            Treat this total as of {monthKeyLabel(booksUnmovedSince)}, not today's sync date.
+          </span>
+        </p>
+      )}
       {note && <p className="text-[11px] text-muted-foreground/80">{note}</p>}
     </div>
   );

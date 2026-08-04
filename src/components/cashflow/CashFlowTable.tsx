@@ -13,15 +13,19 @@
 // by construction).
 //
 // Expand (2nd-round rebuild, 2026-08-03 — Marcello's manager's-view mandate,
-// fix-19): Operating -> {Cash collected from customers, Cash paid out, then
-// — same total, from the books — Accounting profit before non-cash costs,
-// Change in working capital (itself expandable -> receivables / payables /
-// inventory / VAT timing), Depreciation add-back}; Investing -> named
-// fixed-asset lines; Financing -> {Owner & capital movements (expandable ->
-// named shareholder accounts), Family Office & related-entity movements
-// (expandable -> named entities)}. Every child sums back to its parent
-// EXACTLY (see useCashFlowPageData.ts header for the reconciliation
-// formulas) — this is one truth shown two ways, never a second truth.
+// fix-19; simplified 2026-08-04, fix-26 — ONE method only, see
+// useCashFlowPageData.ts header): Operating -> {Cash collected from
+// customers, Cash paid out}; Investing -> named fixed-asset lines (+ an
+// honest residual row for whatever isn't individually named); Financing ->
+// {Owner & capital movements (expandable -> named shareholder accounts +
+// residual), Family Office & related-entity movements (expandable -> named
+// entities + residual)}. Every child sums back to its parent EXACTLY, in
+// BOTH columns, by construction (`reconcileDrill` in the hook) — the
+// cockpit's hard decomposition rule. The accounting-ledger reconciliation
+// (accounting profit, change in working capital, depreciation add-back)
+// does NOT render here any more — it stays a silent internal invariant in
+// the hook. That insight, when a manager needs it, lives in Treasury ->
+// "Cash & Working Capital".
 // Same granularity rule as Economics: Budget comparison has no component-
 // level split, so expansion is disabled entirely in Budget mode
 // (`budgetCapNote` explains why, same placement as Economics' note).
@@ -110,15 +114,18 @@ export const CashFlowTable = ({
               const FlowIcon = r.flow === "in" ? ArrowDownToLine : r.flow === "out" ? ArrowUpFromLine : null;
               return (
                 <Fragment key={r.key}>
-                  {r.captionAbove && (
-                    <tr>
-                      <td colSpan={5} className="pt-3 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70 border-t border-border/40">
-                        {r.captionAbove}
-                      </td>
-                    </tr>
-                  )}
                   <tr
                     className={`border-b border-border/10 ${r.subtotal ? "border-t-2 border-t-border" : ""} ${r.emphasis ? "font-semibold" : ""} ${isSep ? "border-t border-t-border/40" : ""}`}
+                    // fix-26 (2026-08-04): raw, unformatted numbers exposed as
+                    // data attributes so QA can verify "children sum to
+                    // parent" exactly from the DOM, without re-parsing
+                    // currency strings — the decomposition invariant is
+                    // non-negotiable and needs a machine-checkable ground
+                    // truth, not a screenshot eyeball.
+                    data-row-key={r.key}
+                    data-parent-key={r.parentKey ?? ""}
+                    data-actual={r.actual ?? ""}
+                    data-comparison={r.comparison ?? ""}
                   >
                     {/* owner-audit #11 (2026-08-04): 16x16 chevron tap target
                         with the label outside it — see PerformanceAnalysis.tsx

@@ -5,12 +5,39 @@
 // ADDITIVE view of the SAME warehouse totals already computed by
 // v_cashflow_statement_monthly; nothing here changes a top-level number.
 //
+// fix-26 (2026-08-04, CEO cockpit review): the page was mixing TWO cash-flow
+// methodologies at once — the manager statement (cash collected / cash paid
+// out) AND, directly below it under "the same total, from the accounting
+// ledger", the indirect (GL) reconciliation (accounting profit before
+// non-cash costs, change in working capital with its AR/AP/inventory/VAT
+// sub-rows, depreciation add-back). ONE method renders now: the manager
+// statement only. The ledger reconciliation is NOT deleted — it stays a
+// silent INTERNAL invariant computed right here (`operatingResult +
+// operatingWcChange + operatingDaNoncash` must equal `operatingCashFlow`,
+// to the cent) and asserted every render via `useLedgerTieOutCheck` below,
+// which `console.warn`s if it ever breaks. Nothing of it renders. The
+// working-capital drill (AR / AP / inventory / VAT timing) that used to
+// expand under "Change in working capital" is removed from this page
+// entirely, not just hidden — it already lives in Treasury → "Cash &
+// Working Capital" (`TreasuryCash.tsx`, its own independent
+// `useWorkingCapitalMonthly` call), which is the one place a manager should
+// read that insight (Marcello, fix-26 mandate: "do not re-add here").
+//
+// fix-26 also closes the decomposition gap the CEO flagged ("Investing
+// −113,806 with all children —"): every expandable row's children now sum
+// to their parent EXACTLY, in both columns, every window, by CONSTRUCTION —
+// see `reconcileDrill` below. Named balance-sheet lines (PPE, shareholder
+// accounts, intercompany) are shown first; whatever real amount they don't
+// explain is surfaced as one honest "Other movements" row rather than left
+// as an unexplained gap between a real parent total and all-dash children.
+//
 // Page-agnostic aggregation layer for the Cash Flow screen, mirroring how
 // `useKpiHeaderData` feeds the Economics KPI circles: reads the SAME global
 // controls every aligned screen reads (`useAlignment` — window preset,
 // Comparison [PY|Budget]) and the cash-flow warehouse views already wired
 // into the app (`useCashflowMonthly`, `useBalanceSheet`, `useBankBalances`,
-// `useCashflowBudgetComparison`, `useWorkingCapitalMonthly`).
+// `useCashflowBudgetComparison`). Does NOT read `useWorkingCapitalMonthly`
+// (fix-26, 2026-08-04) — that insight lives only in Treasury now.
 //
 // Scope is intentionally NOT read here: v_cashflow_statement_monthly has no
 // recurrence dimension (unlike the P&L basis rows), so "Only Recurring"
@@ -55,17 +82,13 @@
 //   (displayed as a negative, i.e. cash in + cash out = operating cash flow).
 //   The sub-note says so plainly — never presented as itemized.
 //
-//   Working-capital explosion — v_working_capital_monthly (receivables /
-//   inventory / payables balances, SAME account-code ranges the CFS view's
-//   OP_WC bucket uses: 1103%/1104%/2010-2013%). A window's delta on each
-//   balance (end anchor − start-1 anchor, same anchor pattern as the cash
-//   circle) reconstructs each component's cash contribution. The CFS view's
-//   OP_WC bucket ALSO includes the VAT control accounts (20269/20270), which
-//   v_working_capital_monthly does not carry — the residual
-//   (operating_wc_change − reconstructed AR/Inv/AP) is exactly that VAT
-//   movement, verified empirically to the cent across the full 2021-2026
-//   history before shipping. Shown as its own honestly-labeled line, never
-//   folded silently into receivables or payables.
+//   Working-capital explosion — REMOVED from this page 2026-08-04 (fix-26).
+//   It rendered under "Change in working capital" as part of the accounting-
+//   ledger reconciliation block the CEO asked removed wholesale (two
+//   methodologies on one screen). The same insight (receivables / payables /
+//   inventory / VAT-timing, from v_working_capital_monthly) lives in
+//   Treasury → "Cash & Working Capital" — this page no longer fetches that
+//   view at all.
 //
 //   Investing (capex) / Financing (equity, intercompany) drills —
 //   v_balance_sheet_monthly (already fetched by this hook for the cash
@@ -88,16 +111,14 @@
 //   v_cashflow_statement_monthly still shows, live). Handled the same way
 //   the rest of this page handles an open month: a plain note, never a
 //   fabricated zero.
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAlignment, type ComparisonMode } from "@/contexts/AlignmentContext";
 import { computeMtdProration, type Win, type MtdProration } from "@/data/alignment";
 import { monthKey, monthKeyLabel, shiftMonthKey } from "@/data/liveData";
 import {
   useCashflowMonthly, useBalanceSheet, useBankBalances, useCashflowBudgetComparison,
-  useWorkingCapitalMonthly,
   type CashflowMonthRow, type CashflowBudgetRow, type BankBalanceRow, type BalanceSheetRow,
-  type WorkingCapitalMonthRow,
 } from "@/data/statementsLive";
 import { supabase, isSupabaseConfigured, toFriendlyError } from "@/lib/supabaseClient";
 import { fmtSAR } from "@/lib/format";
@@ -233,6 +254,12 @@ export interface BankSplitData {
    * known open item with the client (manual/periodic sync), so a stale badge
    * is expected occasionally, never hidden. */
   stale: boolean;
+  /** fix-26 (2026-08-04): a label (e.g. "Jun 2026") when the live total ties
+   * EXACTLY to the last CLOSED month's book-cash snapshot — a real signal,
+   * computed from this hook's own two cash anchors, that no bank/cash
+   * ledger postings have hit since that close, however fresh the sync
+   * timestamp looks. Null when the live total has genuinely moved since. */
+  booksUnmovedSince: string | null;
 }
 
 // ------------------------------------------------------- customer receipts
@@ -278,46 +305,6 @@ const sumCollections = (rows: CollectionsMonthRow[] | undefined, w: Win): number
   return any ? sum : null;
 };
 
-// --------------------------------------------------- working-capital drill
-
-interface WcStock { receivables: number; inventory: number; payables: number }
-
-const wcStockAt = (rows: WorkingCapitalMonthRow[] | undefined, k: string): WcStock | null => {
-  if (!rows) return null;
-  const row = rows.find((r) => monthKey(r.period_month) === k);
-  if (!row) return null;
-  return { receivables: n(row.receivables), inventory: n(row.inventory), payables: n(row.payables) };
-};
-
-interface WcDelta { dAr: number | null; dInv: number | null; dAp: number | null }
-
-/** Balance delta across the window (end anchor − start-1 anchor) — same
- * anchor pattern the cash-position circle already uses. A stock difference,
- * never pro-rated (see file header). */
-const wcDelta = (rows: WorkingCapitalMonthRow[] | undefined, w: Win): WcDelta => {
-  const start = wcStockAt(rows, shiftMonthKey(w.startKey, -1));
-  const end = wcStockAt(rows, w.endKey);
-  if (!start || !end) return { dAr: null, dInv: null, dAp: null };
-  return {
-    dAr: end.receivables - start.receivables,
-    dInv: end.inventory - start.inventory,
-    dAp: end.payables - start.payables,
-  };
-};
-
-const arContribution = (d: WcDelta): number | null => (d.dAr === null ? null : -d.dAr);
-const invContribution = (d: WcDelta): number | null => (d.dInv === null ? null : -d.dInv);
-const apContribution = (d: WcDelta): number | null => (d.dAp === null ? null : d.dAp);
-
-/** The residual (VAT-control-account timing) that makes AR+Inv+AP tie
- * exactly to operating_wc_change — verified empirically to be exactly the
- * VAT movement, to the cent, across the full 2021-2026 history. */
-const vatResidual = (wcChange: number, d: WcDelta): number | null => {
-  const ar = arContribution(d); const inv = invContribution(d); const ap = apContribution(d);
-  if (ar === null || inv === null || ap === null) return null;
-  return wcChange - (ar + inv + ap);
-};
-
 // --------------------------------------------------- investing/financing drill
 //
 // v_balance_sheet_monthly line codes this drill reads (all real, all already
@@ -349,12 +336,36 @@ const bsLineContribution = (rows: BalanceSheetRow[], w: Win, lineCode: string): 
   return -(end - start);
 };
 
+// fix-26 (2026-08-04): root cause of the CEO's "Investing −113,806 with all
+// children —" complaint. A "to-date" window (YTD, FY to date) ends TODAY —
+// but v_balance_sheet_monthly stops at the last CLOSED month, so calling
+// `bsLineContribution` with the RAW window's end anchor (e.g. Aug when the
+// last closed month is Jun) returns null for EVERY named line, even though
+// the CF flow total itself (from v_cashflow_statement_monthly, which simply
+// has no rows yet for the still-open months) already, correctly, reflects
+// only the closed months. The two data sources were being asked about
+// different windows. `capToClosedBs` fixes this by driving the drill off
+// the SAME closed-months span the total naturally covers: whatever the
+// window's own start is, cap its end at the last closed BS month. Returns
+// the ORIGINAL window unchanged when nothing needs capping, and null only
+// when the window hasn't closed AT ALL yet (its own start is already past
+// the horizon, e.g. Month-to-date on the current month) — in that case the
+// caller falls back to the raw window, which correctly yields no drill data
+// (the existing "hasn't closed yet" message already covers that case).
+const capToClosedBs = (w: Win, lastClosedBsMonth: string | null): Win | null => {
+  if (!lastClosedBsMonth) return null;
+  if (w.startKey > lastClosedBsMonth) return null;
+  return w.endKey <= lastClosedBsMonth ? w : { startKey: w.startKey, endKey: lastClosedBsMonth };
+};
+
 export interface DrillItem {
   key: string;
   label: string;
   actual: number | null;
   comparison: number | null;
   explainer?: string;
+  actualUnavailableReason?: string;
+  comparisonUnavailableReason?: string;
 }
 
 const INVESTING_LINES: Array<{ code: string; label: string }> = [
@@ -410,6 +421,55 @@ const buildBsDrill = (
   return items;
 };
 
+// ------------------------------------------------ decomposition invariant
+//
+// fix-26 (2026-08-04, CEO cockpit review): "any rendered total must equal
+// the sum of its rendered children, in the same window" — no more totals
+// with all-dash children and no explanation. `reconcileDrill` makes this
+// true BY CONSTRUCTION for every expandable row that drills into named
+// balance-sheet lines: whatever real amount the named lines above don't
+// explain becomes one honest residual row, in EITHER column independently
+// (actual and comparison can each have their own gap). If a NAMED line's
+// own value is itself unavailable for this window (open month / pre-ledger
+// horizon), a clean residual can't be computed — the residual row still
+// renders, but flagged "—" with the same reason, rather than silently
+// guessing a number.
+const RECONCILE_EPSILON = 0.5;
+
+const reconcileDrill = (
+  named: DrillItem[],
+  parentActual: number | null,
+  parentComparison: number | null,
+  residualLabel: string,
+  residualExplainer: string,
+): DrillItem[] => {
+  const actualGap = named.some((i) => i.actual === null);
+  const comparisonGap = named.some((i) => i.comparison === null);
+  const actualSum = named.reduce((s, i) => s + (i.actual ?? 0), 0);
+  const comparisonSum = named.reduce((s, i) => s + (i.comparison ?? 0), 0);
+
+  const residualActual = parentActual !== null && !actualGap ? parentActual - actualSum : null;
+  const residualComparison = parentComparison !== null && !comparisonGap ? parentComparison - comparisonSum : null;
+
+  const showActual = residualActual !== null && Math.abs(residualActual) >= RECONCILE_EPSILON;
+  const showComparison = residualComparison !== null && Math.abs(residualComparison) >= RECONCILE_EPSILON;
+
+  if (!showActual && !showComparison) return named;
+
+  return [
+    ...named,
+    {
+      key: "residual",
+      label: residualLabel,
+      actual: actualGap ? null : residualActual,
+      comparison: comparisonGap ? null : residualComparison,
+      explainer: residualExplainer,
+      actualUnavailableReason: actualGap ? "One or more named lines above don't have a figure for this window yet, so the remainder can't be isolated honestly — shown as \"—\" rather than guessed." : undefined,
+      comparisonUnavailableReason: comparisonGap ? "One or more named lines above don't have a figure for the comparison window yet, so the remainder can't be isolated honestly — shown as \"—\" rather than guessed." : undefined,
+    },
+  ];
+};
+
 // --------------------------------------------------------------- exports
 
 export interface CashFlowLineRow {
@@ -443,11 +503,6 @@ export interface CashFlowLineRow {
    * manager's cash-in/cash-out view — independent of the delta-vs-
    * comparison tone used everywhere else on this table. */
   flow?: "in" | "out";
-  /** A short caption rendered as its own line ABOVE this row, with no
-   * numeric columns — used once, to mark the accounting (indirect-method)
-   * reconciliation as an alternate lens on the SAME operating-cash-flow
-   * total shown just above, not an additional amount. */
-  captionAbove?: string;
   /** A small persistent note under the label (not hidden in a tooltip) —
    * used for the one row whose figure is derived rather than itemized. */
   subNote?: string;
@@ -490,7 +545,6 @@ export const useCashFlowPageData = (): CashFlowPageData => {
   const { data: bsData, isLoading: bsLoading } = useBalanceSheet();
   const { data: bankRows, isLoading: bankLoading } = useBankBalances();
   const { data: budgetRows, isLoading: budgetLoading } = useCashflowBudgetComparison();
-  const { data: wcRows, isLoading: wcLoading } = useWorkingCapitalMonthly();
   const { data: collectionsRows, isLoading: collectionsLoading } = useCollectionsMonthly();
 
   const mtdPro = useMemo(() => (preset === "MTD" ? computeMtdProration(todayKey) : null), [preset, todayKey]);
@@ -525,6 +579,25 @@ export const useCashFlowPageData = (): CashFlowPageData => {
     const ageMs = Date.now() - new Date(bankAsOfIso).getTime();
     return ageMs > 36 * 60 * 60 * 1000;
   }, [bankAsOfIso]);
+
+  /** fix-26 (2026-08-04, CEO review — "abbiamo meno soldi di quanto avrei
+   * voluto, verificalo"): the sync-freshness badge above only proves OUR
+   * sync job ran, not that the underlying Qoyod ledger has actually been
+   * kept current. When the live bank total ties EXACTLY to the last CLOSED
+   * month's book-cash snapshot, that is real evidence no bank/cash JE has
+   * posted since that close — both anchors are already fetched by this
+   * hook (`bookCashByMonth`, `liveBankTotal`), no extra query needed. */
+  const lastClosedBookMonth = useMemo(() => {
+    const keys = [...bookCashByMonth.keys()].sort();
+    return keys.length > 0 ? keys[keys.length - 1] : null;
+  }, [bookCashByMonth]);
+
+  const booksUnmovedSinceMonth = useMemo(() => {
+    if (!lastClosedBookMonth || liveBankTotal === null || lastClosedBookMonth === todayKey) return null;
+    const lastClosedTotal = bookCashByMonth.get(lastClosedBookMonth);
+    if (lastClosedTotal === undefined) return null;
+    return Math.abs(liveBankTotal - lastClosedTotal) < 0.5 ? lastClosedBookMonth : null;
+  }, [lastClosedBookMonth, liveBankTotal, bookCashByMonth, todayKey]);
 
   /** Cash position AT the end of month `k` — live bank sync if `k` is
    * today's still-open month, else the book-cash snapshot from the BS view. */
@@ -599,6 +672,28 @@ export const useCashFlowPageData = (): CashFlowPageData => {
   const priorAggRaw = useMemo(() => sumCfWindow(cfRows, py), [cfRows, py]);
   const priorAgg = useMemo(() => (mtdPro ? scaleCfAgg(priorAggRaw, mtdPro.fraction) : priorAggRaw), [priorAggRaw, mtdPro]);
 
+  // fix-26 (2026-08-04): the accounting-ledger reconciliation (operating
+  // result + change in working capital + depreciation add-back = operating
+  // cash flow) no longer RENDERS on this page — see file header. It stays a
+  // live INTERNAL invariant: every render, both windows are checked to the
+  // cent, and any break is surfaced loudly in the console rather than
+  // silently drifting. This is a dev/ops signal, not a UI element.
+  useEffect(() => {
+    const check = (label: string, agg: CfWindowAgg) => {
+      if (agg.monthsCovered === 0) return;
+      const ledgerTotal = agg.operatingResult + agg.operatingWcChange + agg.operatingDaNoncash;
+      const drift = ledgerTotal - agg.operatingCashFlow;
+      if (Math.abs(drift) >= 0.5) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[CashFlow tie-out] ${label}: accounting-ledger reconstruction (operating result + Δ working capital + D&A add-back = ${ledgerTotal.toFixed(2)}) does not match operating cash flow (${agg.operatingCashFlow.toFixed(2)}) — drift ${drift.toFixed(2)} SAR. This is the invariant the manager statement's "Operating cash flow" total is built on; investigate the warehouse view before trusting this window's figures.`,
+        );
+      }
+    };
+    check(`${windowName} (actual)`, actualAgg);
+    check(`${windowName} (comparison)`, priorAggRaw);
+  }, [actualAgg, priorAggRaw, windowName]);
+
   const budgetAggRaw = useMemo(() => sumCfBudgetWindow(budgetRows, win), [budgetRows, win]);
   const budgetAgg = useMemo(() => (mtdPro ? scaleCfBudgetAgg(budgetAggRaw, mtdPro.fraction) : budgetAggRaw), [budgetAggRaw, mtdPro]);
 
@@ -642,52 +737,52 @@ export const useCashFlowPageData = (): CashFlowPageData => {
   const cashOutActual = cashInActualRaw !== null && !noActualData ? -(cashInActualRaw - actualAgg.operatingCashFlow) : null;
   const cashOutPrior = cashInPrior !== null && !noPriorData ? -(cashInPrior - priorAgg.operatingCashFlow) : null;
 
-  // ---------------------------------------------------- working-capital drill
-  const wcDeltaActual = useMemo(() => wcDelta(wcRows, win), [wcRows, win]);
-  const wcDeltaPriorRaw = useMemo(() => wcDelta(wcRows, py), [wcRows, py]);
-  const wcDeltaPrior = useMemo(() => (mtdPro
-    ? {
-        dAr: wcDeltaPriorRaw.dAr === null ? null : wcDeltaPriorRaw.dAr * mtdPro.fraction,
-        dInv: wcDeltaPriorRaw.dInv === null ? null : wcDeltaPriorRaw.dInv * mtdPro.fraction,
-        dAp: wcDeltaPriorRaw.dAp === null ? null : wcDeltaPriorRaw.dAp * mtdPro.fraction,
-      }
-    : wcDeltaPriorRaw), [wcDeltaPriorRaw, mtdPro]);
-
   // ------------------------------------------------- investing/financing drill
   const bsRowsAvail = useMemo(() => (bsData?.available ? bsData.rows : []), [bsData]);
   const cmpFraction = mtdPro ? mtdPro.fraction : null;
+
+  // The last month v_balance_sheet_monthly actually carries — see
+  // `capToClosedBs` above for why the drill must anchor here instead of the
+  // window's raw (possibly still-open) end.
+  const lastClosedBsMonth = useMemo(() => {
+    if (bsRowsAvail.length === 0) return null;
+    return bsRowsAvail.reduce((max, r) => {
+      const k = monthKey(r.month);
+      return k > max ? k : max;
+    }, monthKey(bsRowsAvail[0].month));
+  }, [bsRowsAvail]);
+
+  const investingDrillWin = useMemo(() => capToClosedBs(win, lastClosedBsMonth) ?? win, [win, lastClosedBsMonth]);
+  const investingDrillCmpWin = useMemo(
+    () => (isBudgetMode ? null : (capToClosedBs(py, lastClosedBsMonth) ?? py)),
+    [py, lastClosedBsMonth, isBudgetMode],
+  );
+
   const investingDrill = useMemo(
-    () => (bsData?.available ? buildBsDrill(bsRowsAvail, win, isBudgetMode ? null : py, INVESTING_LINES, cmpFraction) : []),
-    [bsData, bsRowsAvail, win, py, isBudgetMode, cmpFraction],
+    () => (bsData?.available ? buildBsDrill(bsRowsAvail, investingDrillWin, investingDrillCmpWin, INVESTING_LINES, cmpFraction) : []),
+    [bsData, bsRowsAvail, investingDrillWin, investingDrillCmpWin, cmpFraction],
   );
   const equityDrill = useMemo(
-    () => (bsData?.available ? buildBsDrill(bsRowsAvail, win, isBudgetMode ? null : py, EQUITY_LINES, cmpFraction) : []),
-    [bsData, bsRowsAvail, win, py, isBudgetMode, cmpFraction],
+    () => (bsData?.available ? buildBsDrill(bsRowsAvail, investingDrillWin, investingDrillCmpWin, EQUITY_LINES, cmpFraction) : []),
+    [bsData, bsRowsAvail, investingDrillWin, investingDrillCmpWin, cmpFraction],
   );
   const intercoDrill = useMemo(
-    () => (bsData?.available ? buildBsDrill(bsRowsAvail, win, isBudgetMode ? null : py, INTERCO_LINES, cmpFraction) : []),
-    [bsData, bsRowsAvail, win, py, isBudgetMode, cmpFraction],
+    () => (bsData?.available ? buildBsDrill(bsRowsAvail, investingDrillWin, investingDrillCmpWin, INTERCO_LINES, cmpFraction) : []),
+    [bsData, bsRowsAvail, investingDrillWin, investingDrillCmpWin, cmpFraction],
   );
-  // The BS view stops at the last CLOSED month — a window reaching past that
-  // has no drill detail yet for investing/financing (the top-level total
-  // above is still live from the CFS view). Detected by the end anchor being
-  // unavailable while the start-1 anchor IS available (i.e. genuinely an
-  // open-month gap, not simply "before the ledger horizon").
+  // Two distinct messages: the window hasn't closed AT ALL yet (its own
+  // start is past the last closed BS month — e.g. Month-to-date on the
+  // current month: no drill data exists at all), vs. a "to-date" window
+  // that's PARTIALLY closed (e.g. YTD reaching into today) — where the
+  // drill above now covers the closed portion exactly and only the tail
+  // isn't detailed yet.
   const bsDrillUnavailableReason = !bsData?.available
     ? "Detail arrives with the balance-sheet view."
-    : (bsSignedAt(bsRowsAvail, win.endKey, "A_PPE") === null && bsSignedAt(bsRowsAvail, shiftMonthKey(win.startKey, -1), "A_PPE") !== null)
+    : !lastClosedBsMonth || win.startKey > lastClosedBsMonth
       ? "Line-by-line detail arrives once this month closes — the balance-sheet view that carries it stops at the last closed month. The total above is live."
-      : null;
-
-  // Same open-month gap, for the working-capital explosion (v_working_
-  // capital_monthly may not carry a row for the still-open current month
-  // yet either) — the parent "Change in working capital" total above still
-  // comes from the CFS view and stays live either way.
-  const wcDrillUnavailableReason = !wcRows
-    ? "Detail arrives with the working-capital view."
-    : (wcStockAt(wcRows, win.endKey) === null && wcStockAt(wcRows, shiftMonthKey(win.startKey, -1)) !== null)
-      ? "Line-by-line detail arrives once this month closes — the working-capital view that carries it stops at the last posted month. The total above is live."
-      : null;
+      : win.endKey > lastClosedBsMonth
+        ? `Detail below covers through ${monthKeyLabel(lastClosedBsMonth)} (the balance-sheet view's last closed month) — the total above already includes the still-open tail, live from the cash-flow view.`
+        : null;
 
   const rows: CashFlowLineRow[] = useMemo(() => {
     const actualOr = (v: number): number | null => (noActualData ? null : v);
@@ -708,12 +803,22 @@ export const useCashFlowPageData = (): CashFlowPageData => {
       explainer: "Cash generated (or used) by the day-to-day business — members, clients, suppliers, staff.",
     });
     if (!isBudgetMode) {
+      // These two rows tie to their parent EXACTLY by construction (cash out
+      // is derived as cash in − operating cash flow — see file header), so
+      // no residual row is needed here: the only failure mode is the
+      // collections source itself having no data for this window, handled
+      // below with an honest reason rather than a silent dash.
+      const cashInGapReason = !noActualData && cashInActualRaw === null
+        ? "No itemized collections data for this window yet." : undefined;
+      const cashInGapReasonCmp = !noPriorData && cashInPrior === null
+        ? "No itemized collections data for the comparison window yet." : undefined;
       out.push({
         key: "operating.cashin", parentKey: "operating", label: "Cash collected from customers",
         actual: noActualData ? null : cashInActualRaw,
         comparison: noPriorData ? null : cashInPrior,
         indent: 1, expandable: false, flow: "in",
         explainer: "Real payments received from members and clients this window — straight from the payment log, not an accounting estimate.",
+        actualUnavailableReason: cashInGapReason, comparisonUnavailableReason: cashInGapReasonCmp,
       });
       out.push({
         key: "operating.cashout", parentKey: "operating", label: "Cash paid out",
@@ -722,137 +827,121 @@ export const useCashFlowPageData = (): CashFlowPageData => {
         indent: 1, expandable: false, flow: "out",
         explainer: "Everything that left the bank for the business — suppliers, payroll, day-to-day running costs.",
         subNote: "Derived from the accounting ledger (cash in − this = operating cash flow) — a line-by-line supplier/payroll breakdown isn't available in the warehouse yet; it arrives once the bank feed is connected.",
-      });
-
-      out.push({
-        key: "operating.result", parentKey: "operating", label: "Accounting profit before non-cash costs",
-        actual: actualOr(actualAgg.operatingResult), comparison: cmp("operatingResult", null),
-        indent: 1, expandable: false,
-        captionAbove: "The same total, from the accounting ledger:",
-        explainer: "Revenue booked minus costs booked, before depreciation — the accounting starting point for the reconciliation below.",
-      });
-      out.push({
-        key: "operating.wc", parentKey: "operating", label: "Change in working capital",
-        actual: actualOr(actualAgg.operatingWcChange), comparison: cmp("operatingWcChange", null),
-        indent: 1, expandable: true,
-        explainer: "Cash tied up or freed by customers paying late, suppliers being paid later, or stock sitting on the shelf.",
-      });
-      out.push({
-        key: "operating.wc.ar", parentKey: "operating.wc", label: "Change in customer receivables",
-        actual: noActualData ? null : arContribution(wcDeltaActual),
-        comparison: noPriorData ? null : arContribution(wcDeltaPrior),
-        indent: 2, expandable: false,
-        explainer: "Cash trapped in unpaid invoices — negative means customers owe more than before; positive means they've paid down what they owed.",
-        actualUnavailableReason: !noActualData && arContribution(wcDeltaActual) === null ? (wcDrillUnavailableReason ?? undefined) : undefined,
-      });
-      out.push({
-        key: "operating.wc.ap", parentKey: "operating.wc", label: "Change in supplier payables",
-        actual: noActualData ? null : apContribution(wcDeltaActual),
-        comparison: noPriorData ? null : apContribution(wcDeltaPrior),
-        indent: 2, expandable: false,
-        explainer: "Cash held onto by paying suppliers later — positive means more cash kept in hand than before.",
-        actualUnavailableReason: !noActualData && apContribution(wcDeltaActual) === null ? (wcDrillUnavailableReason ?? undefined) : undefined,
-      });
-      out.push({
-        key: "operating.wc.inv", parentKey: "operating.wc", label: "Change in inventory",
-        actual: noActualData ? null : invContribution(wcDeltaActual),
-        comparison: noPriorData ? null : invContribution(wcDeltaPrior),
-        indent: 2, expandable: false,
-        explainer: "Cash tied up in stock sitting on the shelf — negative means more stock was bought than sold down.",
-        actualUnavailableReason: !noActualData && invContribution(wcDeltaActual) === null ? (wcDrillUnavailableReason ?? undefined) : undefined,
-      });
-      out.push({
-        key: "operating.wc.vat", parentKey: "operating.wc", label: "VAT timing",
-        actual: noActualData ? null : vatResidual(actualAgg.operatingWcChange, wcDeltaActual),
-        comparison: noPriorData ? null : vatResidual(priorAgg.operatingWcChange, wcDeltaPrior),
-        indent: 2, expandable: false,
-        explainer: "Movement in VAT collected from members/clients and owed to ZATCA — a timing difference, not part of receivables or payables.",
-        actualUnavailableReason: !noActualData && vatResidual(actualAgg.operatingWcChange, wcDeltaActual) === null ? (wcDrillUnavailableReason ?? undefined) : undefined,
-      });
-      out.push({
-        key: "operating.da", parentKey: "operating", label: "Depreciation add-back (non-cash)",
-        actual: actualOr(actualAgg.operatingDaNoncash), comparison: cmp("operatingDaNoncash", null),
-        indent: 1, expandable: false,
-        explainer: "An accounting cost that never moves cash — added back so the total reflects real cash, not bookkeeping.",
+        actualUnavailableReason: cashInGapReason, comparisonUnavailableReason: cashInGapReasonCmp,
       });
     }
 
+    const investingActual = actualOr(actualAgg.investingCashFlow);
+    const investingComparison = cmp("investingCashFlow", "investingBudget");
     out.push({
-      key: "investing", label: "Investing cash flow", actual: actualOr(actualAgg.investingCashFlow),
-      comparison: cmp("investingCashFlow", "investingBudget"),
+      key: "investing", label: "Investing cash flow", actual: investingActual,
+      comparison: investingComparison,
       indent: 0, expandable: !isBudgetMode, emphasis: true,
       explainer: "Money spent on or recovered from long-term assets — buildings, arenas, vehicles, equipment.",
     });
     if (!isBudgetMode) {
-      if (investingDrill.length > 0) {
-        for (const item of investingDrill) {
+      const investingReconciled = reconcileDrill(
+        investingDrill, investingActual, investingComparison,
+        "Other fixed-asset movements",
+        "Real movement this window not itemized by name above — the balance-sheet view names the two largest fixed-asset lines individually (property/plant/equipment and capital works); this is everything else the same investing total includes.",
+      );
+      if (investingReconciled.length > 0) {
+        for (const item of investingReconciled) {
           out.push({
             key: `investing.${item.key}`, parentKey: "investing", label: item.label,
-            actual: item.actual, comparison: item.comparison,
+            actual: item.actual, comparison: item.comparison, explainer: item.explainer,
             indent: 1, expandable: false,
-            actualUnavailableReason: item.actual === null ? (bsDrillUnavailableReason ?? undefined) : undefined,
+            actualUnavailableReason: item.actual === null ? (item.actualUnavailableReason ?? bsDrillUnavailableReason ?? undefined) : undefined,
+            comparisonUnavailableReason: item.comparison === null ? item.comparisonUnavailableReason : undefined,
           });
         }
       } else {
+        // No named line AND no residual needed: either the parent itself is
+        // null (genuinely no data — flagged below) or its value is a real,
+        // confirmed near-zero (nothing moved) — mirror the parent's OWN
+        // value here rather than a hardcoded null, so this row still ties
+        // to its parent exactly instead of silently showing "—" next to a
+        // real (if tiny) parent figure.
         out.push({
           key: "investing.empty", parentKey: "investing",
           label: bsDrillUnavailableReason ? "Detail not available yet" : "No fixed-asset activity this window",
-          actual: null, comparison: null, indent: 1, expandable: false,
-          actualUnavailableReason: bsDrillUnavailableReason ?? "Nothing posted to a fixed-asset account this window.",
+          actual: investingActual, comparison: investingComparison, indent: 1, expandable: false,
+          actualUnavailableReason: investingActual === null ? (bsDrillUnavailableReason ?? "Nothing posted to a fixed-asset account this window.") : undefined,
+          comparisonUnavailableReason: investingComparison === null ? (bsDrillUnavailableReason ?? "Nothing posted to a fixed-asset account this comparison window.") : undefined,
         });
       }
     }
 
+    const financingActual = actualOr(actualAgg.financingCashFlow);
+    const financingComparison = cmp("financingCashFlow", "financingBudget");
     out.push({
-      key: "financing", label: "Financing cash flow", actual: actualOr(actualAgg.financingCashFlow),
-      comparison: cmp("financingCashFlow", "financingBudget"),
+      key: "financing", label: "Financing cash flow", actual: financingActual,
+      comparison: financingComparison,
       indent: 0, expandable: !isBudgetMode, emphasis: true,
       explainer: "Money moved with the owners and related entities — capital, shareholder current accounts, intercompany transfers.",
     });
     if (!isBudgetMode) {
+      const financingEquityActual = actualOr(actualAgg.financingEquity);
+      const financingEquityComparison = cmp("financingEquity", null);
       out.push({
         key: "financing.equity", parentKey: "financing", label: "Owner & capital movements",
-        actual: actualOr(actualAgg.financingEquity), comparison: cmp("financingEquity", null),
+        actual: financingEquityActual, comparison: financingEquityComparison,
         indent: 1, expandable: true,
         explainer: "Capital injections, share capital, and the shareholders' current accounts.",
       });
-      if (equityDrill.length > 0) {
-        for (const item of equityDrill) {
+      const equityReconciled = reconcileDrill(
+        equityDrill, financingEquityActual, financingEquityComparison,
+        "Other owner movements",
+        "Real movement this window not itemized by name above — the balance-sheet view names share capital, each shareholder's current account and retained earnings individually; this is everything else the same owner & capital total includes.",
+      );
+      if (equityReconciled.length > 0) {
+        for (const item of equityReconciled) {
           out.push({
             key: `financing.equity.${item.key}`, parentKey: "financing.equity", label: item.label,
             actual: item.actual, comparison: item.comparison, indent: 2, expandable: false, explainer: item.explainer,
-            actualUnavailableReason: item.actual === null ? (bsDrillUnavailableReason ?? undefined) : undefined,
+            actualUnavailableReason: item.actual === null ? (item.actualUnavailableReason ?? bsDrillUnavailableReason ?? undefined) : undefined,
+            comparisonUnavailableReason: item.comparison === null ? item.comparisonUnavailableReason : undefined,
           });
         }
       } else {
         out.push({
           key: "financing.equity.empty", parentKey: "financing.equity",
           label: bsDrillUnavailableReason ? "Detail not available yet" : "No owner/capital movement this window",
-          actual: null, comparison: null, indent: 2, expandable: false,
-          actualUnavailableReason: bsDrillUnavailableReason ?? "No shareholder or capital account moved this window.",
+          actual: financingEquityActual, comparison: financingEquityComparison, indent: 2, expandable: false,
+          actualUnavailableReason: financingEquityActual === null ? (bsDrillUnavailableReason ?? "No shareholder or capital account moved this window.") : undefined,
+          comparisonUnavailableReason: financingEquityComparison === null ? (bsDrillUnavailableReason ?? "No shareholder or capital account moved this comparison window.") : undefined,
         });
       }
 
+      const financingIntercoActual = actualOr(actualAgg.financingIntercompany);
+      const financingIntercoComparison = cmp("financingIntercompany", null);
       out.push({
         key: "financing.intercompany", parentKey: "financing", label: "Family Office & related-entity movements",
-        actual: actualOr(actualAgg.financingIntercompany), comparison: cmp("financingIntercompany", null),
+        actual: financingIntercoActual, comparison: financingIntercoComparison,
         indent: 1, expandable: true,
         explainer: "Transfers with the Family Office and the Hospital Jeddah New entity.",
       });
-      if (intercoDrill.length > 0) {
-        for (const item of intercoDrill) {
+      const intercoReconciled = reconcileDrill(
+        intercoDrill, financingIntercoActual, financingIntercoComparison,
+        "Other related-entity movements",
+        "Real movement this window not itemized by name above — the balance-sheet view names the Family Office and Hospital Jeddah New balances individually; this is everything else the same related-entity total includes.",
+      );
+      if (intercoReconciled.length > 0) {
+        for (const item of intercoReconciled) {
           out.push({
             key: `financing.intercompany.${item.key}`, parentKey: "financing.intercompany", label: item.label,
             actual: item.actual, comparison: item.comparison, indent: 2, expandable: false, explainer: item.explainer,
-            actualUnavailableReason: item.actual === null ? (bsDrillUnavailableReason ?? undefined) : undefined,
+            actualUnavailableReason: item.actual === null ? (item.actualUnavailableReason ?? bsDrillUnavailableReason ?? undefined) : undefined,
+            comparisonUnavailableReason: item.comparison === null ? item.comparisonUnavailableReason : undefined,
           });
         }
       } else {
         out.push({
           key: "financing.intercompany.empty", parentKey: "financing.intercompany",
           label: bsDrillUnavailableReason ? "Detail not available yet" : "No intercompany movement this window",
-          actual: null, comparison: null, indent: 2, expandable: false,
-          actualUnavailableReason: bsDrillUnavailableReason ?? "Nothing moved with a related entity this window.",
+          actual: financingIntercoActual, comparison: financingIntercoComparison, indent: 2, expandable: false,
+          actualUnavailableReason: financingIntercoActual === null ? (bsDrillUnavailableReason ?? "Nothing moved with a related entity this window.") : undefined,
+          comparisonUnavailableReason: financingIntercoComparison === null ? (bsDrillUnavailableReason ?? "Nothing moved with a related entity this comparison window.") : undefined,
         });
       }
     }
@@ -889,7 +978,7 @@ export const useCashFlowPageData = (): CashFlowPageData => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     actualAgg, priorAgg, budgetAgg, isBudgetMode, budgetAvailableForWin, noActualData, noPriorData, win, openingActual, openingComparison, closingActual, closingComparison,
-    cashInActualRaw, cashInPrior, cashOutActual, cashOutPrior, wcDeltaActual, wcDeltaPrior, wcDrillUnavailableReason, investingDrill, equityDrill, intercoDrill, bsDrillUnavailableReason,
+    cashInActualRaw, cashInPrior, cashOutActual, cashOutPrior, investingDrill, equityDrill, intercoDrill, bsDrillUnavailableReason,
   ]);
 
   // --------------------------------------------------------- bank split
@@ -897,8 +986,8 @@ export const useCashFlowPageData = (): CashFlowPageData => {
     const accounts: BankSplitAccount[] = (bankRows ?? [])
       .map((r: BankBalanceRow) => ({ code: r.qoyod_account_code, name: r.qoyod_account_name, balance: n(r.current_balance) }))
       .sort((a, b) => b.balance - a.balance);
-    return { accounts, total: liveBankTotal, asOfIso: bankAsOfIso, stale: bankStale };
-  }, [bankRows, liveBankTotal, bankAsOfIso, bankStale]);
+    return { accounts, total: liveBankTotal, asOfIso: bankAsOfIso, stale: bankStale, booksUnmovedSince: booksUnmovedSinceMonth };
+  }, [bankRows, liveBankTotal, bankAsOfIso, bankStale, booksUnmovedSinceMonth]);
 
   // Only worth a note when the live snapshot and the selected window's close
   // actually DIFFER — ties exactly (the common case: window ends on the
@@ -908,7 +997,7 @@ export const useCashFlowPageData = (): CashFlowPageData => {
     : null;
 
   return {
-    isLoading: cfLoading || bsLoading || bankLoading || budgetLoading || wcLoading || collectionsLoading,
+    isLoading: cfLoading || bsLoading || bankLoading || budgetLoading || collectionsLoading,
     isError: cfError,
     comparisonMode, comparisonLabel, windowName, winLabelText,
     mtdProrated: mtdPro !== null,

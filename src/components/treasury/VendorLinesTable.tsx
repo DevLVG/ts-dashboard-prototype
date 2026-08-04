@@ -21,6 +21,15 @@
 // Mechanism (stages/statuses/buttons/logs) is intentionally SYMMETRIC with
 // the customer ladder — same dunningLadder.ts engine, maxStage=2 — only the
 // copy and the sending target differ.
+//
+// PSEUDO-VENDOR GUARD (added 2026-08-04, fix-28-treasury-align, mirrors the
+// same fix on CustomerLinesTable.tsx): vendor_master has one rollup
+// placeholder, "Various Restaurant Vendors" (qoyod_vendor_id 1862) — no open
+// bills against it today (verified live), but the SAME "not a single
+// emailable counterparty" reasoning applies the moment one lands, so the
+// guard is added defensively now rather than after the fact. Detected by
+// known id + an /Aggregated|Various/i name-pattern fallback for any future
+// rollup Qoyod names the same way.
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,7 +38,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Send, ShieldAlert, CheckCircle2, Clock, Handshake, MailX } from "lucide-react";
+import { Send, ShieldAlert, CheckCircle2, Clock, Handshake, MailX, Layers } from "lucide-react";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import { ScrollHint } from "@/components/chrome/AlignmentChrome";
 import { AgingMiniBar } from "@/components/treasury/AgingMiniBar";
@@ -52,6 +61,10 @@ const n = (v: number | null | undefined): number => v ?? 0;
 const fmt = (v: number) => fmtSAR(Math.abs(v) < 0.5 ? 0 : v);
 const fmtDate = (d: Date | null) => (d ? d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—");
 
+const KNOWN_PSEUDO_VENDOR_IDS = new Set(["1862"]);
+const isPseudoVendor = (vendorId: string, vendorName: string): boolean =>
+  KNOWN_PSEUDO_VENDOR_IDS.has(vendorId) || /aggregated|various .*vendors?/i.test(vendorName);
+
 interface VendorAgg {
   vendorId: string;
   vendorName: string;
@@ -60,6 +73,9 @@ interface VendorAgg {
   amountsByBucket: Partial<Record<AgingBucket, number>>;
   maxDaysOverdue: number;
   latestBillNumber: string;
+  /** True for rollup placeholders (e.g. "Various Restaurant Vendors") — not
+   * a real, individually emailable counterparty. */
+  isPseudo: boolean;
 }
 
 const STAGE_CHIP: Record<number, string> = {
@@ -85,7 +101,11 @@ export const VendorLinesTable = ({ rows }: { rows: ApAgingRow[] }) => {
       const days = n(r.days_overdue);
       let agg = m.get(id);
       if (!agg) {
-        agg = { vendorId: id, vendorName: r.vendor_name ?? "—", amount: 0, billCount: 0, amountsByBucket: {}, maxDaysOverdue: 0, latestBillNumber: r.bill_number ?? "—" };
+        const vendorName = r.vendor_name ?? "—";
+        agg = {
+          vendorId: id, vendorName, amount: 0, billCount: 0, amountsByBucket: {}, maxDaysOverdue: 0,
+          latestBillNumber: r.bill_number ?? "—", isPseudo: isPseudoVendor(id, vendorName),
+        };
         m.set(id, agg);
       }
       agg.amount += amt;
@@ -192,7 +212,7 @@ export const VendorLinesTable = ({ rows }: { rows: ApAgingRow[] }) => {
   };
 
   const emptyState: LadderState = { stage: 0, stage1At: null, stage2At: null, stage3At: null, lastActionAt: null, lastReason: null, escalatedManually: false, escalatedAt: null, resolved: false, resolvedAt: null };
-  const ceoAttention = aggregates.filter((a) => isEscalationDue(ladderStates.get(a.vendorId) ?? emptyState, cfg, now));
+  const ceoAttention = aggregates.filter((a) => !a.isPseudo && isEscalationDue(ladderStates.get(a.vendorId) ?? emptyState, cfg, now));
 
   return (
     <Card className="p-6 shadow-sm animate-fade-in">
@@ -248,9 +268,21 @@ export const VendorLinesTable = ({ rows }: { rows: ApAgingRow[] }) => {
               return (
                 <tr key={a.vendorId} className="border-b border-border/10 align-top">
                   <td className="py-2 pr-2 max-w-[200px]">
-                    <div className="truncate font-medium" title={a.vendorName}>{a.vendorName}</div>
+                    <div className="truncate font-medium inline-flex items-center gap-1.5" title={a.vendorName}>
+                      {a.vendorName}
+                      {a.isPseudo && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Layers className="h-3 w-3 text-muted-foreground/70 shrink-0 cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs text-xs">
+                            A rollup of many individual vendors, not one counterparty — see the note in Action.
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+                    </div>
                     <div className="text-[11px] text-muted-foreground">{a.billCount} bill{a.billCount === 1 ? "" : "s"}</div>
-                    {!email && (
+                    {!a.isPseudo && !email && (
                       <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 mt-0.5">
                         <MailX className="h-2.5 w-2.5" /> No email on file
                       </span>
@@ -260,28 +292,41 @@ export const VendorLinesTable = ({ rows }: { rows: ApAgingRow[] }) => {
                   <td className="py-2 px-2 text-right tabular-nums text-muted-foreground">{pct.toFixed(1)}%</td>
                   <td className="py-2 px-2"><AgingMiniBar amountsByBucket={a.amountsByBucket} total={a.amount} /></td>
                   <td className="py-2 px-2">
-                    {status.kind === "resolved" && (
-                      <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-emerald-500/40 bg-emerald-500/10 text-emerald-400">
-                        <CheckCircle2 className="h-3 w-3" /> Resolved
-                      </span>
-                    )}
-                    {status.kind === "escalate" && (
-                      <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-destructive/40 bg-destructive/10 text-destructive">
-                        <ShieldAlert className="h-3 w-3" /> Escalate to CEO
-                      </span>
-                    )}
-                    {status.kind === "not_started" && (
+                    {a.isPseudo ? (
                       <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-border bg-muted/20 text-muted-foreground">
-                        Not yet acknowledged
+                        <Layers className="h-3 w-3" /> Aggregated
                       </span>
-                    )}
-                    {status.kind === "stage_sent" && (
-                      <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border ${STAGE_CHIP[status.stage] ?? ""}`}>
-                        {status.stage === 1 ? "Acknowledgement sent" : "Justification sent"} ({fmtDate(status.at)})
-                      </span>
+                    ) : (
+                      <>
+                        {status.kind === "resolved" && (
+                          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-emerald-500/40 bg-emerald-500/10 text-emerald-400">
+                            <CheckCircle2 className="h-3 w-3" /> Resolved
+                          </span>
+                        )}
+                        {status.kind === "escalate" && (
+                          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-destructive/40 bg-destructive/10 text-destructive">
+                            <ShieldAlert className="h-3 w-3" /> Escalate to CEO
+                          </span>
+                        )}
+                        {status.kind === "not_started" && (
+                          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-border bg-muted/20 text-muted-foreground">
+                            Not yet acknowledged
+                          </span>
+                        )}
+                        {status.kind === "stage_sent" && (
+                          <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border ${STAGE_CHIP[status.stage] ?? ""}`}>
+                            {status.stage === 1 ? "Acknowledgement sent" : "Justification sent"} ({fmtDate(status.at)})
+                          </span>
+                        )}
+                      </>
                     )}
                   </td>
                   <td className="py-2 pl-2">
+                    {a.isPseudo ? (
+                      <p className="text-[11px] text-muted-foreground text-right max-w-[220px] ml-auto leading-snug">
+                        Aggregated vendor rollup — individual suppliers, no acknowledgement target.
+                      </p>
+                    ) : (
                     <div className="flex flex-col items-end gap-1">
                       {status.kind !== "resolved" && next.nextStage && next.nextStage <= 2 && (
                         <Tooltip>
@@ -317,6 +362,7 @@ export const VendorLinesTable = ({ rows }: { rows: ApAgingRow[] }) => {
                         </div>
                       )}
                     </div>
+                    )}
                   </td>
                 </tr>
               );

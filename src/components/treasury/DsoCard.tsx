@@ -1,36 +1,43 @@
-// DSO CARD — average collection time (Marcello's spec, item 2).
+// DSO CARD — Days Sales Outstanding, the average time to collect a sale
+// (Marcello's spec, item 2).
 //
-// FORMULA CHOSEN (shown on-screen, not hidden): the trailing-twelve-month
-// method —
+// CURRENT DSO — unchanged formula, the trailing-twelve-month method:
 //
-//   DSO = Receivables (today's open AR book) / Trailing-12-month revenue x 365
+//   DSO = Receivables (today's open AR book, ar_aging_v2) / Trailing-12-month
+//         revenue x 365
 //
-// This is the "days of trailing revenue currently sitting in AR" reading —
-// more resilient to a single seasonal month than the simpler "AR / one
-// month's revenue x 30" version, and it's the method the DATA actually
-// supports well here: ar_aging_v2 gives a clean "as of today" AR figure,
-// and the P&L basis rows give a clean monthly revenue series to trail
-// twelve months of. (The alternative "average AR over the period" DSO
-// variant needs a daily/weekly AR time series, which does not exist in
-// this warehouse — only month-end book values do — so it is not used.)
+// TRAILING-12-MONTHS REFERENCE — REBUILT 2026-08-04 (fix-28-treasury-align,
+// Marcello live on /treasury, mandate extension #1, item 4). The card used to
+// try to recompute each trailing month's OWN DSO from
+// v_working_capital_monthly's receivables column — but that figure is a NET
+// book value (net of customer deposits/advances) that is negative in every
+// one of the last 12 months, on a different basis than Current DSO's
+// always-non-negative gross AR figure. Averaging a negative "days of
+// receivables" is meaningless, so every month got excluded and the card
+// permanently showed "n/m" — honest, but a dead end (no historical GROSS AR
+// series exists anywhere in the warehouse to replace it with — checked; see
+// migration 075's header).
 //
-// CURRENT vs LAST-12-MONTHS AVERAGE (of the SAME metric, not of revenue or
-// AR alone): for each of the trailing 12 complete months, this recomputes
-// that month's OWN DSO — that month's AR book value (from
-// v_working_capital_monthly, the only historical AR series that exists)
-// divided by ITS OWN trailing-12-month revenue — then averages those. When
-// fewer than 12 such months exist yet, the average is computed over
-// whatever is available and the card says so explicitly (data-coverage
-// honesty, same house rule as everywhere else in this cockpit).
+// FIX: v_ar_realized_dso_trailing12m (migration 075) — a genuinely
+// comparable, always-non-negative reference built a DIFFERENT way: for every
+// payment actually allocated to a customer invoice in the trailing 12
+// months, the amount-weighted average of (payment date - invoice date). This
+// is REALIZED collection time, not a book-value ratio — the method differs
+// from Current DSO's formula (disclosed on screen below, not hidden), but
+// both readings answer the same real question — "how long does it take to
+// collect a sale" — on data that is inherently gross. Legacy 2020-2021
+// invoices are excluded (same cutoff as the segregated legacy pool
+// elsewhere in Treasury) so a handful of very old settlements don't skew the
+// trailing figure to hundreds of days.
 import { useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TrendingUp, TrendingDown, Minus, Info, Clock3 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useArAging } from "@/data/statementsLive";
-import { useWorkingCapitalMonthly } from "@/data/statementsLive";
+import { useArAging, useRealizedDsoTrailing12m } from "@/data/statementsLive";
 import { useBasisRows, aggregatePL, lastCompleteFromBasis } from "@/data/alignment";
-import { monthKey, shiftMonthKey, monthKeyLabel } from "@/data/liveData";
+import { shiftMonthKey, monthKeyLabel } from "@/data/liveData";
+import { fmtDeltaPct, pctChange } from "@/lib/format";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 
 const n = (v: number | null | undefined): number => v ?? 0;
@@ -43,7 +50,7 @@ const trailingRevenue = (basisData: ReturnType<typeof useBasisRows>["data"], end
 export const DsoCard = ({ className }: { className?: string }) => {
   const { data: basis, isLoading: basisLoading } = useBasisRows();
   const ar = useArAging();
-  const { data: wcRows, isLoading: wcLoading } = useWorkingCapitalMonthly();
+  const realized = useRealizedDsoTrailing12m();
 
   const arTotal = useMemo(
     () => (ar.data?.available ? ar.data.rows.reduce((s, r) => s + n(r.residual_amount), 0) : null),
@@ -59,41 +66,18 @@ export const DsoCard = ({ className }: { className?: string }) => {
     return (arTotal / rev) * 365;
   }, [arTotal, basis, lastComplete]);
 
-  const history = useMemo(() => {
-    if (!wcRows || !lastComplete) return { points: [] as { key: string; dso: number }[], monthsAvailable: 0, excludedNegative: 0 };
-    const sorted = [...wcRows]
-      .map((r) => ({ key: monthKey(r.period_month), receivables: n(r.receivables) }))
-      .filter((r) => r.key <= lastComplete)
-      .sort((a, b) => a.key.localeCompare(b.key));
-    const last12 = sorted.slice(-12);
-    // Negative-book-value guard (2026-08-04, owner-audit #5): a month whose
-    // v_working_capital_monthly.receivables is negative is on a different,
-    // net basis than "Current DSO"'s always-non-negative ar_aging_v2 figure
-    // (see DsoCard's header comment) — averaging a negative "own DSO" into
-    // days-of-receivables produces a mathematically nonsensical negative
-    // average. Such months are excluded from the average rather than
-    // silently included, and the card discloses the exclusion.
-    let excludedNegative = 0;
-    const points = last12
-      .map((m) => {
-        if (m.receivables < 0) { excludedNegative += 1; return null; }
-        const rev = trailingRevenue(basis, m.key);
-        return rev > 0 ? { key: m.key, dso: (m.receivables / rev) * 365 } : null;
-      })
-      .filter((p): p is { key: string; dso: number } => p !== null);
-    return { points, monthsAvailable: points.length, excludedNegative };
-  }, [wcRows, basis, lastComplete]);
+  const refReady = realized.data?.available === true;
+  const refRow = refReady ? realized.data!.rows[0] : null;
+  const refDays = refRow?.weighted_avg_days ?? null;
+  const refSampleCount = refRow?.sample_count ?? 0;
 
-  const avgDso = history.points.length > 0
-    ? history.points.reduce((s, p) => s + p.dso, 0) / history.points.length
-    : null;
-
-  const isLoading = basisLoading || wcLoading || (ar.isLoading && !ar.data);
-  const deltaAbs = currentDso !== null && avgDso !== null ? currentDso - avgDso : null;
+  const isLoading = basisLoading || (ar.isLoading && !ar.data) || (realized.isLoading && !realized.data);
+  const deltaAbs = currentDso !== null && refDays !== null ? currentDso - refDays : null;
+  const deltaPct = currentDso !== null && refDays !== null ? pctChange(currentDso, refDays) : null;
   const tone = deltaAbs === null ? "na" : Math.abs(deltaAbs) < 0.5 ? "flat" : deltaAbs > 0 ? "up" : "down";
-  // For DSO, "up" (slower collection) uses the SAME mechanical up=azure/
-  // down=red rule as every other circle/card in the cockpit — a plain
-  // direction-of-change signal, not a value judgement baked into the color.
+  // "up" (slower collection) uses the same mechanical up=azure/down=red rule
+  // as every other circle/card in the cockpit — a plain direction-of-change
+  // signal, not a value judgement baked into the color.
   const TONE_TEXT: Record<string, string> = { up: "text-success", down: "text-destructive", flat: "text-muted-foreground", na: "text-muted-foreground" };
   const Icon = tone === "up" ? TrendingUp : tone === "down" ? TrendingDown : Minus;
 
@@ -101,24 +85,31 @@ export const DsoCard = ({ className }: { className?: string }) => {
     <Card className={cn("p-6 shadow-sm animate-fade-in", className)}>
       <div className="flex items-center gap-3 mb-1 flex-wrap">
         <h3 className="text-xl font-heading tracking-wide inline-flex items-center gap-2">
-          <Clock3 className="h-5 w-5 text-gold" /> DSO — AVERAGE COLLECTION TIME
+          <Clock3 className="h-5 w-5 text-gold" /> DSO — DAYS SALES OUTSTANDING
         </h3>
-        <DataSourceBadge source="live" sourceLabel="Live data from Supabase (ar_aging_v2 + v_pnl_basis + v_working_capital_monthly)" />
-        <span className="text-xs text-muted-foreground">Live receivables + revenue data</span>
+        <DataSourceBadge source="live" sourceLabel="Live data from Supabase (ar_aging_v2 + v_pnl_basis + v_ar_realized_dso_trailing12m)" />
       </div>
 
       <p className="text-sm text-muted-foreground mb-4 inline-flex items-start gap-1.5">
         <span>
-          DSO = Receivables (today's open book) ÷ trailing-12-month revenue × 365 — the more resilient
-          annualised-revenue method, not a single-month approximation.
+          The average time it takes to collect a sale, in days. Current = today's open receivables ÷
+          trailing-12-month revenue × 365. Reference = the actual, realized average collection time over the last
+          12 months.
         </span>
         <Tooltip>
           <TooltipTrigger asChild><Info className="h-3.5 w-3.5 mt-0.5 text-gold/80 cursor-help shrink-0" /></TooltipTrigger>
-          <TooltipContent side="top" className="max-w-sm text-xs">
-            Formula chosen because the data supports it cleanly: a live, precise "as of today" AR figure
-            (ar_aging_v2) divided by a real trailing-12-month revenue figure (P&L basis rows), annualised
-            ×365. The alternative "average AR over the period" variant needs a daily/weekly AR time series
-            that does not exist in this warehouse — only month-end book values do — so it is not used here.
+          <TooltipContent side="top" className="max-w-sm text-xs space-y-1.5">
+            <p>
+              <strong>Current DSO</strong>: a live, precise "as of today" AR figure (ar_aging_v2) divided by a real
+              trailing-12-month revenue figure (P&amp;L basis rows), annualised ×365.
+            </p>
+            <p>
+              <strong>Trailing-12m reference</strong>: a DIFFERENT method by necessity — the amount-weighted average
+              of (payment date − invoice date) for every invoice actually collected in the last 12 months
+              (2020-2021 legacy invoices excluded). No historical GROSS AR book-value series exists in the
+              warehouse to compute this the same way as Current DSO — this realized-collection method is the honest
+              alternative, not a fabricated fallback.
+            </p>
           </TooltipContent>
         </Tooltip>
       </p>
@@ -138,40 +129,29 @@ export const DsoCard = ({ className }: { className?: string }) => {
               {currentDso.toFixed(0)} <span className="text-lg text-muted-foreground font-sans">days</span>
             </span>
             <span className="text-xs text-muted-foreground mt-1">
-              trailing 12m to {lastComplete ? monthKeyLabel(lastComplete) : "—"}
+              trailing 12m revenue to {lastComplete ? monthKeyLabel(lastComplete) : "—"}
             </span>
           </div>
 
           <div className="flex flex-col items-center sm:items-start border-t sm:border-t-0 sm:border-l border-border/60 pt-4 sm:pt-0 sm:pl-6">
-            <span className="text-xs uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1">
-              Last-12-months average {history.monthsAvailable < 12 - history.excludedNegative && (
-                <span className="text-amber-400">(only {history.monthsAvailable} mo. available)</span>
-              )}
-              {history.excludedNegative > 0 && (
-                <Tooltip>
-                  <TooltipTrigger asChild><Info className="h-3.5 w-3.5 text-amber-400 cursor-help" /></TooltipTrigger>
-                  <TooltipContent side="bottom" className="max-w-xs text-xs">
-                    {history.excludedNegative} of the trailing 12 months excluded — v_working_capital_monthly's
-                    receivables book value is negative for those months (a net, not gross, figure), which would
-                    produce a mathematically meaningless negative DSO if averaged in.
-                  </TooltipContent>
-                </Tooltip>
-              )}
-            </span>
-            {avgDso === null ? (
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">Last-12-months reference</span>
+            {!refReady || refDays === null ? (
               <span className="text-sm text-muted-foreground mt-1">
-                {history.excludedNegative > 0
-                  ? "n/m — every trailing month's receivables book value is negative (net basis), not comparable to Current DSO."
-                  : "Not enough history yet."}
+                {refReady ? "No qualifying collections in the last 12 months." : "Reference view not yet available."}
               </span>
             ) : (
               <>
                 <span className="font-heading text-3xl md:text-4xl tracking-tight tabular-nums">
-                  {avgDso.toFixed(0)} <span className="text-base text-muted-foreground font-sans">days</span>
+                  {refDays.toFixed(0)} <span className="text-base text-muted-foreground font-sans">days</span>
                 </span>
                 <span className={cn("inline-flex items-center gap-1 text-sm font-semibold mt-1", TONE_TEXT[tone])}>
                   <Icon className="h-3.5 w-3.5" aria-hidden />
-                  {deltaAbs !== null ? `${deltaAbs > 0 ? "+" : ""}${deltaAbs.toFixed(0)} days vs average` : "—"}
+                  {deltaAbs !== null ? `${deltaAbs > 0 ? "+" : ""}${deltaAbs.toFixed(0)} days` : "—"}
+                  {deltaPct !== null && <span> · {fmtDeltaPct(deltaPct)}</span>}
+                  <span className="font-normal text-muted-foreground">vs reference</span>
+                </span>
+                <span className="text-[11px] text-muted-foreground mt-1">
+                  based on {refSampleCount} collections, realized method (not the book-value method Current DSO uses)
                 </span>
               </>
             )}

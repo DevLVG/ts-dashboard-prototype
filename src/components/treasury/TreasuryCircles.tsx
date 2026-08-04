@@ -1,53 +1,25 @@
-// TREASURY CIRCLES — the operational desk's top strip (Marcello's live-
-// review spec, item 1): Receivables open · Receivables overdue · Payables
-// open · Payables overdue, each with SAR + a count.
+// TREASURY CIRCLES — the operational desk's top strip.
 //
-// VISUAL LANGUAGE: deliberately matches fix-4-kpi's KpiCircles exactly
-// (src/components/overview/KpiCircles.tsx) — same ring/tone tokens, same
-// value-shrink rule, same a11y pattern — so Treasury reads as ONE system
-// with Economics, per Marcello's "clean, symmetric styling with the rest of
-// the cockpit". KpiCircle itself isn't exported from that file (only the
-// 3-metric container is), so — same call CashPositionCircle.tsx already
-// made for the Cash Flow page — this is a deliberate visual match, not an
-// import.
+// REBUILT 2026-08-04 (fix-28-treasury-align, Marcello live on /treasury,
+// mandate extension #1) — three changes from the original 2026-08-03 build:
 //
-// COMPARISON HONESTY: ar_aging_v2 / ap_aging_v2 are "as of today" snapshots
-// with no history of their own, so there is no honest "vs same time last
-// period" figure for a stock/book-value number like this. What DOES exist,
-// genuinely, is v_working_capital_monthly's month-end book values — so the
-// two OPEN circles compare today's open book to the last completed month's
-// book value (a real, if approximate, prior data point). The two OVERDUE
-// circles have no equivalent historical breakdown anywhere in the
-// warehouse (aging-by-bucket is never snapshotted monthly) — they honestly
-// show "no comparison available" rather than inventing one, exactly the
-// same "na" state KpiCircle already renders for a missing PY/Budget figure.
-import { Fragment } from "react";
-import { TrendingUp, TrendingDown, Minus, ArrowDownCircle, ArrowUpCircle, AlertTriangle } from "lucide-react";
+//   1. DROPPED the "vs last month-end book value" comparison entirely.
+//      Marcello, live: "non voglio confrontarlo con l'anno precedente, non
+//      ha senso" — v_working_capital_monthly's book value is a different,
+//      NET basis than ar_aging_v2/ap_aging_v2's gross open-invoice snapshot
+//      (see the retired basis-mismatch guard this file used to carry), so
+//      the comparison was never honestly load-bearing anyway. Gone, not
+//      replaced with anything invented.
+//   2. TWO cards, not four circles. Receivables and Payables each render
+//      ONCE, as a total with its Current (not yet due) / Overdue split
+//      shown as the two components of that ONE amount — not as a second
+//      circle carrying what read as a near-duplicate number.
+//   3. Every block gets a one-line plain-language explainer, and a Info
+//      tooltip spells out what "Current" / "Overdue" mean here.
+import { ArrowDownCircle, ArrowUpCircle, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, pctChange } from "@/lib/format";
-
-type Tone = "up" | "down" | "flat" | "na";
-const DELTA_EPSILON = 0.5;
-
-const toneOf = (deltaAbs: number | null): Tone => {
-  if (deltaAbs === null) return "na";
-  if (Math.abs(deltaAbs) < DELTA_EPSILON) return "flat";
-  return deltaAbs > 0 ? "up" : "down";
-};
-
-const TONE_RING: Record<Tone, string> = {
-  up: "border-success ring-4 ring-success/20",
-  down: "border-destructive ring-4 ring-destructive/20",
-  flat: "border-border ring-4 ring-border/20",
-  na: "border-border/70 ring-4 ring-border/10",
-};
-const TONE_TEXT: Record<Tone, string> = {
-  up: "text-success", down: "text-destructive", flat: "text-muted-foreground", na: "text-muted-foreground",
-};
-const TONE_ICON: Record<Tone, typeof TrendingUp | null> = {
-  up: TrendingUp, down: TrendingDown, flat: Minus, na: null,
-};
+import { fmtSAR } from "@/lib/format";
 
 const valueSizeClass = (formatted: string): string => {
   const len = formatted.length;
@@ -56,75 +28,94 @@ const valueSizeClass = (formatted: string): string => {
   return "text-xl md:text-2xl";
 };
 
-export interface TreasuryCircleMetric {
-  key: string;
+const pctOf = (part: number, whole: number) => (Math.abs(whole) < 0.5 ? 0 : (part / whole) * 100);
+
+export interface TreasurySideMetric {
+  key: "receivables" | "payables";
   label: string;
-  value: number;
-  count: number;
-  countNoun: string; // "invoices" | "invoices overdue" | "bills" | "bills overdue"
+  explainer: string;
+  total: number;
+  totalCount: number;
+  current: number;
+  currentCount: number;
+  overdue: number;
+  overdueCount: number;
   icon: React.ComponentType<{ className?: string }>;
-  /** null = no honest comparison exists for this metric. */
-  comparison: number | null;
-  comparisonUnavailableReason?: string;
+  /** Tailwind color token for the "current" segment / dot. */
+  currentTone: string;
+  /** Tailwind color token for the "overdue" segment / dot. */
+  overdueTone: string;
 }
 
-const TreasuryCircle = ({ metric, comparisonLabel }: { metric: TreasuryCircleMetric; comparisonLabel: string }) => {
-  const deltaAbs = metric.comparison !== null ? metric.value - metric.comparison : null;
-  const deltaPct = metric.comparison !== null ? pctChange(metric.value, metric.comparison) : null;
-  const tone = toneOf(deltaAbs);
-  const Icon = TONE_ICON[tone];
-  const valueStr = fmtSAR(metric.value);
+const noun = (count: number, singular: string, plural: string) => (count === 1 ? singular : plural);
+
+const SideCard = ({ metric }: { metric: TreasurySideMetric }) => {
+  const valueStr = fmtSAR(metric.total);
+  const currentShare = pctOf(metric.current, metric.total);
+  const overdueShare = pctOf(metric.overdue, metric.total);
 
   return (
-    <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm animate-fade-in">
-      <p className="text-xs md:text-sm uppercase tracking-wider text-muted-foreground font-semibold text-center inline-flex items-center gap-1.5">
-        <metric.icon className="h-3.5 w-3.5 text-gold/80 shrink-0" aria-hidden />
-        {metric.label}
-      </p>
-
-      <div
-        className={cn(
-          "relative flex h-36 w-36 md:h-40 md:w-40 shrink-0 items-center justify-center rounded-full border-[3px] bg-background/60 transition-colors",
-          TONE_RING[tone],
-        )}
-        role="img"
-        aria-label={`${metric.label}: ${valueStr} SAR, ${metric.count} ${metric.countNoun}${
-          metric.comparison !== null
-            ? `, ${fmtDeltaSAR(deltaAbs ?? 0)} SAR (${deltaPct !== null ? fmtDeltaPct(deltaPct) : "n/a"}) ${comparisonLabel.toLowerCase()}`
-            : `, no ${comparisonLabel.toLowerCase()} comparison available`
-        }`}
-      >
-        <div className="flex flex-col items-center px-2 text-center">
-          <p className={cn("font-heading tracking-tight leading-none", valueSizeClass(valueStr))}>{valueStr}</p>
-          <p className="mt-1 text-[10px] uppercase tracking-widest text-muted-foreground">SAR</p>
-        </div>
+    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm animate-fade-in">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs md:text-sm uppercase tracking-wider text-muted-foreground font-semibold inline-flex items-center gap-1.5">
+          <metric.icon className="h-3.5 w-3.5 text-gold/80 shrink-0" aria-hidden />
+          {metric.label}
+        </p>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Info className="h-3.5 w-3.5 text-muted-foreground/70 hover:text-gold cursor-help shrink-0 mt-0.5" />
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-xs text-xs">
+            <strong>Current</strong> = not yet due (inside its payment terms). <strong>Overdue</strong> = past its
+            due date. Both are counted in the total above; this card just shows how the total splits between them.
+          </TooltipContent>
+        </Tooltip>
       </div>
 
-      <p className="text-sm font-semibold text-foreground text-center tabular-nums">
-        {metric.count} {metric.countNoun}
-      </p>
+      <p className="text-xs text-muted-foreground -mt-2">{metric.explainer}</p>
 
-      <div className="flex flex-col items-center gap-0.5 min-h-[2.75rem] justify-center">
-        {metric.comparison === null ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex items-center gap-1 text-sm font-semibold text-muted-foreground cursor-help">
-                <Minus className="h-3.5 w-3.5" aria-hidden />
-                —
+      <div className="flex items-center gap-5">
+        <div
+          className="relative flex h-28 w-28 md:h-32 md:w-32 shrink-0 items-center justify-center rounded-full border-[3px] border-border bg-background/60"
+          role="img"
+          aria-label={`${metric.label}: ${valueStr} SAR total across ${metric.totalCount} ${noun(metric.totalCount, "item", "items")} — ${fmtSAR(metric.current)} SAR current, ${fmtSAR(metric.overdue)} SAR overdue`}
+        >
+          <div className="flex flex-col items-center px-2 text-center">
+            <p className={cn("font-heading tracking-tight leading-none", valueSizeClass(valueStr))}>{valueStr}</p>
+            <p className="mt-1 text-[10px] uppercase tracking-widest text-muted-foreground">SAR total</p>
+          </div>
+        </div>
+
+        <div className="flex-1 min-w-0 space-y-2.5">
+          <p className="text-sm font-semibold text-foreground tabular-nums">
+            {metric.totalCount} {metric.key === "receivables" ? noun(metric.totalCount, "invoice", "invoices") : noun(metric.totalCount, "bill", "bills")}
+          </p>
+
+          {/* Two-part segmented bar — current vs overdue share of the same total */}
+          <div className="h-2.5 w-full rounded-full bg-muted/40 overflow-hidden flex">
+            {currentShare > 0 && <div className={cn("h-full", metric.currentTone)} style={{ width: `${Math.max(currentShare, 2)}%` }} />}
+            {overdueShare > 0 && <div className={cn("h-full", metric.overdueTone)} style={{ width: `${Math.max(overdueShare, 2)}%` }} />}
+          </div>
+
+          <div className="flex flex-col gap-1 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                <span className={cn("h-2 w-2 rounded-full shrink-0", metric.currentTone)} />
+                Current ({metric.currentCount})
               </span>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="max-w-xs text-xs">
-              {metric.comparisonUnavailableReason ?? `No ${comparisonLabel.toLowerCase()} figure available.`}
-            </TooltipContent>
-          </Tooltip>
-        ) : (
-          <span className={cn("inline-flex items-center gap-1 text-sm font-semibold", TONE_TEXT[tone])}>
-            {Icon && <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />}
-            {fmtDeltaSAR(deltaAbs ?? 0)}
-            {deltaPct !== null && <Fragment> · {fmtDeltaPct(deltaPct)}</Fragment>}
-          </span>
-        )}
-        <p className="text-[11px] text-muted-foreground text-center">{comparisonLabel}</p>
+              <span className="font-medium tabular-nums">{fmtSAR(metric.current)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                <span className={cn("h-2 w-2 rounded-full shrink-0", metric.overdueTone)} />
+                Overdue ({metric.overdueCount})
+              </span>
+              <span className={cn("font-medium tabular-nums", metric.overdue > 0.5 ? "text-destructive" : "")}>
+                {fmtSAR(metric.overdue)}
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -135,74 +126,53 @@ export interface TreasuryCirclesProps {
   arOverdue: number; arOverdueCount: number;
   apTotal: number; apCount: number;
   apOverdue: number; apOverdueCount: number;
-  /** Last completed month's book values from v_working_capital_monthly —
-   * null when that history isn't available yet. */
-  lastMonthReceivables: number | null;
-  lastMonthPayables: number | null;
-  lastMonthLabel: string | null;
   isLoading: boolean;
   className?: string;
 }
 
 export const TreasuryCircles = ({
   arTotal, arCount, arOverdue, arOverdueCount, apTotal, apCount, apOverdue, apOverdueCount,
-  lastMonthReceivables, lastMonthPayables, lastMonthLabel, isLoading, className,
+  isLoading, className,
 }: TreasuryCirclesProps) => {
-  const comparisonLabel = lastMonthLabel ? `vs ${lastMonthLabel} book value` : "vs last month-end";
-
-  // Basis-mismatch guard (2026-08-04, owner-audit #6): v_working_capital_monthly's
-  // receivables/payables book values are a differently-defined, net figure
-  // that can legitimately be negative (e.g. net of customer deposits/
-  // advances) — a structurally different basis than ar_aging_v2/ap_aging_v2's
-  // gross open-invoice snapshot (always >= 0). Diffing a negative net figure
-  // against a non-negative gross figure produces a nonsensical "+141.9%"-
-  // style delta, not a real change in outstanding receivables/payables. Until
-  // a comparable historical gross-aging snapshot exists (no daily/weekly AR/AP
-  // time series is captured in this warehouse — see DsoCard's identical
-  // note), a negative book value is shown as "n/m", never diffed.
-  const arComparisonMismatch = lastMonthReceivables !== null && lastMonthReceivables < 0;
-  const apComparisonMismatch = lastMonthPayables !== null && lastMonthPayables < 0;
-  const basisMismatchReason = (label: string) =>
-    `${label} book value in v_working_capital_monthly is a net figure and is currently negative — not on the same basis as today's gross open-invoice total, so no honest delta can be shown.`;
-
-  const metrics: TreasuryCircleMetric[] = [
+  const metrics: TreasurySideMetric[] = [
     {
-      key: "ar_open", label: "Receivables open", value: arTotal, count: arCount, countNoun: arCount === 1 ? "invoice" : "invoices",
-      icon: ArrowDownCircle, comparison: arComparisonMismatch ? null : lastMonthReceivables,
-      comparisonUnavailableReason: arComparisonMismatch
-        ? basisMismatchReason("Receivables")
-        : "v_working_capital_monthly has no prior month yet.",
+      key: "receivables",
+      label: "Receivables",
+      explainer: "Money customers owe the club, right now — open invoices only.",
+      total: arTotal, totalCount: arCount,
+      current: Math.max(arTotal - arOverdue, 0), currentCount: Math.max(arCount - arOverdueCount, 0),
+      overdue: arOverdue, overdueCount: arOverdueCount,
+      icon: ArrowDownCircle,
+      currentTone: "bg-sky-400/70", overdueTone: "bg-destructive/70",
     },
     {
-      key: "ar_overdue", label: "Receivables overdue", value: arOverdue, count: arOverdueCount, countNoun: arOverdueCount === 1 ? "invoice overdue" : "invoices overdue",
-      icon: AlertTriangle, comparison: null,
-      comparisonUnavailableReason: "No historical aging-bucket breakdown exists (only today's snapshot) — nothing honest to compare against yet.",
-    },
-    {
-      key: "ap_open", label: "Payables open", value: apTotal, count: apCount, countNoun: apCount === 1 ? "bill" : "bills",
-      icon: ArrowUpCircle, comparison: apComparisonMismatch ? null : lastMonthPayables,
-      comparisonUnavailableReason: apComparisonMismatch
-        ? basisMismatchReason("Payables")
-        : "v_working_capital_monthly has no prior month yet.",
-    },
-    {
-      key: "ap_overdue", label: "Payables overdue", value: apOverdue, count: apOverdueCount, countNoun: apOverdueCount === 1 ? "bill overdue" : "bills overdue",
-      icon: AlertTriangle, comparison: null,
-      comparisonUnavailableReason: "No historical aging-bucket breakdown exists (only today's snapshot) — nothing honest to compare against yet.",
+      key: "payables",
+      label: "Payables",
+      explainer: "Money the club owes vendors, right now — open bills only.",
+      total: apTotal, totalCount: apCount,
+      current: Math.max(apTotal - apOverdue, 0), currentCount: Math.max(apCount - apOverdueCount, 0),
+      overdue: apOverdue, overdueCount: apOverdueCount,
+      icon: ArrowUpCircle,
+      currentTone: "bg-emerald-400/60", overdueTone: "bg-amber-500/80",
     },
   ];
 
   return (
-    <div className={cn("grid grid-cols-2 lg:grid-cols-4 gap-4", className)}>
+    <div className={cn("grid grid-cols-1 sm:grid-cols-2 gap-4", className)}>
       {isLoading
-        ? [0, 1, 2, 3].map((i) => (
-            <div key={i} className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-5">
+        ? [0, 1].map((i) => (
+            <div key={i} className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5">
               <div className="h-3 w-24 rounded bg-muted animate-pulse" />
-              <div className="h-36 w-36 md:h-40 md:w-40 rounded-full bg-muted animate-pulse" />
-              <div className="h-3 w-20 rounded bg-muted animate-pulse" />
+              <div className="flex items-center gap-5">
+                <div className="h-28 w-28 md:h-32 md:w-32 rounded-full bg-muted animate-pulse" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 w-full rounded bg-muted animate-pulse" />
+                  <div className="h-3 w-3/4 rounded bg-muted animate-pulse" />
+                </div>
+              </div>
             </div>
           ))
-        : metrics.map((m) => <TreasuryCircle key={m.key} metric={m} comparisonLabel={comparisonLabel} />)}
+        : metrics.map((m) => <SideCard key={m.key} metric={m} />)}
     </div>
   );
 };

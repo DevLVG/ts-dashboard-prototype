@@ -20,6 +20,19 @@
 // with it false (the default, and the only state until Marcello/Arwa arm
 // go-live) every click still fully exercises the mechanism end-to-end
 // except the network call.
+//
+// PSEUDO-CUSTOMER GUARD (added 2026-08-04, fix-28-treasury-align, Marcello
+// live on /treasury): "B2C Aggregated (Shopify)" (qoyod_customer_id 1844)
+// and "B2B Aggregated (contracts)" (1845) are rollup placeholders for many
+// individual Shopify/contract customers, not a single emailable
+// counterparty — the missing-emails report already flagged both as such.
+// An aggregate is not a dunning target: it stays fully counted in the book
+// (amount, % of book, aging summary all render normally) but gets NO
+// reminder/escalate/resolve action — a plain note explains why instead.
+// Detected by known qoyod_customer_id first (both current known rollups),
+// with an /Aggregated/i name-pattern fallback so any future rollup Qoyod
+// names the same way is caught automatically rather than silently slipping
+// an action button. See isPseudoCustomer() below the imports.
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,7 +41,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Send, ShieldAlert, CheckCircle2, Clock, Users, MailX } from "lucide-react";
+import { Send, ShieldAlert, CheckCircle2, Clock, Users, MailX, Layers } from "lucide-react";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import { ScrollHint } from "@/components/chrome/AlignmentChrome";
 import { AgingMiniBar } from "@/components/treasury/AgingMiniBar";
@@ -51,6 +64,10 @@ const n = (v: number | null | undefined): number => v ?? 0;
 const fmt = (v: number) => fmtSAR(Math.abs(v) < 0.5 ? 0 : v);
 const fmtDate = (d: Date | null) => (d ? d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—");
 
+const KNOWN_PSEUDO_CUSTOMER_IDS = new Set(["1844", "1845"]);
+const isPseudoCustomer = (customerId: string, customerName: string): boolean =>
+  KNOWN_PSEUDO_CUSTOMER_IDS.has(customerId) || /aggregated/i.test(customerName);
+
 interface CustomerAgg {
   customerId: string;
   customerName: string;
@@ -59,6 +76,10 @@ interface CustomerAgg {
   amountsByBucket: Partial<Record<AgingBucket, number>>;
   maxDaysOverdue: number;
   oldestInvoiceNumber: string;
+  /** True for rollup placeholders (e.g. "B2C Aggregated (Shopify)") — not a
+   * real, individually emailable counterparty. See the pseudo-customer
+   * guard header above. */
+  isPseudo: boolean;
 }
 
 const STAGE_CHIP: Record<number, string> = {
@@ -79,7 +100,11 @@ export const CustomerLinesTable = ({ rows }: { rows: ArAgingRow[] }) => {
       const days = n(r.days_overdue);
       let agg = m.get(id);
       if (!agg) {
-        agg = { customerId: id, customerName: r.customer_name ?? "—", amount: 0, invoiceCount: 0, amountsByBucket: {}, maxDaysOverdue: 0, oldestInvoiceNumber: r.invoice_number ?? "—" };
+        const customerName = r.customer_name ?? "—";
+        agg = {
+          customerId: id, customerName, amount: 0, invoiceCount: 0, amountsByBucket: {}, maxDaysOverdue: 0,
+          oldestInvoiceNumber: r.invoice_number ?? "—", isPseudo: isPseudoCustomer(id, customerName),
+        };
         m.set(id, agg);
       }
       agg.amount += amt;
@@ -201,7 +226,9 @@ export const CustomerLinesTable = ({ rows }: { rows: ArAgingRow[] }) => {
     }
   };
 
-  const ceoAttention = aggregates.filter((a) => isEscalationDue(ladderStates.get(a.customerId) ?? { stage: 0, stage1At: null, stage2At: null, stage3At: null, lastActionAt: null, lastReason: null, escalatedManually: false, escalatedAt: null, resolved: false, resolvedAt: null }, cfg, now));
+  const ceoAttention = aggregates.filter(
+    (a) => !a.isPseudo && isEscalationDue(ladderStates.get(a.customerId) ?? { stage: 0, stage1At: null, stage2At: null, stage3At: null, lastActionAt: null, lastReason: null, escalatedManually: false, escalatedAt: null, resolved: false, resolvedAt: null }, cfg, now),
+  );
 
   return (
     <Card className="p-6 shadow-sm animate-fade-in">
@@ -256,9 +283,21 @@ export const CustomerLinesTable = ({ rows }: { rows: ArAgingRow[] }) => {
               return (
                 <tr key={a.customerId} className="border-b border-border/10 align-top">
                   <td className="py-2 pr-2 max-w-[200px]">
-                    <div className="truncate font-medium" title={a.customerName}>{a.customerName}</div>
+                    <div className="truncate font-medium inline-flex items-center gap-1.5" title={a.customerName}>
+                      {a.customerName}
+                      {a.isPseudo && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Layers className="h-3 w-3 text-muted-foreground/70 shrink-0 cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs text-xs">
+                            A rollup of many individual customers, not one counterparty — see the note in Action.
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+                    </div>
                     <div className="text-[11px] text-muted-foreground">{a.invoiceCount} invoice{a.invoiceCount === 1 ? "" : "s"}</div>
-                    {!email && (
+                    {!a.isPseudo && !email && (
                       <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 mt-0.5">
                         <MailX className="h-2.5 w-2.5" /> No email on file
                       </span>
@@ -268,63 +307,78 @@ export const CustomerLinesTable = ({ rows }: { rows: ArAgingRow[] }) => {
                   <td className="py-2 px-2 text-right tabular-nums text-muted-foreground">{pct.toFixed(1)}%</td>
                   <td className="py-2 px-2"><AgingMiniBar amountsByBucket={a.amountsByBucket} total={a.amount} /></td>
                   <td className="py-2 px-2">
-                    {status.kind === "resolved" && (
-                      <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-emerald-500/40 bg-emerald-500/10 text-emerald-400">
-                        <CheckCircle2 className="h-3 w-3" /> Resolved
-                      </span>
-                    )}
-                    {status.kind === "escalate" && (
-                      <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-destructive/40 bg-destructive/10 text-destructive">
-                        <ShieldAlert className="h-3 w-3" /> Escalate to CEO
-                      </span>
-                    )}
-                    {status.kind === "not_started" && (
+                    {a.isPseudo ? (
                       <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-border bg-muted/20 text-muted-foreground">
-                        Not yet reminded
+                        <Layers className="h-3 w-3" /> Aggregated
                       </span>
-                    )}
-                    {status.kind === "stage_sent" && (
-                      <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border ${STAGE_CHIP[status.stage] ?? ""}`}>
-                        {status.stage === 1 ? "1st" : status.stage === 2 ? "2nd" : "3rd"} reminder sent ({fmtDate(status.at)}){status.stage === 3 ? " — firm" : ""}
-                      </span>
+                    ) : (
+                      <>
+                        {status.kind === "resolved" && (
+                          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-emerald-500/40 bg-emerald-500/10 text-emerald-400">
+                            <CheckCircle2 className="h-3 w-3" /> Resolved
+                          </span>
+                        )}
+                        {status.kind === "escalate" && (
+                          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-destructive/40 bg-destructive/10 text-destructive">
+                            <ShieldAlert className="h-3 w-3" /> Escalate to CEO
+                          </span>
+                        )}
+                        {status.kind === "not_started" && (
+                          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-border bg-muted/20 text-muted-foreground">
+                            Not yet reminded
+                          </span>
+                        )}
+                        {status.kind === "stage_sent" && (
+                          <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border ${STAGE_CHIP[status.stage] ?? ""}`}>
+                            {status.stage === 1 ? "1st" : status.stage === 2 ? "2nd" : "3rd"} reminder sent ({fmtDate(status.at)}){status.stage === 3 ? " — firm" : ""}
+                          </span>
+                        )}
+                      </>
                     )}
                   </td>
                   <td className="py-2 pl-2">
-                    <div className="flex flex-col items-end gap-1">
-                      {status.kind !== "resolved" && next.nextStage && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span>
-                              <Button
-                                size="sm" variant="outline" disabled={!eligible}
-                                className="h-7 px-2 gap-1 text-[11px] border-gold/40 hover:bg-gold/10"
-                                onClick={() => openSend(a, next.nextStage as CustomerTemplateStage)}
-                              >
-                                <Send className="h-3.5 w-3.5 text-gold" />
-                                Send {next.nextStage === 1 ? "1st" : next.nextStage === 2 ? "2nd" : "3rd"} reminder
+                    {a.isPseudo ? (
+                      <p className="text-[11px] text-muted-foreground text-right max-w-[220px] ml-auto leading-snug">
+                        Aggregated {a.customerName.match(/B2C/i) ? "B2C" : "B2B"} rollup — individual customers, no
+                        dunning target.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col items-end gap-1">
+                        {status.kind !== "resolved" && next.nextStage && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span>
+                                <Button
+                                  size="sm" variant="outline" disabled={!eligible}
+                                  className="h-7 px-2 gap-1 text-[11px] border-gold/40 hover:bg-gold/10"
+                                  onClick={() => openSend(a, next.nextStage as CustomerTemplateStage)}
+                                >
+                                  <Send className="h-3.5 w-3.5 text-gold" />
+                                  Send {next.nextStage === 1 ? "1st" : next.nextStage === 2 ? "2nd" : "3rd"} reminder
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            {!eligible && (
+                              <TooltipContent side="left" className="max-w-xs text-xs">
+                                <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" /> Available from {fmtDate(next.eligibleAt)} — Marcello's cadence gate.</span>
+                              </TooltipContent>
+                            )}
+                          </Tooltip>
+                        )}
+                        {status.kind !== "resolved" && (
+                          <div className="flex gap-1">
+                            {status.kind !== "escalate" && (
+                              <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-destructive hover:bg-destructive/10" onClick={() => openNote(a, "escalate_ceo")}>
+                                Escalate now
                               </Button>
-                            </span>
-                          </TooltipTrigger>
-                          {!eligible && (
-                            <TooltipContent side="left" className="max-w-xs text-xs">
-                              <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" /> Available from {fmtDate(next.eligibleAt)} — Marcello's cadence gate.</span>
-                            </TooltipContent>
-                          )}
-                        </Tooltip>
-                      )}
-                      {status.kind !== "resolved" && (
-                        <div className="flex gap-1">
-                          {status.kind !== "escalate" && (
-                            <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-destructive hover:bg-destructive/10" onClick={() => openNote(a, "escalate_ceo")}>
-                              Escalate now
+                            )}
+                            <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-muted-foreground hover:bg-muted/20" onClick={() => openNote(a, "resolved")}>
+                              Mark resolved
                             </Button>
-                          )}
-                          <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-muted-foreground hover:bg-muted/20" onClick={() => openNote(a, "resolved")}>
-                            Mark resolved
-                          </Button>
-                        </div>
-                      )}
-                    </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </td>
                 </tr>
               );

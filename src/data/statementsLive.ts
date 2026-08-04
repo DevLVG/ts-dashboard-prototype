@@ -329,6 +329,41 @@ export const useApAging = () =>
       query.state.data && !query.state.data.available ? 60_000 : false,
   });
 
+// ------------------------------------------ realized DSO reference (v075)
+//
+// v_ar_realized_dso_trailing12m (migration 075, 2026-08-04): a single-row
+// "as of today" snapshot — amount-weighted average days between invoice
+// date and actual payment allocation, over the trailing 365 days, legacy
+// 2020-2021 cohort excluded (same cutoff as v_legacy_receivables). See the
+// migration header + DsoCard.tsx for why this REPLACES the book-value
+// trailing-average method (v_working_capital_monthly.receivables runs
+// negative every month — not a comparable basis to today's gross AR).
+
+export interface RealizedDsoRow {
+  sample_count: number;
+  sample_amount_sar: number | null;
+  weighted_avg_days: number | null;
+}
+
+export const useRealizedDsoTrailing12m = () =>
+  useQuery({
+    queryKey: ["v_ar_realized_dso_trailing12m"],
+    queryFn: async (): Promise<AgingResult<RealizedDsoRow>> => {
+      if (!supabase) throw new Error("Supabase is not configured");
+      const { data, error } = await supabase.from("v_ar_realized_dso_trailing12m").select("*").maybeSingle();
+      if (error) {
+        if (isMissingViewError(error)) return { available: false, rows: [] };
+        throw toFriendlyError(error);
+      }
+      return { available: true, rows: data ? [data as RealizedDsoRow] : [] };
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data && !query.state.data.available ? 60_000 : false,
+  });
+
 // ------------------------------------------------ balance-sheet budget (v2)
 //
 // v_budget_balance_sheet_monthly (migration 068, 2026-08-03): a SIMPLE

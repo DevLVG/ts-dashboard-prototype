@@ -18,9 +18,10 @@
 // what Qoyod's own status claims is unpaid.
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AlertTriangle, Archive, HardHat, Snowflake, Info } from "lucide-react";
+import { AlertTriangle, Archive, HardHat, Snowflake, Info, ChevronsUpDown } from "lucide-react";
 import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
 import { ProposedBadge } from "@/components/dashboard/ProposedBadge";
 import { ScrollHint } from "@/components/chrome/AlignmentChrome";
@@ -118,6 +119,15 @@ const LegacyPool = () => {
   }, [rows, search]);
   const visibleRows = showAll ? filteredRows : filteredRows.slice(0, LEGACY_PAGE_SIZE);
 
+  // Compact-by-default (2026-08-04, fix-28-treasury-align, Marcello live on
+  // /treasury, mandate extension #3): ~1,015 debtor rows exploding open by
+  // default made the tab unusable. Default view = the 3 stat cards + a
+  // top-10-by-amount snapshot; the full search+paginate worksheet is an
+  // explicit "open" the treasurer reaches for only when actually working
+  // the reconciliation, with an equally explicit "collapse" back.
+  const [worksheetOpen, setWorksheetOpen] = useState(false);
+  const top10 = useMemo(() => [...rows].sort((a, b) => n(b.legacy_billed_total) - n(a.legacy_billed_total)).slice(0, 10), [rows]);
+
   return (
     <div className="space-y-6">
       {/* Frozen / flagged-only banner — mandatory per Treasury-Decision-Rules §A.6 */}
@@ -181,75 +191,131 @@ const LegacyPool = () => {
             </Card>
           </div>
 
-          <Card className="p-6 shadow-sm animate-fade-in">
-            <div className="flex items-center gap-3 mb-1 flex-wrap">
-              <h3 className="text-xl font-heading tracking-wide">LEGACY — PER-DEBTOR WORKSHEET</h3>
-              <DataSourceBadge source="live" sourceLabel="Live data from Supabase (v_legacy_receivables)" />
-              <span className="text-xs text-muted-foreground">Live legacy receivables data · SAR</span>
-            </div>
-            <p className="text-sm text-muted-foreground mb-4 inline-flex items-start gap-1.5">
-              <Archive className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
-              For the future recover-vs-write-off decision. Collectibility is left blank — no automated rating
-              exists; Marcello + Arwa rate per debtor when the reconciliation work happens.
-            </p>
-            <div className="mb-3 flex flex-wrap items-center gap-3">
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => { setSearch(e.target.value); setShowAll(false); }}
-                placeholder="Search debtor name…"
-                className="h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-              <span className="text-xs text-muted-foreground">
-                Showing {visibleRows.length} of {filteredRows.length}
-                {filteredRows.length !== rows.length ? ` (filtered from ${rows.length})` : ""} debtors, sorted by
-                historical billed total.
-              </span>
-            </div>
-            <ScrollHint>
-              <table className="w-full min-w-[720px] text-sm">
-                <thead>
-                  <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
-                    <th className="text-left py-1 pr-2 font-semibold">Debtor</th>
-                    <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Historical billed</th>
-                    <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Per Qoyod unpaid</th>
-                    <th className="text-right py-1 px-2 font-semibold">Invoices</th>
-                    <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Age (days)</th>
-                    <th className="text-left py-1 px-2 font-semibold whitespace-nowrap">Last activity</th>
-                    <th className="text-left py-1 pl-2 font-semibold">Collectibility</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleRows.map((r) => (
-                    <tr key={String(r.customer_id ?? r.customer_name)} className="border-b border-border/10">
-                      <td className="py-1.5 pr-2 max-w-[220px] truncate" title={r.customer_name ?? ""}>{r.customer_name ?? "—"}</td>
-                      <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">{fmt(n(r.legacy_billed_total))}</td>
-                      <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">
-                        {n(r.legacy_unpaid_per_qoyod) > 0.5 ? fmt(n(r.legacy_unpaid_per_qoyod)) : "—"}
-                      </td>
-                      <td className="py-1.5 px-2 text-right tabular-nums">{r.legacy_invoice_count}</td>
-                      <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">{r.days_since_last_invoice ?? "—"}</td>
-                      <td className="py-1.5 px-2 text-muted-foreground whitespace-nowrap" title="Most recent legacy invoice date — no contact/payment log exists for this cohort">
-                        {r.latest_invoice_date ?? "—"}
-                      </td>
-                      <td className="py-1.5 pl-2 text-muted-foreground">Not yet rated</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </ScrollHint>
-            {!showAll && filteredRows.length > LEGACY_PAGE_SIZE && (
-              <div className="mt-4 text-center">
-                <button
-                  type="button"
-                  onClick={() => setShowAll(true)}
-                  className="text-sm text-gold hover:text-gold/80 underline underline-offset-4"
-                >
-                  Show all {filteredRows.length} debtors
-                </button>
+          {!worksheetOpen ? (
+            <Card className="p-6 shadow-sm animate-fade-in">
+              <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h3 className="text-xl font-heading tracking-wide">LEGACY POOL — SUMMARY</h3>
+                  <DataSourceBadge source="live" sourceLabel="Live data from Supabase (v_legacy_receivables)" />
+                </div>
+                <Button size="sm" variant="outline" className="gap-1.5 border-gold/40 hover:bg-gold/10" onClick={() => setWorksheetOpen(true)}>
+                  <ChevronsUpDown className="h-3.5 w-3.5 text-gold" /> Open full worksheet ({totals.debtors} debtors)
+                </Button>
               </div>
-            )}
-          </Card>
+              <p className="text-sm text-muted-foreground mb-4 inline-flex items-start gap-1.5">
+                <Snowflake className="h-3.5 w-3.5 mt-0.5 shrink-0 text-sky-400" />
+                Frozen — every debtor here is flagged only, no dunning ladder. Top 10 by historical billed amount
+                below; the full per-debtor worksheet (search + all {totals.debtors}) is one click away.
+              </p>
+              <ScrollHint>
+                <table className="w-full min-w-[520px] text-sm">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
+                      <th className="text-left py-1 pr-2 font-semibold">Debtor</th>
+                      <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Historical billed</th>
+                      <th className="text-right py-1 px-2 font-semibold">Invoices</th>
+                      <th className="text-left py-1 pl-2 font-semibold">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {top10.map((r) => (
+                      <tr key={String(r.customer_id ?? r.customer_name)} className="border-b border-border/10">
+                        <td className="py-1.5 pr-2 max-w-[220px] truncate" title={r.customer_name ?? ""}>{r.customer_name ?? "—"}</td>
+                        <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">{fmt(n(r.legacy_billed_total))}</td>
+                        <td className="py-1.5 px-2 text-right tabular-nums">{r.legacy_invoice_count}</td>
+                        <td className="py-1.5 pl-2">
+                          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-sky-500/40 bg-sky-500/10 text-sky-300">
+                            <Snowflake className="h-3 w-3" /> Frozen
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </ScrollHint>
+            </Card>
+          ) : (
+            <Card className="p-6 shadow-sm animate-fade-in">
+              <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h3 className="text-xl font-heading tracking-wide">LEGACY — PER-DEBTOR WORKSHEET</h3>
+                  <DataSourceBadge source="live" sourceLabel="Live data from Supabase (v_legacy_receivables)" />
+                  <span className="text-xs text-muted-foreground">Live legacy receivables data · SAR</span>
+                </div>
+                <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground" onClick={() => setWorksheetOpen(false)}>
+                  <ChevronsUpDown className="h-3.5 w-3.5" /> Collapse
+                </Button>
+              </div>
+              <p className="text-sm text-muted-foreground mb-4 inline-flex items-start gap-1.5">
+                <Archive className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+                For the future recover-vs-write-off decision. Collectibility is left blank — no automated rating
+                exists; Marcello + Arwa rate per debtor when the reconciliation work happens. Every row is
+                frozen — no reminder/escalate action is ever offered against this pool.
+              </p>
+              <div className="mb-3 flex flex-wrap items-center gap-3">
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => { setSearch(e.target.value); setShowAll(false); }}
+                  placeholder="Search debtor name…"
+                  className="h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <span className="text-xs text-muted-foreground">
+                  Showing {visibleRows.length} of {filteredRows.length}
+                  {filteredRows.length !== rows.length ? ` (filtered from ${rows.length})` : ""} debtors, sorted by
+                  historical billed total.
+                </span>
+              </div>
+              <ScrollHint>
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
+                      <th className="text-left py-1 pr-2 font-semibold">Debtor</th>
+                      <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Historical billed</th>
+                      <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Per Qoyod unpaid</th>
+                      <th className="text-right py-1 px-2 font-semibold">Invoices</th>
+                      <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Age (days)</th>
+                      <th className="text-left py-1 px-2 font-semibold whitespace-nowrap">Last activity</th>
+                      <th className="text-left py-1 pl-2 font-semibold">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleRows.map((r) => (
+                      <tr key={String(r.customer_id ?? r.customer_name)} className="border-b border-border/10">
+                        <td className="py-1.5 pr-2 max-w-[220px] truncate" title={r.customer_name ?? ""}>{r.customer_name ?? "—"}</td>
+                        <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">{fmt(n(r.legacy_billed_total))}</td>
+                        <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">
+                          {n(r.legacy_unpaid_per_qoyod) > 0.5 ? fmt(n(r.legacy_unpaid_per_qoyod)) : "—"}
+                        </td>
+                        <td className="py-1.5 px-2 text-right tabular-nums">{r.legacy_invoice_count}</td>
+                        <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">{r.days_since_last_invoice ?? "—"}</td>
+                        <td className="py-1.5 px-2 text-muted-foreground whitespace-nowrap" title="Most recent legacy invoice date — no contact/payment log exists for this cohort">
+                          {r.latest_invoice_date ?? "—"}
+                        </td>
+                        <td className="py-1.5 pl-2">
+                          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold border border-sky-500/40 bg-sky-500/10 text-sky-300">
+                            <Snowflake className="h-3 w-3" /> Frozen
+                          </span>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">Collectibility: not yet rated</div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </ScrollHint>
+              {!showAll && filteredRows.length > LEGACY_PAGE_SIZE && (
+                <div className="mt-4 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowAll(true)}
+                    className="text-sm text-gold hover:text-gold/80 underline underline-offset-4"
+                  >
+                    Show all {filteredRows.length} debtors
+                  </button>
+                </div>
+              )}
+            </Card>
+          )}
         </>
       )}
     </div>

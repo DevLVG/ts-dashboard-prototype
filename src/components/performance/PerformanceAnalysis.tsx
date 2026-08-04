@@ -95,7 +95,7 @@
 //     the chrome level by fix-25 (StrictBasisNote -> no-op); this page also
 //     drops its own `CompletenessBanner` render — Marcello, live review:
 //     "togli tutto" — keeping only the small `OpenMonthsBadge`.
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChevronRight, ChevronDown, Info } from "lucide-react";
@@ -110,6 +110,7 @@ import {
 } from "@/data/alignment";
 import { useBudgetMonthly, monthKeyLabel } from "@/data/liveData";
 import { MOA_PL_LEAVES, buFamilyName } from "@/data/moaTree";
+import { useLeafLines, useLeafLineCount, LEAF_LINE_SOURCE_LABEL } from "@/data/leafLines";
 import { fmtDeltaSAR, fmtDeltaPct, fmtOrDash, comparePct } from "@/lib/format";
 
 // ---------------------------------------------------------------- helpers
@@ -425,6 +426,100 @@ const macroHasData = (key: string, tree: Map<PLSection, SectionTree>, sub: Subto
   }
 };
 
+// --------------------------------------------------- leaf-line drill-down
+//
+// fix-24 follow-up (2026-08-04, Marcello — "i prodotti devono essere
+// uguali agli SKU, voglio arrivare all'ultima foglia e vedere cosa c'e'
+// dentro"). Renders the real booked lines behind one exact moa_code for the
+// current window, right under the leaf row that triggered it — bounded
+// (LEAF_LINE_PAGE at a time, "Show more" grows it, never a runaway
+// explosion) and count-labelled so the user always knows how much of the
+// leaf they're looking at. Source: v_pnl_leaf_lines (migration 076), which
+// sums to the leaf's own total to the cent by construction (see the
+// migration's header for the full verification).
+const LEAF_LINE_PAGE = 20;
+const LEAF_LINE_PAGE_GROW = 50;
+
+const LeafLineRows = ({ moaCode, win, indent }: { moaCode: string; win: Win; indent: number }) => {
+  const [limit, setLimit] = useState(LEAF_LINE_PAGE);
+  const { data: lines, isLoading, error } = useLeafLines(moaCode, win, limit);
+  const { data: totalCount } = useLeafLineCount(moaCode, win);
+  const padLeft = `${indent * 18 + 20}px`;
+
+  if (isLoading) {
+    return (
+      <tr className="border-b border-border/10">
+        <td colSpan={5} className="py-2 text-xs text-muted-foreground" style={{ paddingLeft: padLeft }}>
+          Loading lines…
+        </td>
+      </tr>
+    );
+  }
+  if (error) {
+    return (
+      <tr className="border-b border-border/10">
+        <td colSpan={5} className="py-2 text-xs text-destructive/90" style={{ paddingLeft: padLeft }}>
+          Could not load lines — {error instanceof Error ? error.message : String(error)}
+        </td>
+      </tr>
+    );
+  }
+  if (!lines || lines.length === 0) {
+    return (
+      <tr className="border-b border-border/10">
+        <td colSpan={5} className="py-2 text-xs text-muted-foreground italic" style={{ paddingLeft: padLeft }}>
+          No booked lines in this window.
+        </td>
+      </tr>
+    );
+  }
+  const shown = lines.length;
+  const total = totalCount ?? shown;
+  const hasMore = shown < total;
+  return (
+    <>
+      {lines.map((l) => (
+        <tr key={l.line_id} className="border-b border-border/5 bg-muted/[0.15]">
+          <td className="py-1 pr-3" style={{ paddingLeft: padLeft }}>
+            <span className="inline-flex items-center gap-1.5 min-w-0">
+              <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+              <span className="text-xs text-foreground/80 truncate max-w-[260px]" title={l.description ?? undefined}>
+                {l.product_code && <span className="font-mono text-[10px] text-muted-foreground/70 mr-1">{l.product_code}</span>}
+                {l.description || "—"}
+              </span>
+              <span className="text-[10px] text-muted-foreground/50 shrink-0 whitespace-nowrap">
+                {LEAF_LINE_SOURCE_LABEL[l.source]}{l.doc_ref ? ` · ${l.doc_ref}` : ""} · {l.line_date}
+              </span>
+            </span>
+          </td>
+          <td className="py-1 px-3 text-right tabular-nums text-xs text-muted-foreground">{fmtOrDash(l.amount_sar, 2)}</td>
+          <td className="py-1 px-3 text-right text-xs text-muted-foreground/50">—</td>
+          <td className="py-1 px-3 text-right text-xs text-muted-foreground/50">—</td>
+          <td className="py-1 pl-3 text-right text-xs text-muted-foreground/50">—</td>
+        </tr>
+      ))}
+      <tr className="border-b border-border/10">
+        <td colSpan={5} className="py-1.5 text-[11px] text-muted-foreground" style={{ paddingLeft: padLeft }}>
+          {hasMore ? (
+            <span className="inline-flex items-center gap-2">
+              Showing {shown} of {total} lines
+              <button
+                type="button"
+                onClick={() => setLimit((n) => n + LEAF_LINE_PAGE_GROW)}
+                className="text-gold hover:underline font-semibold cursor-pointer"
+              >
+                Show {Math.min(LEAF_LINE_PAGE_GROW, total - shown)} more
+              </button>
+            </span>
+          ) : (
+            <span>All {total} line{total === 1 ? "" : "s"} shown</span>
+          )}
+        </td>
+      </tr>
+    </>
+  );
+};
+
 // ------------------------------------------------------------- component
 
 export const PerformanceAnalysis = () => {
@@ -505,7 +600,16 @@ export const PerformanceAnalysis = () => {
   // MoA defines for a section renders, every time, per Marcello's mandate
   // ("voglio vedere ogni riga e sottoriga di foglia") — a window with zero
   // rows still shows the full tree at 0 (or "—" under the honesty gate).
-  interface Row { indent: 0 | 1 | 2 | 3; keyPath: string; label: string; codeTag?: string; actual: number | null; comparison: number | null; expandable: boolean; expanded: boolean; onToggle?: () => void; subtotal?: boolean; emphasis?: boolean }
+  // `drillMoaCode`: set only on genuine leaf-equivalent rows (tree leaves
+  // and the below-EBIT statutory lines) — fix-24 follow-up (2026-08-04,
+  // Marcello — "voglio arrivare all'ultima foglia e vedere cosa c'e'
+  // dentro"). When set and `expanded`, LeafLineRows renders the real
+  // booked lines behind this exact moa_code for the current window right
+  // after this row. Distinct from tree expansion (`fam:`/`clu:`/`sec:` keys)
+  // — leaves now DO carry a chevron, but it reveals real transaction detail,
+  // never a copy of the leaf itself (rule 2 is about redundant tree nodes,
+  // not this).
+  interface Row { indent: 0 | 1 | 2 | 3; keyPath: string; label: string; codeTag?: string; actual: number | null; comparison: number | null; expandable: boolean; expanded: boolean; onToggle?: () => void; subtotal?: boolean; emphasis?: boolean; drillMoaCode?: string }
 
   const tableRows = useMemo((): Row[] => {
     const out: Row[] = [];
@@ -572,19 +676,26 @@ export const PerformanceAnalysis = () => {
       // budget-adjacent) data still drives full expansion of an empty
       // current window, exactly as Marcello's mandate requires.
       const curSlots = m.section ? sectionFamilySlots(actualTree.get(m.section)!.families) : [];
-      const canExpand = !isBudgetMode && !!m.section && curSlots.length > 0;
+      // Below-EBIT statutory lines (Financial charges/Gains & disposals/
+      // Zakat) have no `.section` — each pins to exactly one moa_code
+      // instead, so their chevron drives the leaf-line drill directly
+      // rather than a tree expansion.
+      const drillCode = MACRO_LEAF_CODE[m.key];
+      const lineKey = drillCode ? `line:${drillCode}` : null;
+      const canExpand = !isBudgetMode && ((!!m.section && curSlots.length > 0) || !!drillCode);
       out.push({
         indent: 0,
         keyPath: m.key,
         label: m.label,
-        codeTag: MACRO_LEAF_CODE[m.key],
+        codeTag: drillCode,
         actual,
         comparison,
         expandable: canExpand,
-        expanded: !!sectionKey && expanded.has(sectionKey),
-        onToggle: canExpand && sectionKey ? () => toggle(sectionKey) : undefined,
+        expanded: (!!sectionKey && expanded.has(sectionKey)) || (!!lineKey && expanded.has(lineKey)),
+        onToggle: !canExpand ? undefined : sectionKey ? () => toggle(sectionKey) : () => toggle(lineKey!),
         subtotal: m.subtotal,
         emphasis: m.emphasis,
+        drillMoaCode: !m.section ? drillCode : undefined,
       });
       if (!m.section || !sectionKey || !expanded.has(sectionKey) || isBudgetMode) continue;
       const section = m.section;
@@ -611,9 +722,12 @@ export const PerformanceAnalysis = () => {
       for (const slot of curSlots) {
         if (slot.kind === "leaf") {
           const leafP = findLeafInFamilies(priorFamilies, slot.leaf.moaCode);
+          const lineKey = `line:${slot.leaf.moaCode}`;
           out.push({
             indent: 1, keyPath: slot.leaf.moaCode, label: slot.leaf.leafName, codeTag: slot.leaf.moaCode,
-            ...gated(slot.leaf.total, leafP?.total ?? 0), expandable: false, expanded: false,
+            ...gated(slot.leaf.total, leafP?.total ?? 0),
+            expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+            drillMoaCode: slot.leaf.moaCode,
           });
           continue;
         }
@@ -629,9 +743,12 @@ export const PerformanceAnalysis = () => {
           if (!expanded.has(cluExpandKey)) continue;
           for (const leaf of slot.cluster.leaves) {
             const leafP = priorClu?.leaves.find((l) => l.moaCode === leaf.moaCode);
+            const lineKey = `line:${leaf.moaCode}`;
             out.push({
               indent: 2, keyPath: leaf.moaCode, label: leaf.leafName, codeTag: leaf.moaCode,
-              ...gated(leaf.total, leafP?.total ?? 0), expandable: false, expanded: false,
+              ...gated(leaf.total, leafP?.total ?? 0),
+              expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+              drillMoaCode: leaf.moaCode,
             });
           }
           continue;
@@ -652,9 +769,12 @@ export const PerformanceAnalysis = () => {
         for (const fs of famSlotsArr) {
           if (fs.kind === "leaf") {
             const leafP = famP ? findLeafInFamilies([famP], fs.leaf.moaCode) : undefined;
+            const lineKey = `line:${fs.leaf.moaCode}`;
             out.push({
               indent: 2, keyPath: fs.leaf.moaCode, label: fs.leaf.leafName, codeTag: fs.leaf.moaCode,
-              ...gated(fs.leaf.total, leafP?.total ?? 0), expandable: false, expanded: false,
+              ...gated(fs.leaf.total, leafP?.total ?? 0),
+              expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+              drillMoaCode: fs.leaf.moaCode,
             });
             continue;
           }
@@ -669,9 +789,12 @@ export const PerformanceAnalysis = () => {
           if (!expanded.has(cluExpandKey)) continue;
           for (const leaf of fs.cluster.leaves) {
             const leafP = priorClu?.leaves.find((l) => l.moaCode === leaf.moaCode);
+            const lineKey = `line:${leaf.moaCode}`;
             out.push({
               indent: 3, keyPath: leaf.moaCode, label: leaf.leafName, codeTag: leaf.moaCode,
-              ...gated(leaf.total, leafP?.total ?? 0), expandable: false, expanded: false,
+              ...gated(leaf.total, leafP?.total ?? 0),
+              expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+              drillMoaCode: leaf.moaCode,
             });
           }
         }
@@ -781,8 +904,8 @@ export const PerformanceAnalysis = () => {
                   const deltaPct = r.actual === null || r.comparison === null ? null : comparePct(r.actual, r.comparison);
                   const good = deltaAbs === null ? null : deltaAbs >= 0;
                   return (
+                    <Fragment key={r.keyPath}>
                     <tr
-                      key={r.keyPath}
                       className={`border-b border-border/10 ${r.subtotal ? "border-t-2 border-t-border" : ""} ${r.emphasis ? "font-semibold" : ""}`}
                     >
                       {/* owner-audit #11 (2026-08-04): the chevron button's tap
@@ -823,6 +946,10 @@ export const PerformanceAnalysis = () => {
                         {deltaPct === null ? "—" : fmtDeltaPct(deltaPct)}
                       </td>
                     </tr>
+                    {r.drillMoaCode && r.expanded && (
+                      <LeafLineRows moaCode={r.drillMoaCode} win={win} indent={r.indent + 1} />
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>

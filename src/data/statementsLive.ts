@@ -359,15 +359,36 @@ export interface BudgetBalanceSheetResult {
   rows: BudgetBalanceSheetRow[];
 }
 
+// fix-27 perf check (2026-08-04): timed the two views directly against
+// Supabase (3 runs each) — this one is the FAST side, not the slow path:
+// v_budget_balance_sheet_monthly ~100-270ms for its single 558-row page vs
+// v_balance_sheet_monthly's ~500-800ms PER page (and it needs two sequential
+// pages). The Budget branch was never the bottleneck; it just lacked the
+// same defensive guard as fetchBalanceSheet above (owner-audit #9) against a
+// stalled connection hanging forever with no error — added here for
+// consistency/safety, not because this query is slow.
 export const fetchBudgetBalanceSheet = async (): Promise<BudgetBalanceSheetResult> => {
   if (!supabase) throw new Error("Supabase is not configured");
   const all: BudgetBalanceSheetRow[] = [];
   for (let from = 0; ; from += BS_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from("v_budget_balance_sheet_monthly")
-      .select("period_month,line_code,section,subsection,line_item,budget_amount_sar,method_note,version_id")
-      .order("period_month", { ascending: true })
-      .range(from, from + BS_PAGE_SIZE - 1);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), BS_PAGE_TIMEOUT_MS);
+    let data, error;
+    try {
+      ({ data, error } = await supabase
+        .from("v_budget_balance_sheet_monthly")
+        .select("period_month,line_code,section,subsection,line_item,budget_amount_sar,method_note,version_id")
+        .order("period_month", { ascending: true })
+        .range(from, from + BS_PAGE_SIZE - 1)
+        .abortSignal(controller.signal));
+    } catch (e) {
+      clearTimeout(timeout);
+      if (e instanceof Error && e.name === "AbortError") {
+        throw new Error(`Timed out loading the budget balance sheet (page starting at row ${from}) — please retry.`);
+      }
+      throw e;
+    }
+    clearTimeout(timeout);
     if (error) {
       if (isMissingViewError(error)) return { available: false, rows: [] };
       throw toFriendlyError(error);

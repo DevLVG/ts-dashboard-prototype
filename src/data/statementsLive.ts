@@ -118,16 +118,38 @@ const isMissingViewError = (err: { code?: string; message?: string }): boolean =
   );
 };
 
+// Per-request timeout (2026-08-04, owner-audit #9): a hung request in this
+// pagination loop (e.g. starved of connections by other queries firing on
+// the same page load) previously left `isLoading` true forever — no error,
+// no console output, matching the mobile-viewport symptom exactly (Playwright
+// capture: 0 console/page-error events, page stuck on "Loading…"). Each page
+// now aborts after 20s and surfaces a real error instead of hanging silently,
+// so the UI can show the existing error state / let react-query retry.
+const BS_PAGE_TIMEOUT_MS = 20_000;
+
 export const fetchBalanceSheet = async (): Promise<BalanceSheetResult> => {
   if (!supabase) throw new Error("Supabase is not configured");
   const all: BalanceSheetRow[] = [];
   for (let from = 0; ; from += BS_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from("v_balance_sheet_monthly")
-      .select("month,section,subsection,line_item,amount,sort_order,is_adjustment,note,line_code")
-      .order("month", { ascending: true })
-      .order("sort_order", { ascending: true })
-      .range(from, from + BS_PAGE_SIZE - 1);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), BS_PAGE_TIMEOUT_MS);
+    let data, error;
+    try {
+      ({ data, error } = await supabase
+        .from("v_balance_sheet_monthly")
+        .select("month,section,subsection,line_item,amount,sort_order,is_adjustment,note,line_code")
+        .order("month", { ascending: true })
+        .order("sort_order", { ascending: true })
+        .range(from, from + BS_PAGE_SIZE - 1)
+        .abortSignal(controller.signal));
+    } catch (e) {
+      clearTimeout(timeout);
+      if (e instanceof Error && e.name === "AbortError") {
+        throw new Error(`Timed out loading the balance sheet (page starting at row ${from}) — please retry.`);
+      }
+      throw e;
+    }
+    clearTimeout(timeout);
     if (error) {
       if (isMissingViewError(error)) return { available: false, rows: [] };
       throw toFriendlyError(error);

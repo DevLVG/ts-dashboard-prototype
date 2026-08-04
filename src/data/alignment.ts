@@ -139,12 +139,19 @@ export const fetchBasisRows = async (): Promise<BasisDataset> => {
   };
 };
 
-export const useBasisRows = () =>
+/** `enabled` (2026-08-04, owner-audit #19/#9): defaults true — every existing
+ * call site keeps working unchanged. Callers that only need this query on
+ * SOME renders (the shell in `pages/Index.tsx`, which otherwise fired this
+ * 5000+ row paginated fetch on every route including pages with zero P&L
+ * content) can pass `false` to skip it — React Query still de-dupes/serves
+ * from cache for any other component on the same page that calls this with
+ * no args, so nothing that genuinely needs the data loses it. */
+export const useBasisRows = (enabled = true) =>
   useQuery({
     queryKey: ["alignment_basis_rows"],
     queryFn: fetchBasisRows,
     staleTime: 5 * 60 * 1000,
-    enabled: isSupabaseConfigured,
+    enabled: isSupabaseConfigured && enabled,
   });
 
 // ------------------------------------------------- recurrence dimension
@@ -348,12 +355,39 @@ export interface PLAgg {
   ebit: number;
   nonOp: number;
   netResult: number;
+  // "Absent ≠ zero" per-section coverage (2026-08-04, owner-audit #3/#4): true
+  // only when at least one warehouse row landed in this section for the
+  // window — a section with ZERO matching rows (not yet booked) must never
+  // be indistinguishable from a section that summed to a real zero. Derived
+  // subtotals below read these to decide whether they're a real number or
+  // "not yet computable" — see `hasGrossMargin`..`hasNetResult`.
+  hasRevenue: boolean;
+  hasCogs: boolean;
+  hasOpexGa: boolean;
+  hasOpexMs: boolean;
+  hasOpexPeople: boolean;
+  hasProjectCosts: boolean;
+  hasDa: boolean;
+  hasNonOp: boolean;
+  // Derived coverage — a subtotal is only "real" when every section it
+  // depends on actually has posted rows (not merely a window with SOME data
+  // in it, e.g. revenue live but costs unbooked).
+  hasGrossMargin: boolean;
+  hasOpexTotal: boolean;
+  hasEbitda5: boolean;
+  hasEbitdaReported: boolean;
+  hasEbit: boolean;
+  hasNetResult: boolean;
 }
 
 const emptyAgg = (): PLAgg => ({
   revenue: 0, creditNotes: 0, cogs: 0, grossMargin: 0, opexGa: 0, opexMs: 0,
   opexPeople: 0, opex: 0, ebitda5: 0, projectCosts: 0, ebitdaReported: 0,
   da: 0, ebit: 0, nonOp: 0, netResult: 0,
+  hasRevenue: false, hasCogs: false, hasOpexGa: false, hasOpexMs: false,
+  hasOpexPeople: false, hasProjectCosts: false, hasDa: false, hasNonOp: false,
+  hasGrossMargin: false, hasOpexTotal: false, hasEbitda5: false,
+  hasEbitdaReported: false, hasEbit: false, hasNetResult: false,
 });
 
 const inWin = (k: string, w: Win) => k >= w.startKey && k <= w.endKey;
@@ -375,14 +409,14 @@ export const aggregatePL = (
     if (isCN) out.creditNotes += -r.amount_sar; // CN rows are negative revenue
     if (isCN && basis === "VALIDATED") continue; // Validated basis: CN excluded
     switch (r.section) {
-      case "Revenue": out.revenue += r.amount_sar; break;
-      case "COGS": out.cogs += r.amount_sar; break;
-      case "OPEX-GA": out.opexGa += r.amount_sar; break;
-      case "OPEX-MS": out.opexMs += r.amount_sar; break;
-      case "OPEX-People": out.opexPeople += r.amount_sar; break;
-      case "Project-Costs": out.projectCosts += r.amount_sar; break;
-      case "D&A": out.da += r.amount_sar; break;
-      case "NON-OP": out.nonOp += r.amount_sar; break;
+      case "Revenue": out.revenue += r.amount_sar; out.hasRevenue = true; break;
+      case "COGS": out.cogs += r.amount_sar; out.hasCogs = true; break;
+      case "OPEX-GA": out.opexGa += r.amount_sar; out.hasOpexGa = true; break;
+      case "OPEX-MS": out.opexMs += r.amount_sar; out.hasOpexMs = true; break;
+      case "OPEX-People": out.opexPeople += r.amount_sar; out.hasOpexPeople = true; break;
+      case "Project-Costs": out.projectCosts += r.amount_sar; out.hasProjectCosts = true; break;
+      case "D&A": out.da += r.amount_sar; out.hasDa = true; break;
+      case "NON-OP": out.nonOp += r.amount_sar; out.hasNonOp = true; break;
       default: break; // Unmapped = 0 everywhere post-verification 2026-07-21
     }
   }
@@ -392,6 +426,12 @@ export const aggregatePL = (
   out.ebitdaReported = out.ebitda5 + out.projectCosts;
   out.ebit = out.ebitdaReported + out.da;
   out.netResult = out.ebit + out.nonOp;
+  out.hasGrossMargin = out.hasRevenue && out.hasCogs;
+  out.hasOpexTotal = out.hasOpexGa && out.hasOpexMs && out.hasOpexPeople;
+  out.hasEbitda5 = out.hasGrossMargin && out.hasOpexTotal;
+  out.hasEbitdaReported = out.hasEbitda5 && out.hasProjectCosts;
+  out.hasEbit = out.hasEbitdaReported && out.hasDa;
+  out.hasNetResult = out.hasEbit && out.hasNonOp;
   return out;
 };
 

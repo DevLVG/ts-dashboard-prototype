@@ -107,10 +107,13 @@ const KpiTile = ({
 
 // -------------------------------------------------------------- aging card
 const AgingCard = ({
-  title, subtitle, summary, caveat, kind,
+  title, subtitle, sourceLabel, summary, caveat, kind,
 }: {
   title: string;
+  /** Owner-audit #16 (2026-08-04): plain-language now — the raw table name
+   * moved to `sourceLabel` (the LIVE badge's tooltip only). */
   subtitle: string;
+  sourceLabel: string;
   summary: AgingSummary;
   caveat?: string;
   kind: "ar" | "ap";
@@ -118,7 +121,7 @@ const AgingCard = ({
   <Card className="p-6 shadow-sm animate-fade-in">
     <div className="flex items-center gap-3 mb-1 flex-wrap">
       <h3 className="text-xl font-heading tracking-wide">{title}</h3>
-      <DataSourceBadge source="live" />
+      <DataSourceBadge source="live" sourceLabel={sourceLabel} />
       <span className="text-xs text-muted-foreground">{subtitle}</span>
     </div>
     <p className="text-sm text-muted-foreground mb-4">
@@ -355,7 +358,8 @@ export const TreasuryCash = () => {
         ) : arReady ? (
           <AgingCard
             title="RECEIVABLES AGING"
-            subtitle="Supabase · ar_aging_v2 · SAR"
+            subtitle="Live receivables data · SAR"
+            sourceLabel="Live data from Supabase (ar_aging_v2)"
             summary={arSummary}
             kind="ar"
           />
@@ -372,10 +376,11 @@ export const TreasuryCash = () => {
         ) : apReady ? (
           <AgingCard
             title="PAYABLES AGING"
-            subtitle="Supabase · ap_aging_v2 · SAR"
+            subtitle="Live payables data · SAR"
+            sourceLabel="Live data from Supabase (ap_aging_v2)"
             summary={apSummary}
             kind="ap"
-            caveat="AP mirror lags: vendor bills feed is behind and the bank feed is not yet live — treat payables as indicative until the AP/bank sync is brought current (Treasury Decision-Rules §C)."
+            caveat="AP mirror lags: vendor bills feed is behind and the bank feed is not yet live — treat payables as indicative until the AP/bank sync is brought current."
           />
         ) : (
           <NotAvailable what="Payables aging" view="ap_aging_v2" />
@@ -394,8 +399,8 @@ export const TreasuryCash = () => {
       <Card className="p-6 shadow-sm animate-fade-in">
         <div className="flex items-center gap-3 mb-1 flex-wrap">
           <h3 className="text-xl font-heading tracking-wide">WORKING CAPITAL</h3>
-          <DataSourceBadge source="live" />
-          <span className="text-xs text-muted-foreground">Supabase · v_working_capital_monthly · SAR</span>
+          <DataSourceBadge source="live" sourceLabel="Live data from Supabase (v_working_capital_monthly)" />
+          <span className="text-xs text-muted-foreground">Live working-capital data · SAR</span>
         </div>
         <p className="text-sm text-muted-foreground mb-4 inline-flex items-center gap-1.5">
           Receivables &amp; payables bars, net working capital line — last {wc.length} months

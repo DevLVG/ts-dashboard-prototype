@@ -159,8 +159,8 @@ export const SiteCopyAdmin = () => {
         <div className="flex items-center gap-3 mb-1 flex-wrap justify-between">
           <div className="flex items-center gap-3">
             <h3 className="text-xl font-heading tracking-wide">SITE COPY</h3>
-            <DataSourceBadge source="live" />
-            <span className="text-xs text-muted-foreground">Supabase · site_copy</span>
+            <DataSourceBadge source="live" sourceLabel="Live data from Supabase (site_copy)" />
+            <span className="text-xs text-muted-foreground">Live site copy data</span>
           </div>
           <div className="flex items-center gap-3">
             <CopySyncStatusReadout

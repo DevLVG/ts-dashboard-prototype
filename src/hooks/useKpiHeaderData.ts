@@ -23,7 +23,7 @@ import {
   prorateBudget, type Win,
 } from "@/data/alignment";
 import { useBudgetMonthly, monthKey } from "@/data/liveData";
-import { pctChange } from "@/lib/format";
+import { comparePct } from "@/lib/format";
 
 export type KpiKey = "revenue" | "grossMargin" | "ebitda";
 
@@ -105,7 +105,10 @@ const buildMetric = (
 ): KpiHeaderMetric => {
   const comparison = comparisonMode === "BUDGET" ? budget : py;
   const deltaAbs = actual === null || comparison === null ? null : actual - comparison;
-  const deltaPct = actual === null || comparison === null ? null : pctChange(actual, comparison);
+  // comparePct (not pctChange): 2026-08-04, owner-audit #7 — nulls out a
+  // sign-flip (loss-to-profit swing) or near-zero base instead of dividing
+  // by it into a technically-correct but misleading large percentage.
+  const deltaPct = actual === null || comparison === null ? null : comparePct(actual, comparison);
   return {
     key,
     label,
@@ -189,10 +192,29 @@ export const useKpiHeaderData = (): KpiHeaderData => {
         buildMetric("ebitda", "EBITDA (reported)", noActualData ? null : recActual.reportedEbitda, noPriorData ? null : (recPrior?.reportedEbitda ?? 0), null, comparisonMode, EBITDA_REPORTED_BUDGET_NA, pyNaReason),
       ];
     }
+    // Costs-unbooked honesty gate (2026-08-04, owner-audit #3/#4): a window
+    // can have SOME data (e.g. revenue live) while a section the subtotal
+    // depends on has zero posted rows — `hasGrossMargin`/`hasEbitdaReported`
+    // (data/alignment.ts) are false in that case, so the headline circle
+    // reads "—" instead of silently summing an unbooked 0 into a fabricated
+    // positive EBITDA. Mirrors the identical gate now applied to the P&L
+    // table (PerformanceAnalysis.tsx).
+    const costsUnbookedReason = `Costs not fully posted yet for ${windowName} — figure not yet comparable.`;
     return [
       buildMetric("revenue", "Revenue", noActualData ? null : actual.revenue, noPriorData ? null : prior.revenue, budget?.revenue ?? null, comparisonMode, budgetNaReason, pyNaReason),
-      buildMetric("grossMargin", "Gross Margin", noActualData ? null : actual.grossMargin, noPriorData ? null : prior.grossMargin, budget ? budget.revenue + budget.cogs : null, comparisonMode, budgetNaReason, pyNaReason),
-      buildMetric("ebitda", "EBITDA (reported)", noActualData ? null : actual.ebitdaReported, noPriorData ? null : prior.ebitdaReported, null, comparisonMode, EBITDA_REPORTED_BUDGET_NA, pyNaReason),
+      buildMetric(
+        "grossMargin", "Gross Margin",
+        noActualData || !actual.hasGrossMargin ? null : actual.grossMargin,
+        noPriorData || !prior.hasGrossMargin ? null : prior.grossMargin,
+        budget ? budget.revenue + budget.cogs : null,
+        comparisonMode, budgetNaReason, noPriorData ? pyNaReason : (!prior.hasGrossMargin ? costsUnbookedReason : pyNaReason),
+      ),
+      buildMetric(
+        "ebitda", "EBITDA (reported)",
+        noActualData || !actual.hasEbitdaReported ? null : actual.ebitdaReported,
+        noPriorData || !prior.hasEbitdaReported ? null : prior.ebitdaReported,
+        null, comparisonMode, EBITDA_REPORTED_BUDGET_NA, noPriorData ? pyNaReason : (!prior.hasEbitdaReported ? costsUnbookedReason : pyNaReason),
+      ),
     ];
   }, [scope, recActual, recPrior, recBudgetRevenue, actual, prior, budget, comparisonMode, budgetNaReason, pyNaReason, EBITDA_REPORTED_BUDGET_NA, noActualData, noPriorData]);
 

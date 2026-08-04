@@ -120,12 +120,20 @@ export const CashFlowTable = ({
                   <tr
                     className={`border-b border-border/10 ${r.subtotal ? "border-t-2 border-t-border" : ""} ${r.emphasis ? "font-semibold" : ""} ${isSep ? "border-t border-t-border/40" : ""}`}
                   >
-                    <td className="py-1.5 pr-3">
+                    {/* owner-audit #11 (2026-08-04): 16x16 chevron tap target
+                        with the label outside it — see PerformanceAnalysis.tsx
+                        for the identical systemic fix (whole cell shares the
+                        toggle, button keeps its own stopPropagation'd handler
+                        so it isn't double-fired). */}
+                    <td
+                      className={`py-1.5 pr-3 ${r.expandable ? "cursor-pointer select-none" : ""}`}
+                      onClick={r.expandable ? () => toggle(r.key) : undefined}
+                    >
                       <span style={{ paddingLeft: `${r.indent * 18}px` }} className="inline-flex items-start gap-1.5">
                         {r.expandable ? (
                           <button
                             type="button"
-                            onClick={() => toggle(r.key)}
+                            onClick={(e) => { e.stopPropagation(); toggle(r.key); }}
                             className="inline-flex items-center justify-center h-4 w-4 rounded hover:bg-muted/60 text-muted-foreground shrink-0 mt-0.5"
                           >
                             {expanded.has(r.key) ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -138,7 +146,11 @@ export const CashFlowTable = ({
                             {r.explainer && (
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <Info className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" aria-hidden />
+                                  <Info
+                                    className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0"
+                                    aria-hidden
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
                                 </TooltipTrigger>
                                 <TooltipContent side="right" className="max-w-xs text-xs">{r.explainer}</TooltipContent>
                               </Tooltip>

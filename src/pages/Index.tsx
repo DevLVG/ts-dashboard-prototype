@@ -32,14 +32,6 @@ const Index = () => {
   const { session } = useAuth();
   const role = resolveRole(session?.user?.email);
   const { setLastComplete } = useAlignment();
-  const { data: basisData } = useBasisRows();
-
-  // Derive the last complete close from the live rows (rolls forward at each
-  // month-end automatically — never hardcoded).
-  useEffect(() => {
-    const k = lastCompleteFromBasis(basisData?.rows);
-    if (k) setLastComplete(k);
-  }, [basisData, setLastComplete]);
 
   const getCurrentPageFromPath = (): PageType => {
     const path = location.pathname.slice(1);
@@ -49,6 +41,32 @@ const Index = () => {
     return "overview";
   };
   const currentPage = getCurrentPageFromPath();
+
+  // Fetch-on-demand (2026-08-04, owner-audit #19/#9): this shell used to call
+  // useBasisRows() unconditionally on EVERY route, firing a 5000+ row
+  // paginated v_pnl_basis fetch even on pages with no P&L content at all
+  // (Catalog, Media, Copy, Competitions, Instructors, Slot Priority, Payments,
+  // Treasury, Balance Sheet) — verified none of those pages' components read
+  // `useAlignment()`'s `lastComplete` (Balance Sheet's own header comment says
+  // so explicitly: it deliberately doesn't use the shared window chrome; the
+  // others fetch their own data independently). ONLY `performance`/`cash`
+  // (via WindowPicker) — and `analysis`/`overview`, reachable only via a
+  // client-side redirect to `performance` today, kept here for safety — need
+  // `lastComplete` seeded into AlignmentContext. Restricting the fetch to
+  // those pages removes 5 unnecessary concurrent Supabase requests from every
+  // other route, which is very likely what was starving Balance Sheet's own
+  // useBalanceSheet() pagination into never resolving on a narrower/slower
+  // connection (owner-audit #9, "isLoading never flips to false on mobile").
+  const needsBasisRows = currentPage === "performance" || currentPage === "cash" || currentPage === "analysis" || currentPage === "overview";
+  const { data: basisData } = useBasisRows(needsBasisRows);
+
+  // Derive the last complete close from the live rows (rolls forward at each
+  // month-end automatically — never hardcoded).
+  useEffect(() => {
+    if (!needsBasisRows) return;
+    const k = lastCompleteFromBasis(basisData?.rows);
+    if (k) setLastComplete(k);
+  }, [basisData, setLastComplete, needsBasisRows]);
 
   const renderContent = () => {
     switch (currentPage) {

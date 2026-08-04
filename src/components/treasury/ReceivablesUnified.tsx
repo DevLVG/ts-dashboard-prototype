@@ -80,7 +80,8 @@ const CurrentBook = () => {
     <div className="space-y-6">
       <AgingExplodable
         title="RECEIVABLES AGING"
-        subtitle="Supabase · ar_aging_v2 · SAR"
+        subtitle="Live receivables data · SAR"
+        sourceLabel="Live data from Supabase (ar_aging_v2)"
         rows={explodableRows}
         partyLabel="Customer"
         refLabel="Invoice"
@@ -125,10 +126,10 @@ const LegacyPool = () => {
         <span>
           <strong>Legacy — frozen, flagged only.</strong> These are the old 2020-2021 invoices. No reminder
           actions run against this pool — it is deliberately excluded from the dunning ladder. The
-          Treasury-Decision-Rules working estimate is <strong>SAR 170,000-204,000</strong> still outstanding
-          <ProposedBadge className="ml-1.5" detail="§A.6 legacy pool estimate, not yet reconciled." />, which
+          internal Treasury Decision-Rules working estimate is <strong>SAR 170,000-204,000</strong> still outstanding
+          <ProposedBadge className="ml-1.5" detail="Legacy pool estimate, not yet reconciled." />, which
           does not match what Qoyod's own status shows below — reconciling that gap, then deciding
-          pursue-vs-write-off per debtor, is a <strong>Marcello + Arwa</strong> management decision (§A.6), not
+          pursue-vs-write-off per debtor, is a <strong>Marcello + Arwa</strong> management decision, not
           something this panel automates.
         </span>
       </div>
@@ -164,7 +165,7 @@ const LegacyPool = () => {
                   <TooltipContent side="top" className="max-w-xs text-xs">
                     Qoyod marks almost all of this cohort "Paid" — this figure is near-zero even though the
                     business estimates SAR 170,000-204,000 is still outstanding. That contradiction is exactly
-                    what needs reconciling (§A.6) before treating either number as final.
+                    what needs reconciling before treating either number as final.
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -173,18 +174,18 @@ const LegacyPool = () => {
             </Card>
             <Card className="p-4 border-border">
               <div className="text-xs uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5">
-                Business working estimate <ProposedBadge detail="§A.6, not yet reconciled to Qoyod." />
+                Business working estimate <ProposedBadge detail="Not yet reconciled to Qoyod." />
               </div>
               <div className="mt-1 text-xl font-heading tabular-nums">170,000–204,000</div>
-              <div className="text-xs text-muted-foreground">Treasury-Decision-Rules §A.6</div>
+              <div className="text-xs text-muted-foreground">Internal Treasury Decision-Rules estimate</div>
             </Card>
           </div>
 
           <Card className="p-6 shadow-sm animate-fade-in">
             <div className="flex items-center gap-3 mb-1 flex-wrap">
               <h3 className="text-xl font-heading tracking-wide">LEGACY — PER-DEBTOR WORKSHEET</h3>
-              <DataSourceBadge source="live" />
-              <span className="text-xs text-muted-foreground">Supabase · v_legacy_receivables · SAR</span>
+              <DataSourceBadge source="live" sourceLabel="Live data from Supabase (v_legacy_receivables)" />
+              <span className="text-xs text-muted-foreground">Live legacy receivables data · SAR</span>
             </div>
             <p className="text-sm text-muted-foreground mb-4 inline-flex items-start gap-1.5">
               <Archive className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
@@ -274,8 +275,8 @@ export const ReceivablesUnified = () => {
       {tab === "current" && (
         <p className="text-xs text-muted-foreground flex items-start gap-1.5">
           <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-400" />
-          Ageing buckets follow the Treasury Decision-Rules draft (§A.1, standard/low-risk); the reminder
-          ladder above is Marcello's own cadence (2026-08-03), which supersedes the draft's §A.3 timings.
+          Ageing buckets follow the internal Treasury Decision-Rules draft (standard/low-risk profile); the
+          reminder ladder above is Marcello's own cadence (2026-08-03), which supersedes the draft's timings.
         </p>
       )}
     </div>

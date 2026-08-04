@@ -29,6 +29,7 @@ import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
 import { resolveRole, canAccessPage, ROLE_LABELS } from "@/lib/roles";
 import { cn } from "@/lib/utils";
+import { ScrollHint } from "@/components/chrome/AlignmentChrome";
 import tsLogo from "@/assets/ts-logo.png";
 
 interface DashboardNavProps {
@@ -69,7 +70,10 @@ const ALL_PAGES: NavPage[] = [
   { id: "copy", label: "Site Copy", icon: Languages, path: "/copy" },
   { id: "competitions", label: "Competitions", icon: Trophy, path: "/competitions" },
   { id: "instructors", label: "Instructors", icon: Users, path: "/instructors" },
-  { id: "slot-priority", label: "Calendario slot", icon: CalendarClock, path: "/slot-priority" },
+  // Owner-audit #1/#15 (2026-08-04): label was left in Italian ("Calendario
+  // slot") while every sibling nav entry above is English — the one stray
+  // non-English string in the whole product.
+  { id: "slot-priority", label: "Slot Calendar", icon: CalendarClock, path: "/slot-priority" },
 ];
 
 // Top nav IA (Marcello, live review #2, 2026-08-03): Performance (Economics
@@ -131,6 +135,17 @@ export const DashboardNav = ({ currentPage }: DashboardNavProps) => {
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const openTimerRef = useRef<number | null>(null);
   const closeTimerRef = useRef<number | null>(null);
+
+  // Owner-audit #10 (2026-08-04): the mobile nav strip is a horizontally-
+  // scrollable row with most of its content off-screen and no cue that more
+  // exists — the CEO's own active tab was itself clipped at the viewport
+  // edge on every page. Auto-scroll the active pill into view whenever the
+  // route changes, so the current page is never the one that's cut off.
+  const mobileNavRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const active = mobileNavRef.current?.querySelector('[data-current-page="true"]');
+    active?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, [currentPage]);
 
   const clearTimers = () => {
     if (openTimerRef.current !== null) {
@@ -323,31 +338,34 @@ export const DashboardNav = ({ currentPage }: DashboardNavProps) => {
             </div>
           </div>
         </div>
-        <div className="md:hidden flex overflow-x-auto gap-3 pb-2 -mx-1 px-1">
-          {groupedNav.map((group, index) => (
-            <div key={group.id} className="flex shrink-0 items-center gap-1.5">
-              {index > 0 && <span aria-hidden="true" className="mx-0.5 h-6 w-px shrink-0 bg-border" />}
-              <span className="whitespace-nowrap pr-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                {group.label}
-              </span>
-              {group.pages.map((page) => (
-                <NavLink key={page.id} to={page.path}>
-                  <Button
-                    variant={currentPage === page.id ? "default" : "outline"}
-                    size="sm"
-                    className="gap-2 whitespace-nowrap"
-                  >
-                    <page.icon className="h-4 w-4" />
-                    {page.label}
-                  </Button>
-                </NavLink>
-              ))}
-            </div>
-          ))}
-          <Button variant="outline" size="sm" className="shrink-0 gap-2 whitespace-nowrap" onClick={() => signOut()}>
-            <LogOut className="h-4 w-4" />
-            Sign out
-          </Button>
+        <div ref={mobileNavRef} className="md:hidden">
+          <ScrollHint className="flex gap-3 pb-2 -mx-1 px-1">
+            {groupedNav.map((group, index) => (
+              <div key={group.id} className="flex shrink-0 items-center gap-1.5">
+                {index > 0 && <span aria-hidden="true" className="mx-0.5 h-6 w-px shrink-0 bg-border" />}
+                <span className="whitespace-nowrap pr-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  {group.label}
+                </span>
+                {group.pages.map((page) => (
+                  <NavLink key={page.id} to={page.path}>
+                    <Button
+                      variant={currentPage === page.id ? "default" : "outline"}
+                      size="sm"
+                      className="gap-2 whitespace-nowrap"
+                      data-current-page={currentPage === page.id ? "true" : undefined}
+                    >
+                      <page.icon className="h-4 w-4" />
+                      {page.label}
+                    </Button>
+                  </NavLink>
+                ))}
+              </div>
+            ))}
+            <Button variant="outline" size="sm" className="shrink-0 gap-2 whitespace-nowrap" onClick={() => signOut()}>
+              <LogOut className="h-4 w-4" />
+              Sign out
+            </Button>
+          </ScrollHint>
         </div>
       </div>
     </nav>

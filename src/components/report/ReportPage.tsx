@@ -46,16 +46,21 @@ const toneClass = (delta: number | null): string =>
   delta === null || Math.abs(delta) < 0.5 ? "text-muted-foreground" : delta > 0 ? "text-success" : "text-destructive";
 
 const KpiTile = ({ label, row, comparisonLabel }: { label: string; row: MacroRow; comparisonLabel: string }) => {
-  const deltaAbs = row.comparison === null ? null : row.actual - row.comparison;
-  const deltaPct = row.comparison === null ? null : pctChange(row.actual, row.comparison);
+  // owner-audit #14 (2026-08-04): row.actual can now be null (costs not yet
+  // posted for an open window) — the delta/tile must go honestly blank, not
+  // silently treat the missing figure as a comparable number.
+  const deltaAbs = row.actual === null || row.comparison === null ? null : row.actual - row.comparison;
+  const deltaPct = row.actual === null || row.comparison === null ? null : pctChange(row.actual, row.comparison);
   return (
     <div className="flex flex-col items-center gap-1 rounded-xl border border-border bg-background/40 p-4 text-center">
       <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className="font-heading text-2xl tracking-tight tabular-nums">{fmtSAR(row.actual)}</p>
+      <p className="font-heading text-2xl tracking-tight tabular-nums">{fmtOrDash(row.actual)}</p>
       <p className={`text-xs font-semibold ${toneClass(deltaAbs)}`}>
         {deltaAbs === null ? "—" : `${fmtDeltaSAR(deltaAbs)}${deltaPct !== null ? ` · ${fmtDeltaPct(deltaPct)}` : ""}`}
       </p>
-      <p className="text-[10px] text-muted-foreground">vs {comparisonLabel}</p>
+      <p className="text-[10px] text-muted-foreground">
+        {row.actual === null ? "Not yet posted" : `vs ${comparisonLabel}`}
+      </p>
     </div>
   );
 };

@@ -34,14 +34,17 @@ export interface ExplodableRow {
 
 export interface AgingExplodableProps {
   title: string;
+  /** Owner-audit #16 (2026-08-04): plain-language now — the raw table name
+   * moved to `sourceLabel` (the LIVE badge's tooltip only). */
   subtitle: string;
+  sourceLabel: string;
   rows: ExplodableRow[];
   partyLabel: string; // "Customer" | "Vendor"
   refLabel: string; // "Invoice" | "Bill"
   className?: string;
 }
 
-export const AgingExplodable = ({ title, subtitle, rows, partyLabel, refLabel, className }: AgingExplodableProps) => {
+export const AgingExplodable = ({ title, subtitle, sourceLabel, rows, partyLabel, refLabel, className }: AgingExplodableProps) => {
   const [open, setOpen] = useState<Set<AgingBucket>>(new Set());
   const toggle = (b: AgingBucket) =>
     setOpen((prev) => {
@@ -59,7 +62,7 @@ export const AgingExplodable = ({ title, subtitle, rows, partyLabel, refLabel, c
     <Card className={`p-6 shadow-sm animate-fade-in ${className ?? ""}`}>
       <div className="flex items-center gap-3 mb-1 flex-wrap">
         <h3 className="text-xl font-heading tracking-wide">{title}</h3>
-        <DataSourceBadge source="live" />
+        <DataSourceBadge source="live" sourceLabel={sourceLabel} />
         <span className="text-xs text-muted-foreground">{subtitle}</span>
       </div>
       <p className="text-sm text-muted-foreground mb-4">

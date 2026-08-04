@@ -66,8 +66,8 @@ export const InstructorsAdmin = () => {
         <div className="flex items-center gap-3 mb-1 flex-wrap justify-between">
           <div className="flex items-center gap-3">
             <h3 className="text-xl font-heading tracking-wide">INSTRUCTORS</h3>
-            <DataSourceBadge source="live" />
-            <span className="text-xs text-muted-foreground">Supabase · cal_instructors</span>
+            <DataSourceBadge source="live" sourceLabel="Live data from Supabase (cal_instructors)" />
+            <span className="text-xs text-muted-foreground">Live instructor data</span>
           </div>
           <Button size="sm" className="gap-1.5" onClick={() => setSyncOpen(true)}>
             <RefreshCw className="h-4 w-4" /> Sync to site

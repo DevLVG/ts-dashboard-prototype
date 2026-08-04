@@ -28,8 +28,9 @@ export const downloadReportCsvs = (snapshot: ReportSnapshot): void => {
     meta: { ...periodMeta, statement: `Economics — ${snapshot.period.label}`, structure: `vs ${snapshot.comparisonLabel}` },
     columns: ["Line item", "This window", snapshot.comparisonLabel, "Delta", "Delta %"],
     rows: snapshot.macroRows.map((r) => {
-      const deltaAbs = r.comparison === null ? null : r.actual - r.comparison;
-      const deltaPct = r.comparison === null ? null : pctChange(r.actual, r.comparison);
+      // owner-audit #14 (2026-08-04): r.actual can be null (not yet posted).
+      const deltaAbs = r.actual === null || r.comparison === null ? null : r.actual - r.comparison;
+      const deltaPct = r.actual === null || r.comparison === null ? null : pctChange(r.actual, r.comparison);
       return [r.label, r.actual, r.comparison, deltaAbs, deltaPct];
     }),
     notes: snapshot.budgetNaNote ? [snapshot.budgetNaNote] : undefined,

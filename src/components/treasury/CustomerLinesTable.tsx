@@ -141,19 +141,28 @@ export const CustomerLinesTable = ({ rows }: { rows: ArAgingRow[] }) => {
       kind: "customer", entityRef: agg.customerId, to: email, subject: filled.subject, body: filled.body,
       sendEnabled, testRecipient,
     });
-    record.mutate(
-      {
+    // Owner-audit #13 (2026-08-04): the modal previously never closed and
+    // never showed a persisted success state after a successful write —
+    // `record.mutate` was fire-and-forget, so `confirmSend` (and this
+    // button's onClick) "completed" before the DB write actually resolved,
+    // and even once it DID resolve the dialog just sat there re-enabled,
+    // inviting a genuine second click that wrote a duplicate audit-log row.
+    // Now: await the write, close the dialog on success (the toast IS the
+    // confirmation), and leave the dialog open with an error toast on
+    // failure so the user can see what happened and retry deliberately.
+    try {
+      await record.mutateAsync({
         domain: "DUNNING_CUSTOMER", entity_ref: agg.customerId, action: `stage${stage}_sent`, actor: actorEmail,
         payload: {
           customer_name: agg.customerName, amount: agg.amount, invoice_count: agg.invoiceCount,
           template_label: CUSTOMER_TEMPLATE_LABEL[stage], recipient_email: email, send_result: result,
         },
-      },
-      {
-        onSuccess: () => toast({ title: `${CUSTOMER_TEMPLATE_LABEL[stage]} recorded`, description: result.detail }),
-        onError: (err) => toast({ title: "Could not record decision", description: String(err), variant: "destructive" }),
-      },
-    );
+      });
+      toast({ title: `${CUSTOMER_TEMPLATE_LABEL[stage]} recorded`, description: result.detail });
+      setSendTarget(null);
+    } catch (err) {
+      toast({ title: "Could not record decision", description: String(err), variant: "destructive" });
+    }
   };
 
   const sendTest = async () => {
@@ -175,17 +184,21 @@ export const CustomerLinesTable = ({ rows }: { rows: ArAgingRow[] }) => {
     setNoteTarget({ agg, kind });
   };
 
-  const confirmNote = () => {
+  const confirmNote = async () => {
     if (!noteTarget) return;
     const { agg, kind } = noteTarget;
-    record.mutate(
-      { domain: "DUNNING_CUSTOMER", entity_ref: agg.customerId, action: kind, actor: actorEmail, reason: note || undefined, payload: { customer_name: agg.customerName, amount: agg.amount } },
-      {
-        onSuccess: () => toast({ title: kind === "resolved" ? "Marked resolved" : "Escalated to CEO", description: "Logged to the audit trail." }),
-        onError: (err) => toast({ title: "Could not record decision", description: String(err), variant: "destructive" }),
-      },
-    );
-    setNoteTarget(null);
+    // Same fix as confirmSend above (owner-audit #13): await + close on
+    // success instead of a fire-and-forget mutate that leaves the dialog
+    // open and re-clickable after the write already succeeded.
+    try {
+      await record.mutateAsync({
+        domain: "DUNNING_CUSTOMER", entity_ref: agg.customerId, action: kind, actor: actorEmail, reason: note || undefined, payload: { customer_name: agg.customerName, amount: agg.amount },
+      });
+      toast({ title: kind === "resolved" ? "Marked resolved" : "Escalated to CEO", description: "Logged to the audit trail." });
+      setNoteTarget(null);
+    } catch (err) {
+      toast({ title: "Could not record decision", description: String(err), variant: "destructive" });
+    }
   };
 
   const ceoAttention = aggregates.filter((a) => isEscalationDue(ladderStates.get(a.customerId) ?? { stage: 0, stage1At: null, stage2At: null, stage3At: null, lastActionAt: null, lastReason: null, escalatedManually: false, escalatedAt: null, resolved: false, resolvedAt: null }, cfg, now));
@@ -194,8 +207,8 @@ export const CustomerLinesTable = ({ rows }: { rows: ArAgingRow[] }) => {
     <Card className="p-6 shadow-sm animate-fade-in">
       <div className="flex items-center gap-3 mb-1 flex-wrap">
         <h3 className="text-xl font-heading tracking-wide">CUSTOMER LINES — DEBTORS</h3>
-        <DataSourceBadge source="live" />
-        <span className="text-xs text-muted-foreground">Supabase · ar_aging_v2 + treasury_action_log · SAR</span>
+        <DataSourceBadge source="live" sourceLabel="Live data from Supabase (ar_aging_v2 + treasury_action_log)" />
+        <span className="text-xs text-muted-foreground">Live receivables data · SAR</span>
       </div>
       <p className="text-sm text-muted-foreground mb-4">
         {aggregates.length} customers, {fmt(totalBook)} SAR open. Reminder ladder per Marcello's cadence — 1st

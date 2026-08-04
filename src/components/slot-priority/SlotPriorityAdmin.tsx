@@ -29,7 +29,11 @@ export const SlotPriorityAdmin = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-heading tracking-wide">CALENDARIO SLOT</h2>
+        {/* Owner-audit #1/#15 (2026-08-04): was "CALENDARIO SLOT" — the one
+            stray Italian string in an otherwise all-English product. English
+            uppercase form matches the sibling CMS pages' own convention
+            (PRODUCT CATALOGUE / MEDIA LIBRARY / SITE COPY). */}
+        <h2 className="text-2xl font-heading tracking-wide">SLOT CALENDAR</h2>
         <p className="text-sm text-muted-foreground mt-1">
           Seasonal calendars, date-specific exceptions, and priority claims — the three layers behind every
           bookable Horse School slot.

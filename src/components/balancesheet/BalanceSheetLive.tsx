@@ -102,10 +102,21 @@ const ExpandRow = ({
   const good = deltaAbs === null ? null : deltaAbs >= 0;
   return (
     <tr className={`border-b border-border/10 ${emphasis ? "font-semibold border-t border-t-border" : ""}`}>
-      <td className="py-1.5 pr-3">
+      {/* owner-audit #11 (2026-08-04): 16x16 chevron tap target with the
+          label outside it — same systemic fix as PerformanceAnalysis.tsx /
+          CashFlowTable.tsx (whole cell shares onToggle; button keeps its own
+          stopPropagation'd handler). */}
+      <td
+        className={`py-1.5 pr-3 ${onToggle ? "cursor-pointer select-none" : ""}`}
+        onClick={onToggle}
+      >
         <span style={{ paddingLeft: `${indent * 18}px` }} className="inline-flex items-center gap-1.5">
           {onToggle ? (
-            <button type="button" onClick={onToggle} className="inline-flex items-center justify-center h-4 w-4 rounded hover:bg-muted/60 text-muted-foreground shrink-0">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onToggle(); }}
+              className="inline-flex items-center justify-center h-4 w-4 rounded hover:bg-muted/60 text-muted-foreground shrink-0"
+            >
               {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
             </button>
           ) : indent > 0 ? <span className="inline-block h-4 w-4 shrink-0" /> : null}

@@ -62,12 +62,13 @@ export const PayablesDesk = () => {
         <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
         <span>
           AP mirror lags: vendor bills feed is behind and the bank feed is not yet live — treat payables as
-          indicative until the AP/bank sync is brought current (Treasury Decision-Rules §C).
+          indicative until the AP/bank sync is brought current.
         </span>
       </div>
       <AgingExplodable
         title="PAYABLES AGING"
-        subtitle="Supabase · ap_aging_v2 · SAR"
+        subtitle="Live payables data · SAR"
+        sourceLabel="Live data from Supabase (ap_aging_v2)"
         rows={explodableRows}
         partyLabel="Vendor"
         refLabel="Bill"

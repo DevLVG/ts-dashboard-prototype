@@ -71,7 +71,7 @@ import {
 } from "@/data/alignment";
 import { useBudgetMonthly, monthKeyLabel } from "@/data/liveData";
 import { MOA_PL_LEAVES, buFamilyName } from "@/data/moaTree";
-import { fmtDeltaSAR, fmtDeltaPct, fmtOrDash, pctChange } from "@/lib/format";
+import { fmtDeltaSAR, fmtDeltaPct, fmtOrDash, comparePct } from "@/lib/format";
 
 // ---------------------------------------------------------------- helpers
 
@@ -108,7 +108,11 @@ type PLSection = (typeof PL_SECTIONS)[number];
 interface LeafNode { moaCode: string; leafName: string; total: number }
 interface ClusterNode { clusterCode: string; clusterName: string; total: number; leaves: LeafNode[] }
 interface FamilyNode { bu: string; buName: string; total: number; clusters: ClusterNode[] }
-interface SectionTree { total: number; families: FamilyNode[] }
+// `hasData`: true only when >=1 warehouse row actually landed in this
+// section for the window (2026-08-04, owner-audit #3/#4 — "absent ≠ zero").
+// A section with zero matching rows must render "—", never a fabricated 0
+// with a meaningless delta — same rule Cash Flow already applies.
+interface SectionTree { total: number; hasData: boolean; families: FamilyNode[] }
 
 /** Builds the section -> family (BU) -> cluster -> leaf tree for one
  * window/scope. The skeleton (every family/cluster/leaf `data/moaTree.ts`
@@ -127,7 +131,7 @@ const buildTree = (
   const leafByCode = new Map<string, LeafNode>();
   const familyByKey = new Map<string, FamilyNode>();
   const clusterByKey = new Map<string, ClusterNode>();
-  for (const s of PL_SECTIONS) tree.set(s, { total: 0, families: [] });
+  for (const s of PL_SECTIONS) tree.set(s, { total: 0, hasData: false, families: [] });
   for (const def of MOA_PL_LEAVES) {
     const section = tree.get(def.plSection as PLSection);
     if (!section) continue; // defensive: moaTree.ts only ever emits the 8 PL sections above
@@ -163,7 +167,10 @@ const buildTree = (
       // it silently did in the pre-fix build (no regression), not corrupt a
       // total — leaf/cluster/family/section sums stay internally consistent
       // either way because every total is DERIVED from the leaves below it.
-      if (leaf) leaf.total += r.amount_sar;
+      if (leaf) {
+        leaf.total += r.amount_sar;
+        tree.get(r.section as PLSection)!.hasData = true;
+      }
     }
   }
   for (const section of tree.values()) {
@@ -190,17 +197,24 @@ const scaleTree = (tree: Map<PLSection, SectionTree>, fraction: number): Map<PLS
         leaves: c.leaves.map((l) => ({ ...l, total: l.total * fraction })),
       })),
     }));
-    out.set(section, { total: node.total * fraction, families });
+    out.set(section, { total: node.total * fraction, hasData: node.hasData, families });
   }
   return out;
 };
 
 const sectionTotal = (tree: Map<PLSection, SectionTree>, s: PLSection): number => tree.get(s)?.total ?? 0;
+const sectionHasData = (tree: Map<PLSection, SectionTree>, s: PLSection): boolean => tree.get(s)?.hasData ?? false;
 
 /** The 6 derived subtotals, computed FROM the tree's section totals — never
- * from a separate aggregation path, so the table can't disagree with itself. */
+ * from a separate aggregation path, so the table can't disagree with itself.
+ * Each also carries a `hasX` coverage flag (2026-08-04, owner-audit #3/#4):
+ * a subtotal is only a real, comparable number when EVERY section it
+ * depends on has at least one posted row — a window with revenue live but
+ * costs unbooked must never let those unbooked 0s sum into a positive
+ * EBITDA. */
 interface Subtotals {
   grossMargin: number; opexTotal: number; ebitda5: number; ebitdaReported: number; ebit: number; netResult: number;
+  hasGrossMargin: boolean; hasOpexTotal: boolean; hasEbitda5: boolean; hasEbitdaReported: boolean; hasEbit: boolean; hasNetResult: boolean;
 }
 const deriveSubtotals = (tree: Map<PLSection, SectionTree>): Subtotals => {
   const revenue = sectionTotal(tree, "Revenue");
@@ -214,7 +228,15 @@ const deriveSubtotals = (tree: Map<PLSection, SectionTree>): Subtotals => {
   const ebit = ebitdaReported + da;
   const nonOp = sectionTotal(tree, "NON-OP");
   const netResult = ebit + nonOp;
-  return { grossMargin, opexTotal, ebitda5, ebitdaReported, ebit, netResult };
+
+  const hasGrossMargin = sectionHasData(tree, "Revenue") && sectionHasData(tree, "COGS");
+  const hasOpexTotal = sectionHasData(tree, "OPEX-GA") && sectionHasData(tree, "OPEX-MS") && sectionHasData(tree, "OPEX-People");
+  const hasEbitda5 = hasGrossMargin && hasOpexTotal;
+  const hasEbitdaReported = hasEbitda5 && sectionHasData(tree, "Project-Costs");
+  const hasEbit = hasEbitdaReported && sectionHasData(tree, "D&A");
+  const hasNetResult = hasEbit && sectionHasData(tree, "NON-OP");
+
+  return { grossMargin, opexTotal, ebitda5, ebitdaReported, ebit, netResult, hasGrossMargin, hasOpexTotal, hasEbitda5, hasEbitdaReported, hasEbit, hasNetResult };
 };
 
 /** Budget value for a macro row key — null where budget_2026 structurally
@@ -272,6 +294,22 @@ const macroValue = (key: string, tree: Map<PLSection, SectionTree>, sub: Subtota
   }
 };
 
+/** Whether a macro row's value is backed by at least one posted warehouse
+ * row (2026-08-04, owner-audit #3/#4) — false means "not yet booked", so the
+ * row must render "—", not the fabricated 0 `macroValue` would otherwise
+ * return for an un-posted section. */
+const macroHasData = (key: string, tree: Map<PLSection, SectionTree>, sub: Subtotals): boolean => {
+  switch (key) {
+    case "GrossMargin": return sub.hasGrossMargin;
+    case "OpexTotal": return sub.hasOpexTotal;
+    case "EBITDA5": return sub.hasEbitda5;
+    case "EBITDAReported": return sub.hasEbitdaReported;
+    case "EBIT": return sub.hasEbit;
+    case "NetResult": return sub.hasNetResult;
+    default: return sectionHasData(tree, key as PLSection);
+  }
+};
+
 // ------------------------------------------------------------- component
 
 export const PerformanceAnalysis = () => {
@@ -321,6 +359,17 @@ export const PerformanceAnalysis = () => {
     ? `No data posted yet for ${windowName} — every line below shows "—" until this period is fed.`
     : null;
 
+  // Partial-window honesty note (2026-08-04, owner-audit #3/#4): the window
+  // itself has SOME data (revenue live), but at least one cost section
+  // hasn't been posted yet, so EBITDA/EBITDA (reported)/EBIT/Net income are
+  // not yet computable — mirrors Cash Flow's equivalent banner so the same
+  // "figures aren't final for an open period" signal appears in both places.
+  const partialDataNote = useMemo(() => {
+    if (noActualData || isBudgetMode) return null;
+    if (actualSub.hasEbitdaReported) return null;
+    return `Some cost lines are not fully posted yet for ${windowName} — EBITDA / EBITDA (reported) / EBIT / Net income show "—" until costs are booked (see Data completeness below).`;
+  }, [noActualData, isBudgetMode, actualSub, windowName]);
+
   // ------------------------------------------------------------ row build
   //
   // 4 levels, in exact canonical MoA order (data/moaTree.ts's MOA_PL_LEAVES
@@ -348,8 +397,14 @@ export const PerformanceAnalysis = () => {
     for (const m of MACRO_ROWS) {
       const rawActual = macroValue(m.key, actualTree, actualSub);
       const rawComparison = isBudgetMode ? budgetValueFor(m.key, budgetAgg) : macroValue(m.key, priorTree, priorSub);
-      const actual = noActualData ? null : rawActual;
-      const comparison = isBudgetMode ? rawComparison : (noPriorData ? null : rawComparison);
+      // "Absent ≠ zero" (2026-08-04, owner-audit #3/#4): a row backed by zero
+      // posted warehouse rows renders "—", not a fabricated 0 — whether the
+      // WHOLE window is unfed (noActualData/noPriorData) or just this row's
+      // underlying section/subtotal hasn't been booked yet (macroHasData).
+      const actual = noActualData || !macroHasData(m.key, actualTree, actualSub) ? null : rawActual;
+      const comparison = isBudgetMode
+        ? rawComparison
+        : (noPriorData || !macroHasData(m.key, priorTree, priorSub) ? null : rawComparison);
       const sectionKey = m.section ? `sec:${m.section}` : null;
       // The canonical tree always has >=1 family for every one of the 8 PL
       // sections (moaTree.ts defines leaves for all of them) — so this is
@@ -374,6 +429,12 @@ export const PerformanceAnalysis = () => {
       const section = m.section;
       const curFamilies = actualTree.get(section)!.families;
       const priorFamilies = priorTree.get(section)!.families;
+      // Section-level "absent ≠ zero" gate for every family/cluster/leaf
+      // beneath this macro row — mirrors the macro row's own `macroHasData`
+      // check just above, so a section with zero posted rows shows "—" at
+      // every depth, not just at the top (2026-08-04, owner-audit #3/#4).
+      const curSectionHasData = sectionHasData(actualTree, section);
+      const priorSectionHasData = sectionHasData(priorTree, section);
       for (let fi = 0; fi < curFamilies.length; fi++) {
         const famA = curFamilies[fi];
         const famP = priorFamilies[fi]; // identical shape by construction — same bu, same index
@@ -383,8 +444,8 @@ export const PerformanceAnalysis = () => {
           indent: 1,
           keyPath: famExpandKey,
           label: famA.buName,
-          actual: noActualData ? null : famA.total,
-          comparison: noPriorData ? null : famP.total,
+          actual: noActualData || !curSectionHasData ? null : famA.total,
+          comparison: noPriorData || !priorSectionHasData ? null : famP.total,
           expandable: canExpandFam,
           expanded: expanded.has(famExpandKey),
           onToggle: canExpandFam ? () => toggle(famExpandKey) : undefined,
@@ -399,8 +460,8 @@ export const PerformanceAnalysis = () => {
             indent: 2,
             keyPath: cluExpandKey,
             label: cluA.clusterName,
-            actual: noActualData ? null : cluA.total,
-            comparison: noPriorData ? null : cluP.total,
+            actual: noActualData || !curSectionHasData ? null : cluA.total,
+            comparison: noPriorData || !priorSectionHasData ? null : cluP.total,
             expandable: canExpandClu,
             expanded: expanded.has(cluExpandKey),
             onToggle: canExpandClu ? () => toggle(cluExpandKey) : undefined,
@@ -414,8 +475,8 @@ export const PerformanceAnalysis = () => {
               keyPath: leafA.moaCode,
               label: leafA.leafName,
               codeTag: leafA.moaCode,
-              actual: noActualData ? null : leafA.total,
-              comparison: noPriorData ? null : leafP.total,
+              actual: noActualData || !curSectionHasData ? null : leafA.total,
+              comparison: noPriorData || !priorSectionHasData ? null : leafP.total,
               expandable: false,
               expanded: false,
             });
@@ -485,6 +546,9 @@ export const PerformanceAnalysis = () => {
         {noDataNote && (
           <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">{noDataNote}</p>
         )}
+        {partialDataNote && !noDataNote && (
+          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">{partialDataNote}</p>
+        )}
         {budgetNaNote && (
           <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">{budgetNaNote}</p>
         )}
@@ -514,17 +578,38 @@ export const PerformanceAnalysis = () => {
               <tbody>
                 {tableRows.map((r) => {
                   const deltaAbs = r.actual === null || r.comparison === null ? null : r.actual - r.comparison;
-                  const deltaPct = r.actual === null || r.comparison === null ? null : pctChange(r.actual, r.comparison);
+                  // comparePct (not pctChange): 2026-08-04, owner-audit #7 —
+                  // a comparison base that's negative/near-zero (loss-to-
+                  // profit swing, or a tiny prior-year figure) must render
+                  // "n/m" (shown as "—" via deltaPct===null below), never a
+                  // clean-looking but meaningless +1026.2%-style artifact.
+                  const deltaPct = r.actual === null || r.comparison === null ? null : comparePct(r.actual, r.comparison);
                   const good = deltaAbs === null ? null : deltaAbs >= 0;
                   return (
                     <tr
                       key={r.keyPath}
                       className={`border-b border-border/10 ${r.subtotal ? "border-t-2 border-t-border" : ""} ${r.emphasis ? "font-semibold" : ""}`}
                     >
-                      <td className="py-1.5 pr-3">
+                      {/* owner-audit #11 (2026-08-04): the chevron button's tap
+                          target was 16x16 CSS px with the row label OUTSIDE the
+                          clickable area — below even the WCAG 2.5.8 AA minimum
+                          (24x24px). The whole cell now shares r.onToggle (a
+                          normal "tap the row to expand" mobile gesture works),
+                          the button keeps its own handler too (stopPropagation
+                          guards against the Set-based toggle firing twice and
+                          cancelling itself out) so keyboard/explicit-click
+                          behaviour on the chevron itself is unchanged. */}
+                      <td
+                        className={`py-1.5 pr-3 ${r.onToggle ? "cursor-pointer select-none" : ""}`}
+                        onClick={r.onToggle}
+                      >
                         <span style={{ paddingLeft: `${r.indent * 18}px` }} className="inline-flex items-center gap-1.5">
                           {r.onToggle ? (
-                            <button type="button" onClick={r.onToggle} className="inline-flex items-center justify-center h-4 w-4 rounded hover:bg-muted/60 text-muted-foreground shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); r.onToggle?.(); }}
+                              className="inline-flex items-center justify-center h-4 w-4 rounded hover:bg-muted/60 text-muted-foreground shrink-0"
+                            >
                               {r.expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                             </button>
                           ) : r.indent > 0 ? <span className="inline-block h-4 w-4 shrink-0" /> : null}

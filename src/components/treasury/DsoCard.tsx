@@ -60,19 +60,28 @@ export const DsoCard = ({ className }: { className?: string }) => {
   }, [arTotal, basis, lastComplete]);
 
   const history = useMemo(() => {
-    if (!wcRows || !lastComplete) return { points: [] as { key: string; dso: number }[], monthsAvailable: 0 };
+    if (!wcRows || !lastComplete) return { points: [] as { key: string; dso: number }[], monthsAvailable: 0, excludedNegative: 0 };
     const sorted = [...wcRows]
       .map((r) => ({ key: monthKey(r.period_month), receivables: n(r.receivables) }))
       .filter((r) => r.key <= lastComplete)
       .sort((a, b) => a.key.localeCompare(b.key));
     const last12 = sorted.slice(-12);
+    // Negative-book-value guard (2026-08-04, owner-audit #5): a month whose
+    // v_working_capital_monthly.receivables is negative is on a different,
+    // net basis than "Current DSO"'s always-non-negative ar_aging_v2 figure
+    // (see DsoCard's header comment) — averaging a negative "own DSO" into
+    // days-of-receivables produces a mathematically nonsensical negative
+    // average. Such months are excluded from the average rather than
+    // silently included, and the card discloses the exclusion.
+    let excludedNegative = 0;
     const points = last12
       .map((m) => {
+        if (m.receivables < 0) { excludedNegative += 1; return null; }
         const rev = trailingRevenue(basis, m.key);
         return rev > 0 ? { key: m.key, dso: (m.receivables / rev) * 365 } : null;
       })
       .filter((p): p is { key: string; dso: number } => p !== null);
-    return { points, monthsAvailable: points.length };
+    return { points, monthsAvailable: points.length, excludedNegative };
   }, [wcRows, basis, lastComplete]);
 
   const avgDso = history.points.length > 0
@@ -94,8 +103,8 @@ export const DsoCard = ({ className }: { className?: string }) => {
         <h3 className="text-xl font-heading tracking-wide inline-flex items-center gap-2">
           <Clock3 className="h-5 w-5 text-gold" /> DSO — AVERAGE COLLECTION TIME
         </h3>
-        <DataSourceBadge source="live" />
-        <span className="text-xs text-muted-foreground">Supabase · ar_aging_v2 + v_pnl_basis + v_working_capital_monthly</span>
+        <DataSourceBadge source="live" sourceLabel="Live data from Supabase (ar_aging_v2 + v_pnl_basis + v_working_capital_monthly)" />
+        <span className="text-xs text-muted-foreground">Live receivables + revenue data</span>
       </div>
 
       <p className="text-sm text-muted-foreground mb-4 inline-flex items-start gap-1.5">
@@ -134,13 +143,27 @@ export const DsoCard = ({ className }: { className?: string }) => {
           </div>
 
           <div className="flex flex-col items-center sm:items-start border-t sm:border-t-0 sm:border-l border-border/60 pt-4 sm:pt-0 sm:pl-6">
-            <span className="text-xs uppercase tracking-wider text-muted-foreground">
-              Last-12-months average {history.monthsAvailable < 12 && (
+            <span className="text-xs uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1">
+              Last-12-months average {history.monthsAvailable < 12 - history.excludedNegative && (
                 <span className="text-amber-400">(only {history.monthsAvailable} mo. available)</span>
+              )}
+              {history.excludedNegative > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild><Info className="h-3.5 w-3.5 text-amber-400 cursor-help" /></TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-xs text-xs">
+                    {history.excludedNegative} of the trailing 12 months excluded — v_working_capital_monthly's
+                    receivables book value is negative for those months (a net, not gross, figure), which would
+                    produce a mathematically meaningless negative DSO if averaged in.
+                  </TooltipContent>
+                </Tooltip>
               )}
             </span>
             {avgDso === null ? (
-              <span className="text-sm text-muted-foreground mt-1">Not enough history yet.</span>
+              <span className="text-sm text-muted-foreground mt-1">
+                {history.excludedNegative > 0
+                  ? "n/m — every trailing month's receivables book value is negative (net basis), not comparable to Current DSO."
+                  : "Not enough history yet."}
+              </span>
             ) : (
               <>
                 <span className="font-heading text-3xl md:text-4xl tracking-tight tabular-nums">

@@ -160,7 +160,7 @@ export const SlotPriorityEditDialog = ({ open, onOpenChange, row, actor, prefill
     if (!row) return;
     setSaving(true);
     try {
-      await deleteClaim.mutateAsync({ slotPriorityId: row.id, actor, reason: "deleted from Calendario slot panel" });
+      await deleteClaim.mutateAsync({ slotPriorityId: row.id, actor, reason: "deleted from Slot Calendar panel" });
       toast({ title: `Deleted "${row.label}"` });
       onOpenChange(false);
     } catch (err) {

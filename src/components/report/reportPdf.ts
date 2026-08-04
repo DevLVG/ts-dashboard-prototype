@@ -301,9 +301,15 @@ const drawKpiRow = (
   const circleCenterY = topY + r + 6;
 
   for (const item of items) {
-    const deltaAbs = item.row.comparison === null ? null : item.row.actual - item.row.comparison;
-    const deltaPct = item.row.comparison === null ? null : pctChange(item.row.actual, item.row.comparison);
-    const tone = toneColor(deltaAbs);
+    // owner-audit #14 (2026-08-04): item.row.actual can be null (not yet
+    // posted for this window) — this is exactly the headline that used to
+    // print a fabricated "100.0% of revenue"/identical-to-revenue EBITDA
+    // circle on an open month. Render "—" and grey it out instead of
+    // computing a delta against a missing figure.
+    const notPosted = item.row.actual === null;
+    const deltaAbs = item.row.actual === null || item.row.comparison === null ? null : item.row.actual - item.row.comparison;
+    const deltaPct = item.row.actual === null || item.row.comparison === null ? null : pctChange(item.row.actual, item.row.comparison);
+    const tone = notPosted ? MUTED : toneColor(deltaAbs);
 
     setBody(doc, fonts, 7, MUTED, "semibold");
     doc.text(item.label.toUpperCase(), x, topY, { align: "center" });
@@ -313,11 +319,11 @@ const drawKpiRow = (
     doc.setFillColor(...CREAM);
     doc.circle(x, circleCenterY, r, "FD");
 
-    const valueStr = fmtSAR(item.row.actual);
-    setDisplay(doc, fonts, valueFontSize(valueStr), BLACK);
+    const valueStr = fmtOrDash(item.row.actual);
+    setDisplay(doc, fonts, valueFontSize(valueStr), notPosted ? MUTED : BLACK);
     doc.text(valueStr, x, circleCenterY + 1.5, { align: "center" });
     setBody(doc, fonts, 5.5, MUTED);
-    doc.text("SAR", x, circleCenterY + 5.6, { align: "center" });
+    doc.text(notPosted ? "not yet posted" : "SAR", x, circleCenterY + 5.6, { align: "center" });
 
     const deltaStr = deltaAbs === null ? "—" : `${fmtDeltaSAR(deltaAbs)}${deltaPct !== null ? ` · ${fmtDeltaPctPdf(deltaPct)}` : ""}`;
     setBody(doc, fonts, 7, tone, "bold");
@@ -588,13 +594,16 @@ const drawEconomicsTable = (flow: Flow, fonts: FontSet, snapshot: ReportSnapshot
   const head = skipComparisonCols
     ? [["Line item", "This window"]]
     : [["Line item", "This window", snapshot.comparisonLabel, "Change", "Change %"]];
+  // owner-audit #14 (2026-08-04): r.actual can be null (not yet posted for
+  // this window) — fmtOrDash (not fmtSAR) so a not-yet-booked cost line
+  // prints "—", never a fabricated 0 that summed into a 100%-margin EBITDA.
   const body = rows.map((r) => {
-    if (skipComparisonCols) return [r.label, fmtSAR(r.actual)];
-    const deltaAbs = r.comparison === null ? null : r.actual - r.comparison;
-    const deltaPct = r.comparison === null ? null : pctChange(r.actual, r.comparison);
+    if (skipComparisonCols) return [r.label, fmtOrDash(r.actual)];
+    const deltaAbs = r.actual === null || r.comparison === null ? null : r.actual - r.comparison;
+    const deltaPct = r.actual === null || r.comparison === null ? null : pctChange(r.actual, r.comparison);
     return [
       r.label,
-      fmtSAR(r.actual),
+      fmtOrDash(r.actual),
       fmtOrDash(r.comparison),
       deltaAbs === null ? "—" : fmtDeltaSAR(deltaAbs),
       deltaPct === null ? "—" : fmtDeltaPctPdf(deltaPct),
@@ -624,7 +633,7 @@ const drawEconomicsTable = (flow: Flow, fonts: FontSet, snapshot: ReportSnapshot
       }
       if (r.emphasis && (data.column.index === 0 || data.column.index === 1)) data.cell.styles.textColor = GOLD_DEEP;
       if (!skipComparisonCols && (data.column.index === 3 || data.column.index === 4)) {
-        const deltaAbs = r.comparison === null ? null : r.actual - r.comparison;
+        const deltaAbs = r.actual === null || r.comparison === null ? null : r.actual - r.comparison;
         data.cell.styles.textColor = toneColor(deltaAbs);
       }
     },

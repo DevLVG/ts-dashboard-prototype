@@ -32,8 +32,12 @@ export const buildEconomicsCommentary = (s: ReportSnapshot): string[] => {
   const gm = s.kpi.grossMargin;
   const ebitda = s.kpi.ebitda;
 
-  // 1 — revenue headline, always present.
-  if (rev.comparison === null) {
+  // 1 — revenue headline, always present. owner-audit #14 (2026-08-04):
+  // rev.actual can be null (not yet posted) — say so honestly rather than
+  // printing "SAR null"/a fabricated figure.
+  if (rev.actual === null) {
+    sentences.push(`Gross revenue for ${period.label} has not been posted yet.`);
+  } else if (rev.comparison === null) {
     sentences.push(
       `Gross revenue for ${period.label} was SAR ${fmtSAR(rev.actual)}; no comparable ${comparisonLabel.toLowerCase()} figure exists for this window.`,
     );
@@ -69,8 +73,14 @@ export const buildEconomicsCommentary = (s: ReportSnapshot): string[] => {
     );
   }
 
-  // 3 — margin story, always present when revenue is non-trivial.
-  if (Math.abs(rev.actual) > 1) {
+  // 3 — margin story, always present when revenue is non-trivial AND gross
+  // margin has actually been posted (owner-audit #14: costs — COGS —
+  // unposted for an open window must never let this sentence divide by a
+  // real revenue figure over a fabricated 0-cost margin, which is exactly
+  // how the old build printed "100.0% of revenue").
+  if (gm.actual === null) {
+    sentences.push("Gross margin is not yet computable for this window — cost of goods sold has not been posted.");
+  } else if (rev.actual !== null && Math.abs(rev.actual) > 1) {
     const gmPctActual = (gm.actual / rev.actual) * 100;
     let marginSentence = `Gross margin was SAR ${fmtSAR(gm.actual)}, ${fmtPct(gmPctActual)} of revenue`;
     if (gm.comparison !== null && rev.comparison !== null && Math.abs(rev.comparison) > 1) {
@@ -83,8 +93,13 @@ export const buildEconomicsCommentary = (s: ReportSnapshot): string[] => {
     sentences.push(`${marginSentence}.`);
   }
 
-  // 4 — EBITDA (reported), always present.
-  if (ebitda.comparison === null) {
+  // 4 — EBITDA (reported), always present, unless not yet computable
+  // (owner-audit #14: same "costs unposted" gate — this is exactly the
+  // headline number that previously came out looking like a fabricated
+  // +196.0%/100%-margin result on an open month).
+  if (ebitda.actual === null) {
+    sentences.push("EBITDA (reported) is not yet computable for this window — one or more cost sections have not been posted.");
+  } else if (ebitda.comparison === null) {
     sentences.push(`EBITDA (reported) came in at SAR ${fmtSAR(ebitda.actual)}.`);
   } else {
     const d = ebitda.actual - ebitda.comparison;

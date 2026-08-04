@@ -140,7 +140,7 @@ export const LessonSlotEditDialog = ({ open, onOpenChange, row, actor, defaultSe
     if (!row) return;
     setSaving(true);
     try {
-      await deleteSlot.mutateAsync({ lessonSlotId: row.id, actor, reason: "deleted from Calendario slot panel" });
+      await deleteSlot.mutateAsync({ lessonSlotId: row.id, actor, reason: "deleted from Slot Calendar panel" });
       toast({ title: "Time slot removed" });
       onOpenChange(false);
     } catch (err) {

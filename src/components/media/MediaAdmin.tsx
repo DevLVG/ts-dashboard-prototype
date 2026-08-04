@@ -76,6 +76,27 @@ const TypeIcon = ({ type, className }: { type: string; className?: string }) => 
   return <ImageIcon className={className} />;
 };
 
+/** Owner-audit #20 (2026-08-04): 4 brochure thumbnails 404 at the source
+ * (trio-preview-site.vercel.app/brochures/*.png returns HTTP 404 — a
+ * missing-asset problem on the marketing site, not this repo; re-uploading
+ * the correct PNGs or repointing site_media.asset_url is Marcello's/Trio's
+ * call, tracked separately). Until that's resolved, a broken URL rendered a
+ * permanently blank dark tile with no indication anything was wrong — this
+ * shows a clear "image unavailable" placeholder instead, so a real problem
+ * stays visible rather than silently blending into the grid. */
+const MediaThumbImage = ({ src, alt }: { src: string; alt: string }) => {
+  const [broken, setBroken] = useState(false);
+  if (broken) {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-amber-400/80" title={`Image unavailable: ${src}`}>
+        <AlertTriangle className="h-6 w-6" />
+        <span className="text-[9px] uppercase tracking-wider">Unavailable</span>
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} loading="lazy" className="h-full w-full object-cover" onError={() => setBroken(true)} />;
+};
+
 const BACKEND_TONE: Record<string, string> = {
   vercel_static: "border-muted-foreground/40 text-muted-foreground",
   shopify_files: "border-emerald-500/40 text-emerald-400",
@@ -139,8 +160,8 @@ export const MediaAdmin = () => {
         <div className="flex items-center gap-3 mb-1 flex-wrap justify-between">
           <div className="flex items-center gap-3">
             <h3 className="text-xl font-heading tracking-wide">MEDIA LIBRARY</h3>
-            <DataSourceBadge source="live" />
-            <span className="text-xs text-muted-foreground">Supabase · site_media</span>
+            <DataSourceBadge source="live" sourceLabel="Live data from Supabase (site_media)" />
+            <span className="text-xs text-muted-foreground">Live media library data</span>
           </div>
           {reviewCount > 0 && (
             <Badge variant="outline" className="gap-1 border-amber-500/40 text-amber-400">
@@ -187,8 +208,7 @@ export const MediaAdmin = () => {
                 className="group relative rounded-md border overflow-hidden bg-muted/20 text-left hover:border-gold/60 transition-colors">
                 <div className="aspect-square w-full flex items-center justify-center bg-muted/30 overflow-hidden">
                   {a.media_type === "image" ? (
-                    <img src={a.asset_url} alt={a.alt_text ?? a.media_key} loading="lazy"
-                      className="h-full w-full object-cover" />
+                    <MediaThumbImage src={a.asset_url} alt={a.alt_text ?? a.media_key} />
                   ) : (
                     <TypeIcon type={a.media_type} className="h-8 w-8 text-muted-foreground" />
                   )}

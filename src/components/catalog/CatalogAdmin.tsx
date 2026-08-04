@@ -162,8 +162,8 @@ export const CatalogAdmin = () => {
         <div className="flex items-center gap-3 mb-1 flex-wrap justify-between">
           <div className="flex items-center gap-3">
             <h3 className="text-xl font-heading tracking-wide">PRODUCT CATALOGUE</h3>
-            <DataSourceBadge source="live" />
-            <span className="text-xs text-muted-foreground">Supabase · pricing_master_snap</span>
+            <DataSourceBadge source="live" sourceLabel="Live data from Supabase (pricing_master_snap)" />
+            <span className="text-xs text-muted-foreground">Live product & pricing data</span>
           </div>
           <div className="flex items-center gap-2">
             {pendingApprovalCount > 0 && (

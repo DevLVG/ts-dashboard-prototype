@@ -138,7 +138,7 @@ export const CalendarEditDialog = ({ open, onOpenChange, calendar, actor }: Prop
     if (!calendar?.periodId) return;
     setSaving(true);
     try {
-      await deletePeriod.mutateAsync({ calendarPeriodId: calendar.periodId, actor, reason: "deleted from Calendario slot panel" });
+      await deletePeriod.mutateAsync({ calendarPeriodId: calendar.periodId, actor, reason: "deleted from Slot Calendar panel" });
       toast({ title: `Removed "${calendar.displayName}"` });
       onOpenChange(false);
     } catch (err) {

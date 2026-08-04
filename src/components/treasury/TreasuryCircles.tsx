@@ -150,11 +150,28 @@ export const TreasuryCircles = ({
 }: TreasuryCirclesProps) => {
   const comparisonLabel = lastMonthLabel ? `vs ${lastMonthLabel} book value` : "vs last month-end";
 
+  // Basis-mismatch guard (2026-08-04, owner-audit #6): v_working_capital_monthly's
+  // receivables/payables book values are a differently-defined, net figure
+  // that can legitimately be negative (e.g. net of customer deposits/
+  // advances) — a structurally different basis than ar_aging_v2/ap_aging_v2's
+  // gross open-invoice snapshot (always >= 0). Diffing a negative net figure
+  // against a non-negative gross figure produces a nonsensical "+141.9%"-
+  // style delta, not a real change in outstanding receivables/payables. Until
+  // a comparable historical gross-aging snapshot exists (no daily/weekly AR/AP
+  // time series is captured in this warehouse — see DsoCard's identical
+  // note), a negative book value is shown as "n/m", never diffed.
+  const arComparisonMismatch = lastMonthReceivables !== null && lastMonthReceivables < 0;
+  const apComparisonMismatch = lastMonthPayables !== null && lastMonthPayables < 0;
+  const basisMismatchReason = (label: string) =>
+    `${label} book value in v_working_capital_monthly is a net figure and is currently negative — not on the same basis as today's gross open-invoice total, so no honest delta can be shown.`;
+
   const metrics: TreasuryCircleMetric[] = [
     {
       key: "ar_open", label: "Receivables open", value: arTotal, count: arCount, countNoun: arCount === 1 ? "invoice" : "invoices",
-      icon: ArrowDownCircle, comparison: lastMonthReceivables,
-      comparisonUnavailableReason: "v_working_capital_monthly has no prior month yet.",
+      icon: ArrowDownCircle, comparison: arComparisonMismatch ? null : lastMonthReceivables,
+      comparisonUnavailableReason: arComparisonMismatch
+        ? basisMismatchReason("Receivables")
+        : "v_working_capital_monthly has no prior month yet.",
     },
     {
       key: "ar_overdue", label: "Receivables overdue", value: arOverdue, count: arOverdueCount, countNoun: arOverdueCount === 1 ? "invoice overdue" : "invoices overdue",
@@ -163,8 +180,10 @@ export const TreasuryCircles = ({
     },
     {
       key: "ap_open", label: "Payables open", value: apTotal, count: apCount, countNoun: apCount === 1 ? "bill" : "bills",
-      icon: ArrowUpCircle, comparison: lastMonthPayables,
-      comparisonUnavailableReason: "v_working_capital_monthly has no prior month yet.",
+      icon: ArrowUpCircle, comparison: apComparisonMismatch ? null : lastMonthPayables,
+      comparisonUnavailableReason: apComparisonMismatch
+        ? basisMismatchReason("Payables")
+        : "v_working_capital_monthly has no prior month yet.",
     },
     {
       key: "ap_overdue", label: "Payables overdue", value: apOverdue, count: apOverdueCount, countNoun: apOverdueCount === 1 ? "bill overdue" : "bills overdue",

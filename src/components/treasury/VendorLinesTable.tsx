@@ -147,16 +147,21 @@ export const VendorLinesTable = ({ rows }: { rows: ApAgingRow[] }) => {
       kind: "vendor", entityRef: agg.vendorId, to: email, subject: filled.subject, body: filled.body,
       sendEnabled, testRecipient,
     });
-    record.mutate(
-      {
+    // Owner-audit #13 (2026-08-04), same fix as CustomerLinesTable's
+    // confirmSend: await the write and close the dialog only on success,
+    // instead of a fire-and-forget mutate that left the dialog open and
+    // re-clickable after the write had already succeeded (duplicate
+    // audit-log rows on a second, entirely reasonable click).
+    try {
+      await record.mutateAsync({
         domain: "PAYABLE_ESCALATION", entity_ref: agg.vendorId, action: `stage${stage}_sent`, actor: actorEmail,
         payload: { vendor_name: agg.vendorName, amount: agg.amount, bill_count: agg.billCount, template_label: VENDOR_TEMPLATE_LABEL[stage], recipient_email: email, send_result: result },
-      },
-      {
-        onSuccess: () => toast({ title: `${VENDOR_TEMPLATE_LABEL[stage]} recorded`, description: result.detail }),
-        onError: (err) => toast({ title: "Could not record decision", description: String(err), variant: "destructive" }),
-      },
-    );
+      });
+      toast({ title: `${VENDOR_TEMPLATE_LABEL[stage]} recorded`, description: result.detail });
+      setSendTarget(null);
+    } catch (err) {
+      toast({ title: "Could not record decision", description: String(err), variant: "destructive" });
+    }
   };
 
   const sendTest = async () => {
@@ -172,17 +177,18 @@ export const VendorLinesTable = ({ rows }: { rows: ApAgingRow[] }) => {
 
   const openNote = (agg: VendorAgg, kind: "escalate_ceo" | "resolved") => { setNote(""); setNoteTarget({ agg, kind }); };
 
-  const confirmNote = () => {
+  const confirmNote = async () => {
     if (!noteTarget) return;
     const { agg, kind } = noteTarget;
-    record.mutate(
-      { domain: "PAYABLE_ESCALATION", entity_ref: agg.vendorId, action: kind, actor: actorEmail, reason: note || undefined, payload: { vendor_name: agg.vendorName, amount: agg.amount } },
-      {
-        onSuccess: () => toast({ title: kind === "resolved" ? "Marked resolved" : "Escalated to CEO", description: kind === "escalate_ceo" ? "Internal escalation only — no vendor-facing email sent." : "Logged to the audit trail." }),
-        onError: (err) => toast({ title: "Could not record decision", description: String(err), variant: "destructive" }),
-      },
-    );
-    setNoteTarget(null);
+    try {
+      await record.mutateAsync({
+        domain: "PAYABLE_ESCALATION", entity_ref: agg.vendorId, action: kind, actor: actorEmail, reason: note || undefined, payload: { vendor_name: agg.vendorName, amount: agg.amount },
+      });
+      toast({ title: kind === "resolved" ? "Marked resolved" : "Escalated to CEO", description: kind === "escalate_ceo" ? "Internal escalation only — no vendor-facing email sent." : "Logged to the audit trail." });
+      setNoteTarget(null);
+    } catch (err) {
+      toast({ title: "Could not record decision", description: String(err), variant: "destructive" });
+    }
   };
 
   const emptyState: LadderState = { stage: 0, stage1At: null, stage2At: null, stage3At: null, lastActionAt: null, lastReason: null, escalatedManually: false, escalatedAt: null, resolved: false, resolvedAt: null };
@@ -192,8 +198,8 @@ export const VendorLinesTable = ({ rows }: { rows: ApAgingRow[] }) => {
     <Card className="p-6 shadow-sm animate-fade-in">
       <div className="flex items-center gap-3 mb-1 flex-wrap">
         <h3 className="text-xl font-heading tracking-wide">VENDOR LINES — PAYABLES</h3>
-        <DataSourceBadge source="live" />
-        <span className="text-xs text-muted-foreground">Supabase · ap_aging_v2 + treasury_action_log · SAR</span>
+        <DataSourceBadge source="live" sourceLabel="Live data from Supabase (ap_aging_v2 + treasury_action_log)" />
+        <span className="text-xs text-muted-foreground">Live payables data · SAR</span>
       </div>
       <p className="text-sm text-muted-foreground mb-4 inline-flex items-start gap-1.5">
         <Handshake className="h-3.5 w-3.5 mt-0.5 shrink-0 text-gold/80" />

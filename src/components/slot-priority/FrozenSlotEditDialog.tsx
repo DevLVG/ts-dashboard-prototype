@@ -129,7 +129,7 @@ export const FrozenSlotEditDialog = ({ open, onOpenChange, row, actor }: Props) 
     if (!row) return;
     setSaving(true);
     try {
-      await deleteFrozen.mutateAsync({ frozenSlotId: row.id, actor, reason: "deleted from Calendario slot panel" });
+      await deleteFrozen.mutateAsync({ frozenSlotId: row.id, actor, reason: "deleted from Slot Calendar panel" });
       toast({ title: `Deleted "${row.label}"` });
       onOpenChange(false);
     } catch (err) {

@@ -193,6 +193,18 @@ export const CeoApprovalPanel = () => {
 
   return (
     <div className="space-y-6">
+      {/* Owner-audit #2 (2026-08-04): page previously jumped straight from
+          the top nav into the DRAFT banner with no title identifying the
+          page — every other page in the product (Economics, Cash Flow,
+          Balance Sheet, Confirmations, …) carries one. Same h1/subtitle
+          pattern as those pages. */}
+      <div>
+        <h1 className="font-heading text-2xl tracking-wide text-foreground">Approvals</h1>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          CEO review queue for the ready-to-pay run — approve, adjust, or hold each bill. Read + record only.
+        </p>
+      </div>
+
       {/* SIGN-OFF guard banner — persistent */}
       <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
         <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
@@ -235,25 +247,25 @@ export const CeoApprovalPanel = () => {
         <Card className="p-6 shadow-sm animate-fade-in">
           <div className="flex items-center gap-3 mb-1 flex-wrap">
             <h3 className="text-xl font-heading tracking-wide">READY-TO-PAY QUEUE</h3>
-            <DataSourceBadge source="live" />
-            <span className="text-xs text-muted-foreground">Supabase · v_ready_to_pay · SAR</span>
+            <DataSourceBadge source="live" sourceLabel="Live data from Supabase (v_ready_to_pay)" />
+            <span className="text-xs text-muted-foreground">Live payables-ready-to-pay data · SAR</span>
           </div>
           <p className="text-sm text-muted-foreground mb-4 inline-flex items-center gap-1.5 flex-wrap">
             Ranked by tier, then by how overdue each bill is.
-            <span title="Within-tier ordering uses the deadline signal; the Score column (§B.1) is a live-editable draft ranking, not yet confirmed.">
+            <span title="Within-tier ordering uses the deadline signal; the Score column is a live-editable draft ranking, not yet confirmed.">
               <Info className="h-3.5 w-3.5 text-gold/80 cursor-help" />
             </span>
             <span className="inline-flex items-center gap-1.5">
-              Tier &amp; score <ProposedBadge detail="§B.1 within-tier scoring weights." />
+              Tier &amp; score <ProposedBadge detail="Within-tier scoring weights, not yet confirmed." />
             </span>
           </p>
 
           <div className="mb-4 flex items-start gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
             <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-gold/70" />
             <span>
-              Cash guardrail (§B.4) — projected balance after the run flags if it would drop below the
+              Cash guardrail — projected balance after the run flags if it would drop below the
               minimum cash buffer. <strong className="text-foreground">Buffer value: to be set by Trio</strong> —
-              no default is invented here. <ProposedBadge className="ml-1" detail="§B.4 / Decisions needed #12." />
+              no default is invented here. <ProposedBadge className="ml-1" detail="Awaiting Trio's cash-buffer decision." />
             </span>
           </div>
 

@@ -111,7 +111,11 @@ export const useReportLastComplete = (): string => {
 export interface MacroRow {
   key: string;
   label: string;
-  actual: number;
+  /** null = not yet booked for this window (2026-08-04, owner-audit #14) —
+   * "absent ≠ zero", same rule as Economics/Cash Flow. Never a fabricated 0
+   * that a downstream margin/EBITDA %/narrative sentence could silently sum
+   * into a 100%-margin headline. */
+  actual: number | null;
   comparison: number | null;
   subtotal?: boolean;
   emphasis?: boolean;
@@ -171,6 +175,32 @@ const macroBudgetValue = (key: string, b: BudgetAgg | null): number | null => {
   }
 };
 
+/** Whether a macro row's value is backed by >=1 posted warehouse row
+ * (2026-08-04, owner-audit #14) — mirrors `macroHasData` in
+ * PerformanceAnalysis.tsx / the `hasX` flags `aggregatePL` now computes
+ * (data/alignment.ts). false means "not yet booked", so the row (and any
+ * subtotal/circle/narrative sentence derived from it) must render/say
+ * "not yet posted", never a fabricated 0. */
+const macroHasData = (key: string, a: PLAgg): boolean => {
+  switch (key) {
+    case "GrossMargin": return a.hasGrossMargin;
+    case "OpexTotal": return a.hasOpexTotal;
+    case "EBITDA5": return a.hasEbitda5;
+    case "EBITDAReported": return a.hasEbitdaReported;
+    case "EBIT": return a.hasEbit;
+    case "NetResult": return a.hasNetResult;
+    case "Revenue": return a.hasRevenue;
+    case "COGS": return a.hasCogs;
+    case "OPEX-GA": return a.hasOpexGa;
+    case "OPEX-MS": return a.hasOpexMs;
+    case "OPEX-People": return a.hasOpexPeople;
+    case "Project-Costs": return a.hasProjectCosts;
+    case "D&A": return a.hasDa;
+    case "NON-OP": return a.hasNonOp;
+    default: return false;
+  }
+};
+
 export const buildMacroRows = (
   actual: PLAgg,
   comparisonMode: ComparisonMode,
@@ -180,8 +210,10 @@ export const buildMacroRows = (
   MACRO_DEFS.map((d) => ({
     key: d.key,
     label: d.label,
-    actual: macroActualValue(d.key, actual),
-    comparison: comparisonMode === "BUDGET" ? macroBudgetValue(d.key, budget) : macroActualValue(d.key, priorYear),
+    actual: macroHasData(d.key, actual) ? macroActualValue(d.key, actual) : null,
+    comparison: comparisonMode === "BUDGET"
+      ? macroBudgetValue(d.key, budget)
+      : (macroHasData(d.key, priorYear) ? macroActualValue(d.key, priorYear) : null),
     subtotal: d.subtotal,
     emphasis: d.emphasis,
   }));

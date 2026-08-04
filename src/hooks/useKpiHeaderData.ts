@@ -181,15 +181,46 @@ export const useKpiHeaderData = (): KpiHeaderData => {
   // identical row instead of contradicting it.
   const EBITDA_REPORTED_BUDGET_NA =
     "Budget has no Project-Costs line — not comparable to the actual's post-project-costs EBITDA reported figure.";
+  // Recurring EBITDA (Only Recurring scope) has its own, separate reason:
+  // budget_2026's only non-recurring concept is the GA-NRP-*/MS-FFC line
+  // filter (a 2-pattern rule), which is a DIFFERENT, coarser perimeter than
+  // the actual's model-derived recurrence classification (dim_recurrence +
+  // recurrence_rules — 5 patterns incl. COMP-IA/TPC/B2B-CGBI/DRIFT retags).
+  // Diffing actual recEbitda against budget.ebitdaPreNrp would silently mix
+  // two different "recurring" definitions — same class of error as the bug
+  // this fix corrects, so it stays null rather than compounding it.
+  const REC_EBITDA_BUDGET_NA =
+    "Budget's non-recurring perimeter (GA-NRP/MS-FFC) differs from the actual's model-based recurrence classification — not directly comparable.";
 
   const comparisonLabel = comparisonMode === "BUDGET" ? "Budget" : "Previous Year";
 
   const metrics: KpiHeaderMetric[] = useMemo(() => {
     if (scope === "RECURRING" && recActual) {
+      // fix-23-recon (2026-08-04): this metric used to read
+      // `recActual.reportedEbitda`, which — by construction — adds every
+      // non-recurring revenue/COGS/OpEx/Project-Costs line straight back in
+      // (see `aggregateRecurring` in data/alignment.ts: `reportedEbitda =
+      // recEbitda + nonRecRevenue + nonRecDirect + nonRecOpex`). That makes
+      // it algebraically IDENTICAL to the "All" scope's `ebitdaReported` for
+      // the same window — toggling "Only Recurring" changed Revenue and
+      // Gross Margin but silently left this tile showing the full-company
+      // number, Project-Costs (Leveredge/F&F mandates) and all. SQL-verified
+      // against the live warehouse: YTD Jan-Aug26 showed -488,452.55 (ties
+      // Marcello's reported -488,453) when the model's own recurring
+      // perimeter (dim_recurrence, matching `recEbitda`) computes
+      // +438,427.86 — POSITIVE, matching the validated deck. PY Jan-Aug25
+      // showed -4,042,650.10 (his "-4.0M looks wrong") vs the correct
+      // -493,476.97. The full bridge is in
+      // CLEVER/Cockpit/deliverables/review-fixes-2026-08-04/fix-23-recon/bridge.md.
+      // `recEbitda` (= recGrossProfit + recOpex, stopping BEFORE non-recurring
+      // OpEx/Project-Costs are added back) is the model's own "Recurring
+      // EBITDA" subtotal (spec Tile P3) — relabeled below so it's never
+      // confused with the statutory "EBITDA (reported)" the All-scope tile
+      // shows (a different, deliberately-broader figure, unchanged here).
       return [
         buildMetric("revenue", "Revenue", noActualData ? null : recActual.recRevenue, noPriorData ? null : (recPrior?.recRevenue ?? 0), recBudgetRevenue, comparisonMode, budgetNaReason, pyNaReason),
         buildMetric("grossMargin", "Gross Margin", noActualData ? null : recActual.recGrossProfit, noPriorData ? null : (recPrior?.recGrossProfit ?? 0), null, comparisonMode, "Budget COGS is not split by recurrence.", pyNaReason),
-        buildMetric("ebitda", "EBITDA (reported)", noActualData ? null : recActual.reportedEbitda, noPriorData ? null : (recPrior?.reportedEbitda ?? 0), null, comparisonMode, EBITDA_REPORTED_BUDGET_NA, pyNaReason),
+        buildMetric("ebitda", "Recurring EBITDA (as booked)", noActualData ? null : recActual.recEbitda, noPriorData ? null : (recPrior?.recEbitda ?? 0), null, comparisonMode, REC_EBITDA_BUDGET_NA, pyNaReason),
       ];
     }
     // Costs-unbooked honesty gate (2026-08-04, owner-audit #3/#4): a window

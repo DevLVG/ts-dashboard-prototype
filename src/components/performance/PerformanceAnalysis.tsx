@@ -56,12 +56,51 @@
 //     applied uniformly down to every family/cluster/leaf so a child row's
 //     comparison always sums back to its parent's.
 //   - Window = the global period selector (month/quarter/MTD/YTD/TTM).
+//
+// FIX-24 (2026-08-04, Marcello P0 live review — tree hygiene + MoA leaf
+// verification):
+//   - Single-child collapse (global rule): a family/cluster level only earns
+//     its own clickable row when it splits into 2+ children. A lone child —
+//     same name (Private Events family -> its only cluster, also "Private
+//     Events") or different (Corporate -> its ten G&A clusters; Trio Project
+//     Costs' two leaves) — is equally uninformative as an extra click, so its
+//     row is skipped and its own children are promoted straight into its
+//     slot, chained through as many singleton hops as exist. Concrete effect:
+//     Private Events collapses straight to its 3 leaves; G&A/Marketing &
+//     Sales/People collapse away their sole "Corporate" family (those 3
+//     sections are 100% CORP by MoA design — the family split is structurally
+//     never anything else); Project costs collapses BOTH "Corporate" and
+//     "Trio Project Costs" in one hop, landing on its 2 leaves; every D&A
+//     family whose only cluster has only one leaf (B2B, Retail) collapses
+//     straight to that leaf; every cluster of exactly one leaf anywhere
+//     collapses to the leaf's own name (Bank Costs -> Bank Charges,
+//     Furniture & Fixtures, EOS Provision -> End of Service, Non-Recurring
+//     Professional Fees -> Project Professional Fees, etc). See
+//     `clusterSlots`/`familySlots`/`sectionFamilySlots` below. Leaves
+//     (terminal moa_code rows) never carry an onToggle, promoted or not — no
+//     row can ever expand into a copy of itself.
+//   - Gross margin now explodes into a per-revenue-family margin line
+//     (family revenue + family COGS, COGS already negative — same sign
+//     convention as the macro row) alongside the existing Cost of goods sold
+//     family breakdown, tying to the macro Gross margin total by
+//     construction (same underlying family totals, just regrouped).
+//   - Below EBIT, the single opaque "Non-operating items" row is replaced by
+//     the master's own NON-OP breakdown as explicit, always-visible
+//     statutory lines — Financial charges (NO-FIN01, Bank Interest), Gains &
+//     disposals (NO-GAI01), Zakat (NO-ZKT01) — then Net income. No account is
+//     invented: the master has no financial-INCOME leaf today, only the
+//     financial-charge (interest) leaf, so only that side renders — verified
+//     against moa_gestionale 2026-08-04 (see fix-24 deliverable report).
+//   - The shared "Figures net of customer credit notes" line was retired at
+//     the chrome level by fix-25 (StrictBasisNote -> no-op); this page also
+//     drops its own `CompletenessBanner` render — Marcello, live review:
+//     "togli tutto" — keeping only the small `OpenMonthsBadge`.
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChevronRight, ChevronDown, Info } from "lucide-react";
 import { useAlignment } from "@/contexts/AlignmentContext";
-import { WindowPicker, ComparisonToggle, ScopeToggle, OpenMonthsBadge, CompletenessBanner, StrictBasisNote } from "@/components/chrome/AlignmentChrome";
+import { WindowPicker, ComparisonToggle, ScopeToggle, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
 import { KpiCircles } from "@/components/overview/KpiCircles";
 import { ComparisonHistogram } from "@/components/overview/ComparisonHistogram";
 import {
@@ -205,6 +244,63 @@ const scaleTree = (tree: Map<PLSection, SectionTree>, fraction: number): Map<PLS
 const sectionTotal = (tree: Map<PLSection, SectionTree>, s: PLSection): number => tree.get(s)?.total ?? 0;
 const sectionHasData = (tree: Map<PLSection, SectionTree>, s: PLSection): boolean => tree.get(s)?.hasData ?? false;
 
+/** Finds one specific leaf (by moa_code) anywhere in a section — used for
+ * the below-EBIT statutory lines (fix-24), which each pin to exactly one
+ * NON-OP account rather than an aggregate. */
+const findLeafInTree = (tree: Map<PLSection, SectionTree>, section: PLSection, moaCode: string): LeafNode | undefined => {
+  for (const fam of tree.get(section)?.families ?? []) {
+    for (const clu of fam.clusters) {
+      const leaf = clu.leaves.find((l) => l.moaCode === moaCode);
+      if (leaf) return leaf;
+    }
+  }
+  return undefined;
+};
+const findLeafInFamilies = (families: FamilyNode[], moaCode: string): LeafNode | undefined => {
+  for (const f of families) for (const c of f.clusters) {
+    const leaf = c.leaves.find((l) => l.moaCode === moaCode);
+    if (leaf) return leaf;
+  }
+  return undefined;
+};
+const findClusterInFamilies = (families: FamilyNode[], bu: string, clusterCode: string): ClusterNode | undefined =>
+  families.find((f) => f.bu === bu)?.clusters.find((c) => c.clusterCode === clusterCode);
+const findFamilyByBu = (families: FamilyNode[], bu: string): FamilyNode | undefined => families.find((f) => f.bu === bu);
+
+// --------------------------------------------- single-child collapse (fix-24)
+//
+// "A level renders only if it splits into 2+ children" (Marcello, live
+// review). A container (family or cluster) with exactly one child is
+// equally uninformative as an extra click whether the child's name matches
+// its own or not, so its row is skipped entirely and the child's own
+// children are promoted to render directly in its slot — chained through as
+// many singleton hops as exist (Project costs: 1 family -> 1 cluster both
+// collapse in one hop, landing on its 2 leaves).
+
+type NodeSlot =
+  | { kind: "family"; family: FamilyNode }
+  | { kind: "cluster"; cluster: ClusterNode }
+  | { kind: "leaf"; leaf: LeafNode };
+
+/** A cluster of exactly one leaf conveys nothing the leaf itself doesn't —
+ * skip the cluster row, promote the leaf into the cluster's slot. */
+const clusterSlots = (clusters: ClusterNode[]): NodeSlot[] =>
+  clusters.map((c) => (c.leaves.length === 1 ? { kind: "leaf", leaf: c.leaves[0] } : { kind: "cluster", cluster: c }));
+
+/** A family of exactly one cluster: skip the cluster row too, promoting
+ * straight to that cluster's own leaves (itself further collapsed if there's
+ * only one — the B2B/Retail D&A "family with one leaf" case). */
+const familySlots = (family: FamilyNode): NodeSlot[] =>
+  family.clusters.length === 1
+    ? family.clusters[0].leaves.map((l) => ({ kind: "leaf" as const, leaf: l }))
+    : clusterSlots(family.clusters);
+
+/** A section of exactly one family (every OPEX-GA/OPEX-MS/OPEX-People/
+ * Project-Costs/NON-OP leaf is bu="CORP" by MoA design, structurally, not
+ * just today) skips the redundant "Corporate" family row too. */
+const sectionFamilySlots = (families: FamilyNode[]): NodeSlot[] =>
+  families.length === 1 ? familySlots(families[0]) : families.map((f) => ({ kind: "family" as const, family: f }));
+
 /** The 6 derived subtotals, computed FROM the tree's section totals — never
  * from a separate aggregation path, so the table can't disagree with itself.
  * Each also carries a `hasX` coverage flag (2026-08-04, owner-audit #3/#4):
@@ -278,9 +374,24 @@ const MACRO_ROWS: MacroRowDef[] = [
   { key: "EBITDAReported", label: "EBITDA (reported)", subtotal: true },
   { key: "D&A", label: "Depreciation & amortization", section: "D&A" },
   { key: "EBIT", label: "EBIT", subtotal: true },
-  { key: "NON-OP", label: "Non-operating items", section: "NON-OP" },
+  // Below-EBIT statutory lines (fix-24, 2026-08-04): the master's own NON-OP
+  // breakdown, each pinned to one moa_gestionale leaf, always shown even at
+  // zero — no "Non-operating items" catch-all row anymore. The master has no
+  // financial-INCOME leaf today (only the financial-charge/interest one), so
+  // only that side is shown — never invented. See MACRO_LEAF_CODE below.
+  { key: "NonOpFin", label: "Financial charges" },
+  { key: "NonOpGains", label: "Gains & disposals" },
+  { key: "Zakat", label: "Zakat" },
   { key: "NetResult", label: "Net income", subtotal: true, emphasis: true },
 ];
+
+/** moa_code each below-EBIT statutory row pins to — shown as the row's small
+ * secondary tag, same convention as every other leaf on this table. */
+const MACRO_LEAF_CODE: Record<string, string> = {
+  NonOpFin: "NO-FIN01",
+  NonOpGains: "NO-GAI01",
+  Zakat: "NO-ZKT01",
+};
 
 const macroValue = (key: string, tree: Map<PLSection, SectionTree>, sub: Subtotals): number => {
   switch (key) {
@@ -290,6 +401,9 @@ const macroValue = (key: string, tree: Map<PLSection, SectionTree>, sub: Subtota
     case "EBITDAReported": return sub.ebitdaReported;
     case "EBIT": return sub.ebit;
     case "NetResult": return sub.netResult;
+    case "NonOpFin": return findLeafInTree(tree, "NON-OP", MACRO_LEAF_CODE.NonOpFin)?.total ?? 0;
+    case "NonOpGains": return findLeafInTree(tree, "NON-OP", MACRO_LEAF_CODE.NonOpGains)?.total ?? 0;
+    case "Zakat": return findLeafInTree(tree, "NON-OP", MACRO_LEAF_CODE.Zakat)?.total ?? 0;
     default: return sectionTotal(tree, key as PLSection);
   }
 };
@@ -306,6 +420,7 @@ const macroHasData = (key: string, tree: Map<PLSection, SectionTree>, sub: Subto
     case "EBITDAReported": return sub.hasEbitdaReported;
     case "EBIT": return sub.hasEbit;
     case "NetResult": return sub.hasNetResult;
+    case "NonOpFin": case "NonOpGains": case "Zakat": return sectionHasData(tree, "NON-OP");
     default: return sectionHasData(tree, key as PLSection);
   }
 };
@@ -367,7 +482,7 @@ export const PerformanceAnalysis = () => {
   const partialDataNote = useMemo(() => {
     if (noActualData || isBudgetMode) return null;
     if (actualSub.hasEbitdaReported) return null;
-    return `Some cost lines are not fully posted yet for ${windowName} — EBITDA / EBITDA (reported) / EBIT / Net income show "—" until costs are booked (see Data completeness below).`;
+    return `Some cost lines are not fully posted yet for ${windowName} — EBITDA / EBITDA (reported) / EBIT / Net income show "—" until costs are booked.`;
   }, [noActualData, isBudgetMode, actualSub, windowName]);
 
   // ------------------------------------------------------------ row build
@@ -405,6 +520,50 @@ export const PerformanceAnalysis = () => {
       const comparison = isBudgetMode
         ? rawComparison
         : (noPriorData || !macroHasData(m.key, priorTree, priorSub) ? null : rawComparison);
+
+      // Gross margin family explosion (fix-24, rule 5): family revenue -
+      // family direct costs, one row per revenue family, ties to the macro
+      // Gross margin total by construction (same underlying family totals,
+      // just regrouped) — disabled in Budget mode, same as every other
+      // MoA-granularity drill on this table.
+      if (m.key === "GrossMargin") {
+        const gmExpandKey = "gm:family";
+        const revFamilies = actualTree.get("Revenue")!.families; // canonical order — same as the Revenue row's own expansion
+        const canExpandGM = !isBudgetMode && revFamilies.length > 0;
+        out.push({
+          indent: 0, keyPath: "GrossMargin", label: m.label, actual, comparison,
+          expandable: canExpandGM,
+          expanded: canExpandGM && expanded.has(gmExpandKey),
+          onToggle: canExpandGM ? () => toggle(gmExpandKey) : undefined,
+          subtotal: m.subtotal, emphasis: m.emphasis,
+        });
+        if (canExpandGM && expanded.has(gmExpandKey)) {
+          const cogsFamilies = actualTree.get("COGS")!.families;
+          const revFamiliesP = priorTree.get("Revenue")!.families;
+          const cogsFamiliesP = priorTree.get("COGS")!.families;
+          for (const revFam of revFamilies) {
+            // Not every revenue family has a COGS counterpart — Competitions
+            // and Private Events have zero moa_gestionale COGS accounts
+            // today (verified 2026-08-04: no B2B/EVT/COMP placeholder
+            // exists), which is a real MoA-completeness gap, not a bug —
+            // their family margin is correctly 100% of revenue, never a
+            // fabricated cost.
+            const cogsFam = findFamilyByBu(cogsFamilies, revFam.bu);
+            const revFamP = findFamilyByBu(revFamiliesP, revFam.bu);
+            const cogsFamP = findFamilyByBu(cogsFamiliesP, revFam.bu);
+            const famGmActual = revFam.total + (cogsFam?.total ?? 0);
+            const famGmPrior = (revFamP?.total ?? 0) + (cogsFamP?.total ?? 0);
+            out.push({
+              indent: 1, keyPath: `gm:${revFam.bu}`, label: revFam.buName,
+              actual: noActualData || !actualSub.hasGrossMargin ? null : famGmActual,
+              comparison: noPriorData || !priorSub.hasGrossMargin ? null : famGmPrior,
+              expandable: false, expanded: false,
+            });
+          }
+        }
+        continue;
+      }
+
       const sectionKey = m.section ? `sec:${m.section}` : null;
       // The canonical tree always has >=1 family for every one of the 8 PL
       // sections (moaTree.ts defines leaves for all of them) — so this is
@@ -412,11 +571,13 @@ export const PerformanceAnalysis = () => {
       // "August has zero cost rows -> chevron disappears" defect: PY (or
       // budget-adjacent) data still drives full expansion of an empty
       // current window, exactly as Marcello's mandate requires.
-      const canExpand = !isBudgetMode && !!m.section && actualTree.get(m.section)!.families.length > 0;
+      const curSlots = m.section ? sectionFamilySlots(actualTree.get(m.section)!.families) : [];
+      const canExpand = !isBudgetMode && !!m.section && curSlots.length > 0;
       out.push({
         indent: 0,
         keyPath: m.key,
         label: m.label,
+        codeTag: MACRO_LEAF_CODE[m.key],
         actual,
         comparison,
         expandable: canExpand,
@@ -435,50 +596,82 @@ export const PerformanceAnalysis = () => {
       // every depth, not just at the top (2026-08-04, owner-audit #3/#4).
       const curSectionHasData = sectionHasData(actualTree, section);
       const priorSectionHasData = sectionHasData(priorTree, section);
-      for (let fi = 0; fi < curFamilies.length; fi++) {
-        const famA = curFamilies[fi];
-        const famP = priorFamilies[fi]; // identical shape by construction — same bu, same index
-        const famExpandKey = `fam:${section}::${famA.bu}`;
-        const canExpandFam = famA.clusters.length > 0;
+      const gated = (curTotal: number, priorTotal: number) => ({
+        actual: noActualData || !curSectionHasData ? null : curTotal,
+        comparison: noPriorData || !priorSectionHasData ? null : priorTotal,
+      });
+
+      // Single-child collapse (fix-24): `curSlots` is the section's family
+      // level already collapsed per `sectionFamilySlots` — for the 5
+      // structurally-CORP-only sections (OPEX-GA/MS/People, Project-Costs,
+      // and, were it still section-driven, NON-OP) this is directly the
+      // cluster/leaf level, promoted one tier up; for Revenue/COGS/D&A
+      // (2+ families) it's the normal family row list.
+      const soleBu = curFamilies.length === 1 ? curFamilies[0].bu : null;
+      for (const slot of curSlots) {
+        if (slot.kind === "leaf") {
+          const leafP = findLeafInFamilies(priorFamilies, slot.leaf.moaCode);
+          out.push({
+            indent: 1, keyPath: slot.leaf.moaCode, label: slot.leaf.leafName, codeTag: slot.leaf.moaCode,
+            ...gated(slot.leaf.total, leafP?.total ?? 0), expandable: false, expanded: false,
+          });
+          continue;
+        }
+        if (slot.kind === "cluster") {
+          const bu = soleBu!; // a cluster/leaf slot only appears here when the section has exactly one family
+          const cluExpandKey = `clu:${section}::${bu}::${slot.cluster.clusterCode}`;
+          const priorClu = findClusterInFamilies(priorFamilies, bu, slot.cluster.clusterCode);
+          out.push({
+            indent: 1, keyPath: cluExpandKey, label: slot.cluster.clusterName,
+            ...gated(slot.cluster.total, priorClu?.total ?? 0),
+            expandable: true, expanded: expanded.has(cluExpandKey), onToggle: () => toggle(cluExpandKey),
+          });
+          if (!expanded.has(cluExpandKey)) continue;
+          for (const leaf of slot.cluster.leaves) {
+            const leafP = priorClu?.leaves.find((l) => l.moaCode === leaf.moaCode);
+            out.push({
+              indent: 2, keyPath: leaf.moaCode, label: leaf.leafName, codeTag: leaf.moaCode,
+              ...gated(leaf.total, leafP?.total ?? 0), expandable: false, expanded: false,
+            });
+          }
+          continue;
+        }
+        // slot.kind === "family" — the normal 2+-family case (Revenue, COGS, D&A).
+        const fam = slot.family;
+        const famExpandKey = `fam:${section}::${fam.bu}`;
+        const famP = findFamilyByBu(priorFamilies, fam.bu);
+        const famSlotsArr = familySlots(fam);
+        const canExpandFam = famSlotsArr.length > 0;
         out.push({
-          indent: 1,
-          keyPath: famExpandKey,
-          label: famA.buName,
-          actual: noActualData || !curSectionHasData ? null : famA.total,
-          comparison: noPriorData || !priorSectionHasData ? null : famP.total,
-          expandable: canExpandFam,
-          expanded: expanded.has(famExpandKey),
+          indent: 1, keyPath: famExpandKey, label: fam.buName,
+          ...gated(fam.total, famP?.total ?? 0),
+          expandable: canExpandFam, expanded: expanded.has(famExpandKey),
           onToggle: canExpandFam ? () => toggle(famExpandKey) : undefined,
         });
         if (!canExpandFam || !expanded.has(famExpandKey)) continue;
-        for (let ci = 0; ci < famA.clusters.length; ci++) {
-          const cluA = famA.clusters[ci];
-          const cluP = famP.clusters[ci];
-          const cluExpandKey = `clu:${section}::${famA.bu}::${cluA.clusterCode}`;
-          const canExpandClu = cluA.leaves.length > 0;
-          out.push({
-            indent: 2,
-            keyPath: cluExpandKey,
-            label: cluA.clusterName,
-            actual: noActualData || !curSectionHasData ? null : cluA.total,
-            comparison: noPriorData || !priorSectionHasData ? null : cluP.total,
-            expandable: canExpandClu,
-            expanded: expanded.has(cluExpandKey),
-            onToggle: canExpandClu ? () => toggle(cluExpandKey) : undefined,
-          });
-          if (!canExpandClu || !expanded.has(cluExpandKey)) continue;
-          for (let li = 0; li < cluA.leaves.length; li++) {
-            const leafA = cluA.leaves[li];
-            const leafP = cluP.leaves[li];
+        for (const fs of famSlotsArr) {
+          if (fs.kind === "leaf") {
+            const leafP = famP ? findLeafInFamilies([famP], fs.leaf.moaCode) : undefined;
             out.push({
-              indent: 3,
-              keyPath: leafA.moaCode,
-              label: leafA.leafName,
-              codeTag: leafA.moaCode,
-              actual: noActualData || !curSectionHasData ? null : leafA.total,
-              comparison: noPriorData || !priorSectionHasData ? null : leafP.total,
-              expandable: false,
-              expanded: false,
+              indent: 2, keyPath: fs.leaf.moaCode, label: fs.leaf.leafName, codeTag: fs.leaf.moaCode,
+              ...gated(fs.leaf.total, leafP?.total ?? 0), expandable: false, expanded: false,
+            });
+            continue;
+          }
+          // fs.kind === "cluster"
+          const cluExpandKey = `clu:${section}::${fam.bu}::${fs.cluster.clusterCode}`;
+          const priorClu = famP?.clusters.find((c) => c.clusterCode === fs.cluster.clusterCode);
+          out.push({
+            indent: 2, keyPath: cluExpandKey, label: fs.cluster.clusterName,
+            ...gated(fs.cluster.total, priorClu?.total ?? 0),
+            expandable: true, expanded: expanded.has(cluExpandKey), onToggle: () => toggle(cluExpandKey),
+          });
+          if (!expanded.has(cluExpandKey)) continue;
+          for (const leaf of fs.cluster.leaves) {
+            const leafP = priorClu?.leaves.find((l) => l.moaCode === leaf.moaCode);
+            out.push({
+              indent: 3, keyPath: leaf.moaCode, label: leaf.leafName, codeTag: leaf.moaCode,
+              ...gated(leaf.total, leafP?.total ?? 0), expandable: false, expanded: false,
             });
           }
         }
@@ -495,17 +688,19 @@ export const PerformanceAnalysis = () => {
       </div>
 
       {/* ---------- global controls ---------- */}
+      {/* fix-24 (2026-08-04, Marcello — "togli tutto"): the "Figures net of
+          customer credit notes" footnote and the Data completeness banner
+          are both removed from this page; only the small open-months badge
+          stays. The footnote is a shared-chrome no-op as of fix-25 either
+          way — the wrapper div and CompletenessBanner call are dropped here
+          rather than left rendering nothing. */}
       <div className="flex flex-wrap items-center gap-3">
         <WindowPicker months={factMonths(rows)} />
         <ComparisonToggle />
         <ScopeToggle />
         <OpenMonthsBadge />
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <StrictBasisNote />
-      </div>
 
-      <CompletenessBanner rows={rows} />
       {isLoading && <p className="text-sm text-muted-foreground">Loading live warehouse rows…</p>}
       {basisError && !isLoading && (
         <p className="text-sm text-destructive/90">

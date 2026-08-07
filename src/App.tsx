@@ -11,6 +11,10 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import { ReportPage } from "@/components/report/ReportPage";
 import { ConfirmationsPage } from "@/components/confirmations/ConfirmationsPage";
+import { CashForecastPage } from "@/components/forecast/CashForecastPage";
+import { AccrualsPage } from "@/components/accruals/AccrualsPage";
+import { VatPrefilePage } from "@/components/vat/VatPrefilePage";
+import { MonthEndClosePage } from "@/components/close/MonthEndClosePage";
 
 const queryClient = new QueryClient();
 
@@ -65,6 +69,16 @@ const App = () => {
                     route, same pattern as /report — ConfirmationsPage mounts
                     its own <DashboardNav/> + role gate. */}
                 <Route path="/confirmations" element={<ConfirmationsPage />} />
+                {/* Cash Forecast / Accruals / VAT Pre-Filing / Month-End Close
+                    (handbook package job, 2026-08-07): same standalone-route
+                    pattern as Report/Confirmations — own <DashboardNav/> mount
+                    + own role gate, not routed through Index.tsx's PageType
+                    switch. Read-only, first UI for four previously orphaned
+                    DB views. */}
+                <Route path="/cash-forecast" element={<CashForecastPage />} />
+                <Route path="/accruals" element={<AccrualsPage />} />
+                <Route path="/vat-prefile" element={<VatPrefilePage />} />
+                <Route path="/month-close" element={<MonthEndClosePage />} />
                 <Route path="/analysis" element={<Navigate to="/performance" replace />} />
                 <Route path="/catalog" element={<Index />} />
                 <Route path="/media" element={<Index />} />

@@ -22,6 +22,10 @@ import {
   ChevronDown,
   FileText,
   FileCheck2,
+  CalendarRange,
+  Receipt,
+  ShieldCheck,
+  ClipboardCheck,
   type LucideIcon,
 } from "lucide-react";
 import { PageType } from "@/types/dashboard";
@@ -54,6 +58,10 @@ interface NavPage {
 const ALL_PAGES: NavPage[] = [
   { id: "performance", label: "Economics", icon: TrendingUp, path: "/performance" },
   { id: "cash", label: "Cash Flow", icon: Banknote, path: "/cash" },
+  // Cash Forecast (handbook package job, 2026-08-07): first UI for
+  // v_cash_forecast_13w / v_cash_forecast_monthly (migration 045) — sits
+  // next to Cash Flow, the forward-looking counterpart.
+  { id: "cash-forecast", label: "Cash Forecast", icon: CalendarRange, path: "/cash-forecast" },
   { id: "balance", label: "Balance Sheet", icon: Scale, path: "/balance" },
   // Report (fix-6-report, 2026-08-03): the ONE export place — bottom of the
   // Performance group, per Marcello's live-review spec.
@@ -65,6 +73,13 @@ const ALL_PAGES: NavPage[] = [
   // dropdown per Marcello's explicit order.
   { id: "confirmations", label: "Confirmations", icon: FileCheck2, path: "/confirmations" },
   { id: "payments", label: "Approvals", icon: Stamp, path: "/payments" },
+  // Accruals / VAT pre-filing / Month-end close (handbook package job,
+  // 2026-08-07): first UI for three orphaned DB views (migrations 035, 041,
+  // 042) — grouped with Admin, same close/compliance neighbourhood as
+  // Treasury/Confirmations/Approvals.
+  { id: "accruals", label: "Accruals", icon: Receipt, path: "/accruals" },
+  { id: "vat-prefile", label: "VAT Pre-Filing", icon: ShieldCheck, path: "/vat-prefile" },
+  { id: "month-close", label: "Month-End Close", icon: ClipboardCheck, path: "/month-close" },
   { id: "catalog", label: "Catalogue", icon: Package, path: "/catalog" },
   { id: "media", label: "Media", icon: Image, path: "/media" },
   { id: "copy", label: "Site Copy", icon: Languages, path: "/copy" },
@@ -96,10 +111,12 @@ interface NavGroup {
 }
 
 const NAV_GROUPS: NavGroup[] = [
-  { id: "performance-group", label: "Performance", defaultPageId: "performance", pageIds: ["performance", "cash", "balance", "report"] },
+  { id: "performance-group", label: "Performance", defaultPageId: "performance", pageIds: ["performance", "cash", "cash-forecast", "balance", "report"] },
   // Admin group = Treasury (default, unchanged) · Confirmations · Approvals
-  // (Marcello, live review #3, 2026-08-03) — three items, in this order.
-  { id: "admin-group", label: "Admin", defaultPageId: "treasury", pageIds: ["treasury", "confirmations", "payments"] },
+  // (Marcello, live review #3, 2026-08-03) — plus Accruals · VAT Pre-Filing ·
+  // Month-End Close (handbook package job, 2026-08-07), same close/compliance
+  // neighbourhood.
+  { id: "admin-group", label: "Admin", defaultPageId: "treasury", pageIds: ["treasury", "confirmations", "payments", "accruals", "vat-prefile", "month-close"] },
   { id: "marketing-group", label: "Marketing", pageIds: ["catalog", "media", "copy", "competitions", "instructors", "slot-priority"] },
 ];
 

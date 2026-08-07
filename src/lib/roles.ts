@@ -57,8 +57,15 @@ const CMS_PAGES: PageType[] = ["catalog", "media", "copy", "competitions", "inst
 // a destination that no longer exists. The PageType values and page
 // components themselves are untouched for now — this is an access-list
 // change only.
+// Handbook package job (2026-08-07): four DB views existed live with real
+// data but were never surfaced anywhere in the cockpit — cash forecast,
+// EOSB/leave accruals, VAT pre-filing checks, month-end close assistant.
+// Role grants below are a first-pass call (documented per-page in each
+// component's own header) — proposed, to confirm with Marcello/Luca, same
+// posture as the rest of this file.
 const ALL_PAGES: PageType[] = [
-  "performance", "cash", "treasury", "confirmations", "payments", "balance", "report",
+  "performance", "cash", "cash-forecast", "treasury", "confirmations", "payments", "balance", "report",
+  "accruals", "vat-prefile", "month-close",
   ...CMS_PAGES,
 ];
 /** "Everything business" = every screen except the CMS admin tabs. */
@@ -67,11 +74,15 @@ const BUSINESS_PAGES: PageType[] = ALL_PAGES.filter((p) => !CMS_PAGES.includes(p
 /** Pages each role may see. First entry is that role's landing page. */
 export const ROLE_PAGES: Record<Role, PageType[]> = {
   leveredge: ALL_PAGES,                    // everything, incl. CMS admin
-  ceo: BUSINESS_PAGES,                     // Economics + Cash Flow + Balance Sheet + Treasury + Confirmations + Approvals; not CMS
+  ceo: BUSINESS_PAGES,                     // Economics + Cash Flow + Balance Sheet + Treasury + Confirmations + Approvals + the 4 new screens; not CMS
   // Treasury workspace (2 sub-tabs) + Cash Flow + Confirmations (live review
   // #3, 2026-08-03 — "confirmation staff" work, promoted out of Treasury into
   // its own standalone page/nav item; administration keeps access to it).
-  administration: ["treasury", "cash", "confirmations"],
+  // cash-forecast (extension of "cash") and month-close (process visibility,
+  // like confirmations) added 2026-08-07; accruals/vat-prefile withheld —
+  // payroll-sensitive / filing-compliance, same class as "payments" and
+  // "report" which administration also does not see.
+  administration: ["treasury", "cash", "cash-forecast", "confirmations", "month-close"],
   unknown: ["performance"],                // Economics only, read-only default landing
 };
 

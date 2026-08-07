@@ -42,7 +42,12 @@ const RETRY_BACKOFF_MS = [400, 1200]; // 2 retries: ~0.4s, then ~1.2s
  * logical errors (permission denied, missing relation, bad query) return
  * normally through `fn`'s own {data,error} shape and are never retried here
  * — only connection-level failures throw, so only those hit this catch. */
-async function withTransientRetry<T>(fn: () => Promise<T>): Promise<T> {
+// Exported (2026-08-07, handbook-package job) so the same helper backs the
+// four newly-surfaced read-only screens (cash forecast, EOSB/leave accruals,
+// VAT pre-file checks, month-end close) in their own data-access files —
+// same Supabase/Cloudflare edge, same QUIC failure mode, no reason to
+// duplicate the retry logic.
+export async function withTransientRetry<T>(fn: () => Promise<T>): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
     try {

@@ -10,6 +10,53 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase, isSupabaseConfigured, toFriendlyError } from "@/lib/supabaseClient";
 
+// ------------------------------------------- transient-network retry (2026-08-07)
+//
+// Root cause (JOB 1, intermittent ~20s stall, ~1-in-5-8 page loads):
+// Chrome DevTools captures on the stalled loads showed ERR_QUIC_PROTOCOL_ERROR
+// on exactly the requests below (Supabase/Cloudflare edge advertises HTTP/3;
+// a QUIC handshake that stalls on a flaky network path — office wifi/VPN UDP
+// interference — is a well-documented Chromium failure mode with no
+// automatic fast fallback to h2 on that connection). It is NOT something the
+// Supabase JS client (browser `fetch`) can force off — protocol selection
+// (h3/QUIC vs h2) is negotiated by the browser/OS below the fetch API, no
+// client option exists to pin it. So "force HTTP/1.1 or /2" was evaluated
+// and is not implementable from this codebase; it would need a server-side
+// change on Supabase's Cloudflare edge (outside our infrastructure).
+// What IS actionable, and is what actually fires the 20s stall today: each
+// page of v_balance_sheet_monthly (2 sequential pages, ~1980 rows) already
+// carries a 20s abort timeout (owner-audit #9, 2026-08-04) — that timeout
+// firing at exactly 20s and surfacing as a hard error to the user IS the
+// reported symptom. QUIC connection failures are transient by nature (the
+// same request over a fresh connection typically succeeds in <1s): bounded
+// retry with backoff turns a dead 20s wait + visible error into 1-2 silent
+// retries that resolve in ~1-2s. Applied to every paginated statement fetch
+// in this file (balance sheet, budget balance sheet, AR/AP aging) since all
+// four hit the same Supabase edge and share the same failure mode.
+const RETRY_BACKOFF_MS = [400, 1200]; // 2 retries: ~0.4s, then ~1.2s
+
+/** Retries `fn` on transient network failures only — AbortError (our own
+ * page timeout) and TypeError (`fetch` network failure, which is how the
+ * browser surfaces ERR_QUIC_PROTOCOL_ERROR to JS: no error.code, just
+ * "TypeError: Failed to fetch" / "TypeError: network error"). PostgREST
+ * logical errors (permission denied, missing relation, bad query) return
+ * normally through `fn`'s own {data,error} shape and are never retried here
+ * — only connection-level failures throw, so only those hit this catch. */
+async function withTransientRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const transient = e instanceof Error && (e.name === "AbortError" || e instanceof TypeError);
+      if (!transient || attempt === RETRY_BACKOFF_MS.length) throw e;
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS[attempt]));
+    }
+  }
+  throw lastErr;
+}
+
 // ------------------------------------------------------------- cash flow
 
 export interface CashflowMonthRow {
@@ -131,25 +178,29 @@ export const fetchBalanceSheet = async (): Promise<BalanceSheetResult> => {
   if (!supabase) throw new Error("Supabase is not configured");
   const all: BalanceSheetRow[] = [];
   for (let from = 0; ; from += BS_PAGE_SIZE) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), BS_PAGE_TIMEOUT_MS);
     let data, error;
     try {
-      ({ data, error } = await supabase
-        .from("v_balance_sheet_monthly")
-        .select("month,section,subsection,line_item,amount,sort_order,is_adjustment,note,line_code")
-        .order("month", { ascending: true })
-        .order("sort_order", { ascending: true })
-        .range(from, from + BS_PAGE_SIZE - 1)
-        .abortSignal(controller.signal));
+      ({ data, error } = await withTransientRetry(async () => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), BS_PAGE_TIMEOUT_MS);
+        try {
+          return await supabase
+            .from("v_balance_sheet_monthly")
+            .select("month,section,subsection,line_item,amount,sort_order,is_adjustment,note,line_code")
+            .order("month", { ascending: true })
+            .order("sort_order", { ascending: true })
+            .range(from, from + BS_PAGE_SIZE - 1)
+            .abortSignal(controller.signal);
+        } finally {
+          clearTimeout(timeout);
+        }
+      }));
     } catch (e) {
-      clearTimeout(timeout);
       if (e instanceof Error && e.name === "AbortError") {
         throw new Error(`Timed out loading the balance sheet (page starting at row ${from}) — please retry.`);
       }
       throw e;
     }
-    clearTimeout(timeout);
     if (error) {
       if (isMissingViewError(error)) return { available: false, rows: [] };
       throw toFriendlyError(error);
@@ -291,11 +342,20 @@ const fetchAging = async <T>(view: string): Promise<AgingResult<T>> => {
   if (!supabase) throw new Error("Supabase is not configured");
   const all: T[] = [];
   for (let from = 0; ; from += AGING_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from(view)
-      .select("*")
-      .order("residual_amount", { ascending: false })
-      .range(from, from + AGING_PAGE_SIZE - 1);
+    const { data, error } = await withTransientRetry(async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), BS_PAGE_TIMEOUT_MS);
+      try {
+        return await supabase
+          .from(view)
+          .select("*")
+          .order("residual_amount", { ascending: false })
+          .range(from, from + AGING_PAGE_SIZE - 1)
+          .abortSignal(controller.signal);
+      } finally {
+        clearTimeout(timeout);
+      }
+    });
     if (error) {
       if (isMissingViewError(error)) return { available: false, rows: [] };
       throw toFriendlyError(error);
@@ -406,24 +466,28 @@ export const fetchBudgetBalanceSheet = async (): Promise<BudgetBalanceSheetResul
   if (!supabase) throw new Error("Supabase is not configured");
   const all: BudgetBalanceSheetRow[] = [];
   for (let from = 0; ; from += BS_PAGE_SIZE) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), BS_PAGE_TIMEOUT_MS);
     let data, error;
     try {
-      ({ data, error } = await supabase
-        .from("v_budget_balance_sheet_monthly")
-        .select("period_month,line_code,section,subsection,line_item,budget_amount_sar,method_note,version_id")
-        .order("period_month", { ascending: true })
-        .range(from, from + BS_PAGE_SIZE - 1)
-        .abortSignal(controller.signal));
+      ({ data, error } = await withTransientRetry(async () => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), BS_PAGE_TIMEOUT_MS);
+        try {
+          return await supabase
+            .from("v_budget_balance_sheet_monthly")
+            .select("period_month,line_code,section,subsection,line_item,budget_amount_sar,method_note,version_id")
+            .order("period_month", { ascending: true })
+            .range(from, from + BS_PAGE_SIZE - 1)
+            .abortSignal(controller.signal);
+        } finally {
+          clearTimeout(timeout);
+        }
+      }));
     } catch (e) {
-      clearTimeout(timeout);
       if (e instanceof Error && e.name === "AbortError") {
         throw new Error(`Timed out loading the budget balance sheet (page starting at row ${from}) — please retry.`);
       }
       throw e;
     }
-    clearTimeout(timeout);
     if (error) {
       if (isMissingViewError(error)) return { available: false, rows: [] };
       throw toFriendlyError(error);

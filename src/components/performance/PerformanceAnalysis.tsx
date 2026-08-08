@@ -793,35 +793,47 @@ export const PerformanceAnalysis = () => {
   const opexSectionLabel = (s: PLSection): string => MACRO_ROWS.find((m) => m.key === s)?.label ?? s;
 
   /** Renders one OpEx functional section (GA/MS/People) — and, if expanded,
-   * its family/cluster/leaf children — reading from the supplied curTree/
-   * priorTree pair instead of the page's single actual/prior tree. Called
-   * twice (once per recurrence bucket) by the OpEx block below. Every key is
-   * prefixed with `keyPrefix` so the two renders of the SAME section (e.g.
-   * OPEX-GA appears once under Recurring, once under Non-recurring) never
-   * collide in the `expanded` Set or as a React row key — the two rows show
+   * its family/cluster/leaf children — reading AMOUNTS from the supplied
+   * curTree/priorTree (a recurrence-split tree) but reading its "absent ≠
+   * zero" coverage gate from the page's own UNSPLIT actualTree/priorTree.
+   * Deliberate: a section with zero rows in ONE recurrence bucket (e.g. no
+   * non-recurring G&A this month) is a legitimate real zero, not missing
+   * data, as long as the section itself has been fed for the window — gating
+   * on the split tree's own (necessarily sparser) coverage would wrongly
+   * dash out a real, computable 0 any time a functional section happened to
+   * be 100% one-sided. Same section-level granularity the pre-existing
+   * Revenue/COGS/D&A rows already use (see `curSectionHasData` a few
+   * hundred lines below, identical `sectionHasData(actualTree, section)`
+   * call) — extended here, not reinvented. Called twice (once per
+   * recurrence bucket) by the OpEx block below. Every key is prefixed with
+   * `keyPrefix` so the two renders of the SAME section (e.g. OPEX-GA
+   * appears once under Recurring, once under Non-recurring) never collide
+   * in the `expanded` Set or as a React row key — the two rows show
    * genuinely different amounts for the same moa_code, never a duplicate. */
   const pushOpexSectionRows = (
     out: Row[],
     keyPrefix: string,
     section: PLSection,
     label: string,
-    curTree: Map<PLSection, SectionTree>,
-    priorTree: Map<PLSection, SectionTree>,
+    curSplitTree: Map<PLSection, SectionTree>,
+    priorSplitTree: Map<PLSection, SectionTree>,
   ) => {
-    const curSectionHasData = sectionHasData(curTree, section);
+    // Coverage gate reads the page's own UNSPLIT actualTree/priorTree (not
+    // curSplitTree/priorSplitTree) — see the function comment above.
+    const curSectionHasData = sectionHasData(actualTree, section);
     const priorSectionHasData = sectionHasData(priorTree, section);
     const gated = (curTotal: number, priorTotal: number) => ({
       actual: noActualData || !curSectionHasData ? null : curTotal,
       comparison: noPriorData || !priorSectionHasData ? null : priorTotal,
     });
-    const curFamilies = curTree.get(section)!.families;
-    const priorFamilies = priorTree.get(section)!.families;
+    const curFamilies = curSplitTree.get(section)!.families;
+    const priorFamilies = priorSplitTree.get(section)!.families;
     const curSlots = sectionFamilySlots(curFamilies);
     const sectionKey = `${keyPrefix}:sec:${section}`;
     const canExpand = curSlots.length > 0;
     out.push({
       indent: 1, keyPath: sectionKey, label,
-      ...gated(sectionTotal(curTree, section), sectionTotal(priorTree, section)),
+      ...gated(sectionTotal(curSplitTree, section), sectionTotal(priorSplitTree, section)),
       expandable: canExpand, expanded: canExpand && expanded.has(sectionKey),
       onToggle: canExpand ? () => toggle(sectionKey) : undefined,
     });
@@ -932,14 +944,25 @@ export const PerformanceAnalysis = () => {
       // table): OPEX-GA/MS/People fall through to their pre-existing
       // single-row rendering unchanged there.
       if (m.key === "OPEX-GA" && !isBudgetMode) {
+        // Coverage gate for BOTH group subtotals reuses `actualSub.hasOpexTotal`
+        // / `priorSub.hasOpexTotal` — the SAME flag the pre-existing "Total
+        // operating expenses" row below already gates on (all 3 functional
+        // sections fed, regardless of recurring/non-recurring tag). NOT a
+        // split-tree-specific coverage check: a recurrence bucket that's
+        // genuinely empty for one or two functional sections (e.g. zero
+        // non-recurring G&A this month) is a real zero, not missing data —
+        // gating on the split tree's own sparser coverage would wrongly dash
+        // out a real, computable total any time a bucket happened to be
+        // one-sided (caught in QA: PY Marketing & Sales non-recurring
+        // (604,075) was present but the group total still showed "—"
+        // because G&A/People had zero PY non-recurring rows — fixed by
+        // reusing this shared gate instead).
         const recTotal = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(recurringOpexTree, sec), 0);
         const recTotalP = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(recurringOpexTreePrior, sec), 0);
-        const hasRecTotal = OPEX_SECTIONS.every((sec) => sectionHasData(recurringOpexTree, sec));
-        const hasRecTotalP = OPEX_SECTIONS.every((sec) => sectionHasData(recurringOpexTreePrior, sec));
         out.push({
           indent: 0, keyPath: "OpexRecurring", label: "Operating costs — Recurring",
-          actual: noActualData || !hasRecTotal ? null : recTotal,
-          comparison: noPriorData || !hasRecTotalP ? null : recTotalP,
+          actual: noActualData || !actualSub.hasOpexTotal ? null : recTotal,
+          comparison: noPriorData || !priorSub.hasOpexTotal ? null : recTotalP,
           expandable: false, expanded: false, subtotal: true,
         });
         for (const sec of OPEX_SECTIONS) {
@@ -948,12 +971,10 @@ export const PerformanceAnalysis = () => {
 
         const nonRecTotal = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(nonRecurringOpexTree, sec), 0);
         const nonRecTotalP = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(nonRecurringOpexTreePrior, sec), 0);
-        const hasNonRecTotal = OPEX_SECTIONS.every((sec) => sectionHasData(nonRecurringOpexTree, sec));
-        const hasNonRecTotalP = OPEX_SECTIONS.every((sec) => sectionHasData(nonRecurringOpexTreePrior, sec));
         out.push({
           indent: 0, keyPath: "OpexNonRecurring", label: "Operating costs — Non-recurring",
-          actual: noActualData || !hasNonRecTotal ? null : nonRecTotal,
-          comparison: noPriorData || !hasNonRecTotalP ? null : nonRecTotalP,
+          actual: noActualData || !actualSub.hasOpexTotal ? null : nonRecTotal,
+          comparison: noPriorData || !priorSub.hasOpexTotal ? null : nonRecTotalP,
           expandable: false, expanded: false, subtotal: true,
         });
         for (const sec of OPEX_SECTIONS) {

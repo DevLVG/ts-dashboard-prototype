@@ -103,9 +103,10 @@ import { useAlignment } from "@/contexts/AlignmentContext";
 import { WindowPicker, ComparisonToggle, ScopeToggle, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
 import { KpiCircles } from "@/components/overview/KpiCircles";
 import { ComparisonHistogram } from "@/components/overview/ComparisonHistogram";
+import { BuRevenueGrossMarginChart, type BuChartDatum } from "@/components/performance/BuRevenueGrossMarginChart";
 import {
-  useBasisRows, useRecurrence, resolveRecurrence, aggregateBudgetWindow,
-  computeMtdProration, prorateBudget, factMonths, levGapSummary,
+  useBasisRows, useRecurrence, resolveRecurrence, aggregateBudgetWindow, aggregatePL,
+  computeMtdProration, prorateAgg, prorateBudget, factMonths, levGapSummary,
   type BasisRow, type Win, type RecurrenceState, type BudgetAgg,
 } from "@/data/alignment";
 import { useBudgetMonthly, monthKeyLabel } from "@/data/liveData";
@@ -144,6 +145,22 @@ const monthsCoveredInWin = (rows: BasisRow[] | undefined, w: Win): number => {
 
 const PL_SECTIONS = ["Revenue", "COGS", "OPEX-GA", "OPEX-MS", "OPEX-People", "Project-Costs", "D&A", "NON-OP"] as const;
 type PLSection = (typeof PL_SECTIONS)[number];
+
+/** Revenue-bearing business units, in the same canonical order buildTree's
+ * own family list uses (first-seen order walking MOA_PL_LEAVES) — DERIVED
+ * from the same source of truth rather than hand-listed, so the "By Business
+ * Unit" chart (BuRevenueGrossMarginChart, 2026-08-08 CEO mandate) can never
+ * drift out of sync with the MoA tree or silently drop a BU. */
+const REVENUE_BUS: { bu: string; buName: string }[] = (() => {
+  const seen = new Set<string>();
+  const out: { bu: string; buName: string }[] = [];
+  for (const def of MOA_PL_LEAVES) {
+    if (def.plSection !== "Revenue" || seen.has(def.bu)) continue;
+    seen.add(def.bu);
+    out.push({ bu: def.bu, buName: buFamilyName(def.bu) });
+  }
+  return out;
+})();
 
 interface LeafNode { moaCode: string; leafName: string; total: number }
 interface ClusterNode { clusterCode: string; clusterName: string; total: number; leaves: LeafNode[] }
@@ -569,6 +586,60 @@ export const PerformanceAnalysis = () => {
     ? `No data posted yet for ${windowName} — every line below shows "—" until this period is fed.`
     : null;
 
+  // ---------------------------------------------------- By Business Unit chart
+  //
+  // 2026-08-08, CEO mandate (Marcello) — a graphical Revenue/Gross Margin
+  // view per business unit, stopping at Gross Margin (OPEX below it is 100%
+  // bu="CORP" by MoA design — see BuRevenueGrossMarginChart.tsx's header for
+  // the full reasoning and why an EBITDA-per-BU row must NOT be fabricated
+  // here later without a real indirect-cost allocation first).
+  //
+  // scopedRows mirrors buildTree's own inline scope filter exactly (same
+  // predicate, same `resolveRecurrence` call) so aggregatePL's per-BU sums
+  // are computed over the IDENTICAL row set actualTree/priorTree already
+  // are — this is what makes the chart reconcile to the cent with the table
+  // below, not a separate re-derivation that could quietly drift from it.
+  const scopedRows = useMemo(() => {
+    if (!rows) return rows;
+    if (scope !== "RECURRING") return rows;
+    return rows.filter((r) => resolveRecurrence(r, rec) !== "non-recurring");
+  }, [rows, scope, rec]);
+
+  const buChartData = useMemo((): BuChartDatum[] => {
+    // Gate on the table's OWN whole-company flags, not a per-BU recompute:
+    // Competitions/Private Events have zero moa_gestionale COGS accounts (a
+    // real MoA gap, not a bug — see the Gross Margin family explosion
+    // comment above), so their Gross Margin legitimately equals 100% of
+    // their Revenue every time the company-wide gate is open. Gating each BU
+    // on its own hasCogs would wrongly blank those two out and disagree with
+    // the table's own family rows for the identical window.
+    const revenueHasData = sectionHasData(actualTree, "Revenue");
+    const revenueHasDataP = sectionHasData(priorTree, "Revenue");
+    return REVENUE_BUS.map(({ bu, buName }) => {
+      const actualAgg = aggregatePL(scopedRows, "STRICT", win, bu);
+      const priorAggRaw = aggregatePL(scopedRows, "STRICT", py, bu);
+      const priorAgg = mtdPro ? prorateAgg(priorAggRaw, mtdPro.fraction) : priorAggRaw;
+      const budgetAggBuRaw = isBudgetMode ? aggregateBudgetWindow(budgetRowsForScope, win, bu) : null;
+      const budgetAggBu = mtdPro && budgetAggBuRaw ? prorateBudget(budgetAggBuRaw, mtdPro.fraction) : budgetAggBuRaw;
+
+      const revenueActual = noActualData || !revenueHasData ? null : actualAgg.revenue;
+      const revenueComparison = isBudgetMode
+        ? (budgetAggBu?.revenue ?? null)
+        : (noPriorData || !revenueHasDataP ? null : priorAgg.revenue);
+
+      const gmActual = noActualData || !actualSub.hasGrossMargin ? null : actualAgg.grossMargin;
+      // Budget doesn't allocate COGS by BU (verified against v_budget_monthly,
+      // 2026-08-08 — see BuRevenueGrossMarginChart's gmBudgetNote) — never
+      // show a Budget Gross Margin per BU, it would silently read as ~100%
+      // margin for every real BU.
+      const gmComparison = isBudgetMode
+        ? null
+        : (noPriorData || !priorSub.hasGrossMargin ? null : priorAgg.grossMargin);
+
+      return { bu, buName, revenueActual, revenueComparison, gmActual, gmComparison };
+    });
+  }, [scopedRows, win, py, mtdPro, isBudgetMode, budgetRowsForScope, noActualData, noPriorData, actualTree, priorTree, actualSub, priorSub]);
+
   // Project-Costs (Leveredge/F&F) months missing within the CURRENT window
   // — same per-month scan `deriveCompleteness` runs globally in
   // data/alignment.ts, just scoped to `win` so the note below only talks
@@ -882,6 +953,21 @@ export const PerformanceAnalysis = () => {
           wiring from this page. */}
       <KpiCircles />
       <ComparisonHistogram />
+
+      {/* ---------- By Business Unit (Revenue / Gross Margin only) ---------- */}
+      {/* 2026-08-08 CEO mandate — see the buChartData memo above and
+          BuRevenueGrossMarginChart.tsx for why this stops at Gross Margin
+          and how it's kept reconciled to the table below. */}
+      {!isLoading && hasAnyData && (
+        <BuRevenueGrossMarginChart
+          data={buChartData}
+          comparisonLabel={comparisonLabel}
+          isBudgetMode={isBudgetMode}
+          mtdProrated={mtdPro !== null}
+          windowName={windowName}
+          noActualData={noActualData}
+        />
+      )}
 
       {/* ---------- the P&L table ---------- */}
       <Card className="p-5 space-y-3">

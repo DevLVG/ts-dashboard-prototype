@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
-import { AlertTriangle, Scale, Archive, ChevronsRight, Radio, TrendingUp, Wallet, Layers, Repeat, CalendarRange } from "lucide-react";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { AlertTriangle, Scale, Archive, ChevronsRight, ChevronLeft, ChevronRight, Radio, TrendingUp, Wallet, Layers, Repeat, CalendarRange } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlignment, type ComparisonMode, type Scope } from "@/contexts/AlignmentContext";
 import {
@@ -112,6 +112,95 @@ export const ScopeToggle = () => {
     <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
       {seg("ALL", "All", Layers)}
       {seg("RECURRING", "Only Recurring", Repeat)}
+    </div>
+  );
+};
+
+// ------------------------------------------------- month-range calendar
+
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Real, clickable calendar for the Custom range panel below (Marcello,
+ * live review 2026-08-08 — "voglio un calendario vero, non solo digitare le
+ * date"). Deliberately a MONTH grid, not a day grid: the picker everywhere
+ * else here works at month-key grain (see the long note on `WindowPicker`
+ * below on why day grain would be dishonest — no daily P&L fact exists), so
+ * a day-level `react-day-picker` <Calendar/> would invite a precision the
+ * data can't back up. Built from the exact same primitives/tokens as the
+ * shadcn `Calendar` in `components/ui/calendar.tsx` (`buttonVariants`,
+ * `bg-primary`/`text-primary-foreground` for the selected day, `bg-accent`
+ * for the in-range fill, ghost hover) so it reads as part of the same
+ * component family and inherits the dashboard's charcoal/gold theme for
+ * free — no new dependency, no new palette. Year-at-a-time nav, clamped to
+ * [min, max] (the real warehouse history), so out-of-range years/months are
+ * simply unreachable rather than clickable-then-rejected. */
+const MonthRangeCalendar = ({
+  min,
+  max,
+  start,
+  end,
+  onPick,
+}: {
+  min: string;
+  max: string;
+  start: string;
+  end: string;
+  onPick: (key: string) => void;
+}) => {
+  const [viewYear, setViewYear] = useState(() => Number((end || start || max).slice(0, 4)) || Number(max.slice(0, 4)));
+  const minYear = Number(min.slice(0, 4));
+  const maxYear = Number(max.slice(0, 4));
+  const navBtn = "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100 disabled:opacity-20 disabled:pointer-events-none disabled:hover:opacity-20";
+  return (
+    <div className="select-none">
+      <div className="flex items-center justify-between pb-2">
+        <button
+          type="button"
+          aria-label="Previous year"
+          disabled={viewYear <= minYear}
+          onClick={() => setViewYear((y) => y - 1)}
+          className={cn(buttonVariants({ variant: "outline" }), navBtn)}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <span className="text-sm font-medium tabular-nums">{viewYear}</span>
+        <button
+          type="button"
+          aria-label="Next year"
+          disabled={viewYear >= maxYear}
+          onClick={() => setViewYear((y) => y + 1)}
+          className={cn(buttonVariants({ variant: "outline" }), navBtn)}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-1">
+        {MONTH_ABBR.map((label, i) => {
+          const key = `${viewYear}-${String(i + 1).padStart(2, "0")}`;
+          const disabled = key < min || key > max;
+          const isEdge = key === start || key === end;
+          const inRange = !!start && !!end && key > start && key < end;
+          return (
+            <button
+              key={key}
+              type="button"
+              disabled={disabled}
+              aria-pressed={isEdge}
+              onClick={() => onPick(key)}
+              title={monthKeyLabel(key)}
+              className={cn(
+                buttonVariants({ variant: "ghost" }),
+                "h-9 w-full p-0 font-normal text-sm rounded-md",
+                disabled && "text-muted-foreground opacity-40 pointer-events-none",
+                inRange && "bg-accent/60 text-accent-foreground rounded-none",
+                isEdge && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground",
+              )}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 };
@@ -224,6 +313,23 @@ export const WindowPicker = ({ months }: { months?: string[] }) => {
     setCustomOpen(false);
   };
 
+  // Calendar click semantics (fix — 2026-08-08, Marcello live review, real
+  // clickable calendar): first click starts a new range (clears end);
+  // clicking again either closes the range (if on/after start) or restarts
+  // it (if before start) — the same two-click convention as every other
+  // month-range calendar. Shares `draftStart`/`draftEnd` with the two text
+  // inputs below so clicking and typing stay in lockstep either direction.
+  const pickCalendarMonth = (key: string) => {
+    if (!draftStart || draftEnd) {
+      setDraftStart(key);
+      setDraftEnd("");
+    } else if (key < draftStart) {
+      setDraftStart(key);
+    } else {
+      setDraftEnd(key);
+    }
+  };
+
   // Click-outside + Escape to close — a plain conditional panel (NOT a
   // second Radix portal primitive) deliberately: an earlier version used
   // <Popover> anchored to the Select, but closing/opening the Popover in the
@@ -307,36 +413,61 @@ export const WindowPicker = ({ months }: { months?: string[] }) => {
         <div
           role="dialog"
           aria-label="Custom range"
-          className="absolute left-0 top-full z-50 mt-2 w-72 space-y-3 rounded-md border border-border bg-popover p-4 text-popover-foreground shadow-md"
+          className="absolute left-0 top-full z-50 mt-2 w-[19rem] max-w-[calc(100vw-2rem)] space-y-3 rounded-md border border-border bg-popover p-4 text-popover-foreground shadow-md"
         >
-          <p className="text-xs font-semibold text-foreground">Custom range</p>
-          <div className="space-y-1.5">
-            <label htmlFor="custom-range-start" className="text-xs text-muted-foreground">Start month</label>
-            <input
-              id="custom-range-start"
-              type="month"
-              value={draftStart}
-              min={monthBounds.min}
-              max={draftEnd || monthBounds.max}
-              onChange={(e) => setDraftStart(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm text-foreground"
-            />
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-foreground">Custom range</p>
+            <p className="text-[11px] text-muted-foreground tabular-nums">
+              {draftStart ? monthKeyLabel(draftStart) : "Start"} → {draftEnd ? monthKeyLabel(draftEnd) : "End"}
+            </p>
           </div>
-          <div className="space-y-1.5">
-            <label htmlFor="custom-range-end" className="text-xs text-muted-foreground">End month</label>
-            <input
-              id="custom-range-end"
-              type="month"
-              value={draftEnd}
-              min={draftStart || monthBounds.min}
-              max={monthBounds.max}
-              onChange={(e) => setDraftEnd(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm text-foreground"
-            />
+
+          {/* Click-driven calendar (fix — 2026-08-08, Marcello live review:
+              "voglio un calendario vero da cliccare"). Month grain, clamped
+              to the real warehouse history in `monthBounds`. */}
+          <MonthRangeCalendar
+            min={monthBounds.min}
+            max={monthBounds.max}
+            start={draftStart}
+            end={draftEnd}
+            onPick={pickCalendarMonth}
+          />
+
+          {/* Typing stays available for anyone who prefers it — shares the
+              same draftStart/draftEnd state as the calendar above, so either
+              input method stays in sync with the other. */}
+          <div className="grid grid-cols-2 gap-2 border-t border-border pt-3">
+            <div className="space-y-1">
+              <label htmlFor="custom-range-start" className="text-xs text-muted-foreground">Start month</label>
+              <input
+                id="custom-range-start"
+                type="month"
+                value={draftStart}
+                min={monthBounds.min}
+                max={draftEnd || monthBounds.max}
+                onChange={(e) => setDraftStart(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="custom-range-end" className="text-xs text-muted-foreground">End month</label>
+              <input
+                id="custom-range-end"
+                type="month"
+                value={draftEnd}
+                min={draftStart || monthBounds.min}
+                max={monthBounds.max}
+                onChange={(e) => setDraftEnd(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+              />
+            </div>
           </div>
           {draftStart && draftEnd && draftStart > draftEnd && (
             <p className="text-xs text-destructive">Start must be on or before end.</p>
           )}
+          <p className="text-[11px] text-muted-foreground">
+            Data available from {monthKeyLabel(monthBounds.min)} to {monthKeyLabel(monthBounds.max)}.
+          </p>
           <div className="flex items-center justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" size="sm" onClick={() => setCustomOpen(false)}>Cancel</Button>
             <Button type="button" size="sm" disabled={draftInvalid} onClick={applyCustom}>Apply</Button>

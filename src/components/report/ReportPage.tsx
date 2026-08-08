@@ -34,7 +34,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAlignment } from "@/contexts/AlignmentContext";
 import { resolveRole } from "@/lib/roles";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
-import { WindowPicker, ComparisonToggle, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
+import { WindowPicker, ComparisonToggle, ScopeToggle, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
 import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtOrDash, comparePct } from "@/lib/format";
 import { periodFromPreset, useReportLastComplete, useReportSnapshot, type MacroRow } from "./reportData";
 import { buildEconomicsCommentary } from "./reportCommentary";
@@ -119,14 +119,22 @@ export const ReportPage = () => {
           <h1 className="font-heading text-2xl tracking-wide text-foreground">Report</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
             Export a branded, board-ready PDF — Economics, Cash Flow and Balance Sheet for the window you pick. Same
-            period and comparison controls as Economics / Cash Flow.
+            period, comparison and scope controls as Economics / Cash Flow.
           </p>
         </div>
 
         <Card className="p-5 space-y-4">
+          {/* ScopeToggle added 2026-08-08 (CEO live review — "nel report
+              manca il bottone recurring e non recurring"): Economics and
+              Cash Flow both let the CEO switch All/Only Recurring; the
+              report had no such control at all, so an exported document
+              could never reflect that choice. Same shared control, same
+              global AlignmentContext — see reportData.ts's scope-filtered
+              snapshot. */}
           <div className="flex flex-wrap items-center gap-3">
             <WindowPicker />
             <ComparisonToggle />
+            <ScopeToggle />
             <OpenMonthsBadge />
           </div>
 
@@ -164,7 +172,9 @@ export const ReportPage = () => {
               <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                 Preview — {snapshot.period.label}
               </h2>
-              <span className="text-[11px] text-muted-foreground">vs {snapshot.comparisonLabel}</span>
+              <span className="text-[11px] text-muted-foreground">
+                vs {snapshot.comparisonLabel} · {snapshot.scopeLabel}
+              </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

@@ -62,7 +62,9 @@ const Login = () => {
           <h1 className="font-heading text-4xl tracking-widest">TRIO SPORTING</h1>
           <div className="mt-2 h-px w-16 bg-gold/60" />
           <p className="mt-3 text-xs uppercase tracking-[0.3em] text-muted-foreground">
-            CLEVER · CEO Cockpit
+            {/* On-screen label only (CEO live-review request, 2026-08-08) —
+                see the matching note in DashboardNav.tsx. */}
+            CLEVER · CEO Dashboard
           </p>
         </div>
 

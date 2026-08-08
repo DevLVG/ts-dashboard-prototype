@@ -15,11 +15,25 @@
 //     view: recurring-only statement lines when RECURRING. Default ALL.
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Basis, WindowPresetId, Win } from "@/data/alignment";
-import { resolveWindow, pyWin, winLabel, windowIncludesOpenMonths } from "@/data/alignment";
+import { resolveWindow, pyWin, ppWin, winLabel, windowIncludesOpenMonths } from "@/data/alignment";
 import { todayMonthKey } from "@/data/liveData";
 
-export type ComparisonMode = "PY" | "BUDGET";
+// "PP" (Previous Period) added 2026-08-08 — CEO live-review request, third
+// comparison alongside Previous Year and Budget: the window immediately
+// preceding the active one, same length (see `ppWin` in data/alignment.ts).
+export type ComparisonMode = "PY" | "BUDGET" | "PP";
 export type Scope = "ALL" | "RECURRING";
+
+/** Single source of truth for the comparison's plain-language label — every
+ * screen that shows "vs {label}" (KPI circles, the P&L table header, Cash
+ * Flow, the Report page) reads this instead of re-deriving its own
+ * PY/BUDGET-only ternary, so adding PP here is the ONE place a third
+ * comparison's label needs to be spelled out. */
+export const COMPARISON_LABELS: Record<ComparisonMode, string> = {
+  PY: "Previous Year",
+  BUDGET: "Budget",
+  PP: "Previous Period",
+};
 
 interface AlignmentState {
   /** Pinned to "STRICT" (2026-08-03 decision) — kept typed as `Basis` so
@@ -110,7 +124,8 @@ export const AlignmentProvider = ({ children }: { children: ReactNode }) => {
   });
   const [comparisonMode, setComparisonModeState] = useState<ComparisonMode>(() => {
     const v = typeof localStorage !== "undefined" ? localStorage.getItem(COMPARISON_KEY) : null;
-    return v === "BUDGET" ? "BUDGET" : "PY"; // PY is the DEFAULT (decision #2)
+    // PY is the DEFAULT (decision #2); PP added 2026-08-08 alongside it.
+    return v === "BUDGET" ? "BUDGET" : v === "PP" ? "PP" : "PY";
   });
   const [scope, setScopeState] = useState<Scope>(() => {
     const v = typeof localStorage !== "undefined" ? localStorage.getItem(SCOPE_KEY) : null;
@@ -135,7 +150,18 @@ export const AlignmentProvider = ({ children }: { children: ReactNode }) => {
 
   const value = useMemo<AlignmentState>(() => {
     const { win, name } = resolveWindow(preset, lastComplete, todayKey);
-    const py = pyWin(win);
+    // `py` is the field name every consumer (KPI circles, the Economics/Cash
+    // Flow/Report tables, the leaf-line drill-down) already reads as "the
+    // active non-Budget comparison window" — they all branch on
+    // `comparisonMode === "BUDGET"` and otherwise use this window as-is, so
+    // resolving it to PP here (instead of always PY) is the ONE change that
+    // makes the whole app's "absent ≠ zero" honesty gates, MTD proration and
+    // leaf-line detail apply to Previous Period for free, with no per-screen
+    // rewiring. In Budget mode this value is unused for the comparison
+    // figure itself (Budget is aggregated separately) — kept as PY there,
+    // same as before this change, purely so nothing downstream that still
+    // reads it for messaging changes behaviour.
+    const py = comparisonMode === "PP" ? ppWin(win) : pyWin(win);
     return {
       basis, setBasis, preset, setPreset, win, windowName: name, py,
       winLabelText: winLabel(win), pyLabelText: winLabel(py),

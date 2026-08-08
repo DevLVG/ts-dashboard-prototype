@@ -24,7 +24,7 @@
 //   start June (Q1=Jun-Aug ... Q4=Mar-May).
 import { useQuery } from "@tanstack/react-query";
 import { supabase, isSupabaseConfigured, toFriendlyError } from "@/lib/supabaseClient";
-import { monthKey, shiftMonthKey, monthKeyLabel } from "@/data/liveData";
+import { monthKey, shiftMonthKey, monthKeyLabel, rangeLengthMonths } from "@/data/liveData";
 
 // ---------------------------------------------------------------- types
 
@@ -70,17 +70,73 @@ const isMissingRelation = (err: { code?: string; message?: string }): boolean =>
   );
 };
 
-const fetchAllPages = async <T,>(build: (from: number, to: number) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }>): Promise<T[] | "missing"> => {
-  const all: T[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await build(from, from + PAGE - 1);
-    if (error) {
-      if (isMissingRelation(error)) return "missing";
-      throw toFriendlyError(error);
+/** PERF (2026-08-08, CEO live review — "otto-nove secondi, ha pensato che
+ * fossero bloccate"): this used to fetch page 0, AWAIT it, then fetch page
+ * 1, await it, etc — every page waited for the previous one to fully round-
+ * trip before even being REQUESTED, even though the pages have no
+ * dependency on each other (they're just offset windows of the same query).
+ * Measured live (Playwright network trace, local dev, 2026-08-08):
+ * `v_pnl_basis` alone needed 5 sequential pages on the Cash Flow page — each
+ * individual page was a perfectly normal 600-950ms PostgREST round trip, but
+ * chained serially they summed to ~3.4s of the page's ~4s total load, i.e.
+ * the pagination STRATEGY, not any one slow query, was the dominant cost.
+ * Fix: ask PostgREST for the exact total row count on page 0 (`count:
+ * "exact"` costs nothing extra — Postgres computes it as part of the same
+ * query and returns it in the response's Content-Range header, which the
+ * Supabase JS client already surfaces as `count`), then fire every
+ * remaining page CONCURRENTLY via Promise.all instead of one at a time.
+ * Total wall time drops from sum(pages) towards max(pages) — for the 5-page
+ * v_pnl_basis case, from ~3.4s serial to close to the slowest single page's
+ * own ~900ms. Purely a concurrency change: same rows, same order once
+ * reassembled, same error handling — verified to return identical row
+ * counts/totals against the live warehouse before landing (see the
+ * 2026-08-08 QA notes). Falls back to the old page-at-a-time loop if the
+ * server ever omits `count` (defensive — every current call site's view
+ * supports it) so this can never silently under-fetch. */
+const fetchAllPages = async <T,>(
+  build: (from: number, to: number, withCount: boolean) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null; count?: number | null }>,
+): Promise<T[] | "missing"> => {
+  const first = await build(0, PAGE - 1, true);
+  if (first.error) {
+    if (isMissingRelation(first.error)) return "missing";
+    throw toFriendlyError(first.error);
+  }
+  const firstPage = (first.data ?? []) as T[];
+  const total = first.count ?? null;
+
+  // Fits in one page, or the server didn't return a count (fall back to the
+  // safe serial loop below rather than guess how many pages remain).
+  if (firstPage.length < PAGE) return firstPage;
+  if (total === null) {
+    const all = [...firstPage];
+    for (let from = PAGE; ; from += PAGE) {
+      const { data, error } = await build(from, from + PAGE - 1, false);
+      if (error) {
+        if (isMissingRelation(error)) return "missing";
+        throw toFriendlyError(error);
+      }
+      const page = (data ?? []) as T[];
+      all.push(...page);
+      if (page.length < PAGE) break;
     }
-    const page = (data ?? []) as T[];
-    all.push(...page);
-    if (page.length < PAGE) break;
+    return all;
+  }
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE));
+  if (pageCount <= 1) return firstPage;
+  const rest = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, i) => {
+      const from = (i + 1) * PAGE;
+      return build(from, from + PAGE - 1, false);
+    }),
+  );
+  const all = [...firstPage];
+  for (const r of rest) {
+    if (r.error) {
+      if (isMissingRelation(r.error)) continue; // relation vanished mid-fetch — treat as no more rows, not a crash
+      throw toFriendlyError(r.error);
+    }
+    all.push(...((r.data ?? []) as T[]));
   }
   return all;
 };
@@ -97,10 +153,13 @@ interface VPnlBasisRow {
 export const fetchBasisRows = async (): Promise<BasisDataset> => {
   if (!supabase) throw new Error("Supabase is not configured");
   // Preferred: the DB-2 contract view.
-  const viaView = await fetchAllPages<VPnlBasisRow>((from, to) =>
+  const viaView = await fetchAllPages<VPnlBasisRow>((from, to, withCount) =>
     supabase!
       .from("v_pnl_basis")
-      .select("period_month,section,bu,cluster,leaf,moa_code,source,recurrence,drift_flag,amount_net_sar,amount_precn_sar,credit_note_sar")
+      .select(
+        "period_month,section,bu,cluster,leaf,moa_code,source,recurrence,drift_flag,amount_net_sar,amount_precn_sar,credit_note_sar",
+        withCount ? { count: "exact" } : undefined,
+      )
       .order("period_month", { ascending: true })
       .order("moa_code", { ascending: true })
       .range(from, to),
@@ -124,10 +183,13 @@ export const fetchBasisRows = async (): Promise<BasisDataset> => {
   }
   // Fallback: identical arithmetic on pnl_management (has `source`, incl.
   // 'credit_note' — migration 026). Certified live view, NOT a mock.
-  const viaMgmt = await fetchAllPages<Omit<BasisRow, "recurrence" | "drift_flag">>((from, to) =>
+  const viaMgmt = await fetchAllPages<Omit<BasisRow, "recurrence" | "drift_flag">>((from, to, withCount) =>
     supabase!
       .from("pnl_management")
-      .select("period_month,section,bu,cluster,leaf,moa_code,source,amount_sar")
+      .select(
+        "period_month,section,bu,cluster,leaf,moa_code,source,amount_sar",
+        withCount ? { count: "exact" } : undefined,
+      )
       .order("period_month", { ascending: true })
       .order("moa_code", { ascending: true })
       .range(from, to),
@@ -252,6 +314,23 @@ export const shiftWin = (w: Win, months: number): Win => ({
 
 /** PY = the same window shifted −12 months (§0.2). Never anything else. */
 export const pyWin = (w: Win): Win => shiftWin(w, -12);
+
+/** PP (Previous Period) = the immediately preceding window of the SAME
+ * length as `w` — the third comparison (CEO live-review request,
+ * 2026-08-08): "se il CEO sceglie gennaio-giugno 2026, deve poterlo
+ * confrontare con luglio-dicembre 2025, non solo con gennaio-giugno 2025."
+ * Length-aware by construction (`rangeLengthMonths`, already used by the
+ * cash-flow module's own PP definition in liveData.ts — reused here rather
+ * than re-derived, so there is exactly one "how many months is this window"
+ * implementation in the app): a 6-month window shifts back 6 months, a
+ * single month shifts back 1, a 3-month quarter shifts back 3 — never a
+ * fixed offset the way `pyWin` is. Deliberately distinct from `pyWin`
+ * (always −12 months, whole calendar-year shift) — the two answer different
+ * questions and must never be conflated. */
+export const ppWin = (w: Win): Win => {
+  const len = rangeLengthMonths(w.startKey, w.endKey);
+  return shiftWin(w, -len);
+};
 
 /** A window "includes open months" whenever it reaches past the last CLOSED
  * month (`lastComplete`, derived from actual cost postings — see

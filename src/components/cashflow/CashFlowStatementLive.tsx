@@ -40,7 +40,7 @@
 //     mini `actualDataNote`/`budgetCapNote` lines inside the statement card
 //     itself (rendered only when genuinely relevant to the selected window)
 //     stay, since those are a single honest sentence, not a boxed banner.
-import { WindowPicker, ComparisonToggle, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
+import { WindowPicker, ComparisonToggle, OpenMonthsBadge, LoadingState } from "@/components/chrome/AlignmentChrome";
 import { useCashFlowPageData } from "@/hooks/useCashFlowPageData";
 import { CashPositionCircle } from "@/components/cashflow/CashPositionCircle";
 import { CashByBankSplit } from "@/components/cashflow/CashByBankSplit";
@@ -63,31 +63,43 @@ export const CashFlowStatementLive = () => {
         <OpenMonthsBadge />
       </div>
 
-      {data.isLoading && <p className="text-sm text-muted-foreground">Loading live cash-flow data…</p>}
       {data.isError && (
         <p className="text-sm text-destructive/90">Could not load the cash-flow statement from Supabase.</p>
       )}
 
-      {/* ---------- big cash circle + cash-by-bank split ---------- */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
-        <CashPositionCircle
-          actual={data.circleActual}
-          comparison={data.circleComparison}
-          comparisonLabel={data.comparisonLabel}
-        />
-        <CashByBankSplit data={data.bankSplit} note={data.bankSplitNote} />
-      </div>
+      {/* 2026-08-08 (CEO live review): render the loading state INSTEAD OF
+          the circle/split/table below, not alongside them — those three
+          have no loading-awareness of their own, so leaving them mounted
+          during the fetch showed a full-looking page of "—" placeholders
+          with only a tiny text line as any hint something was still
+          working. That read as frozen mid-demo; this is the clear signal
+          fix (see LoadingState's own header comment for the full context). */}
+      {data.isLoading ? (
+        <LoadingState label="Loading the cash-flow statement…" />
+      ) : (
+        <>
+          {/* ---------- big cash circle + cash-by-bank split ---------- */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+            <CashPositionCircle
+              actual={data.circleActual}
+              comparison={data.circleComparison}
+              comparisonLabel={data.comparisonLabel}
+            />
+            <CashByBankSplit data={data.bankSplit} note={data.bankSplitNote} />
+          </div>
 
-      {/* ---------- the cash-flow statement table ---------- */}
-      <CashFlowTable
-        rows={data.rows}
-        windowName={data.windowName}
-        comparisonLabel={data.comparisonLabel}
-        mtdProrated={data.mtdProrated}
-        mtdHint={data.mtdHint}
-        budgetCapNote={data.budgetCapNote}
-        actualDataNote={data.actualDataNote}
-      />
+          {/* ---------- the cash-flow statement table ---------- */}
+          <CashFlowTable
+            rows={data.rows}
+            windowName={data.windowName}
+            comparisonLabel={data.comparisonLabel}
+            mtdProrated={data.mtdProrated}
+            mtdHint={data.mtdHint}
+            budgetCapNote={data.budgetCapNote}
+            actualDataNote={data.actualDataNote}
+          />
+        </>
+      )}
     </div>
   );
 };

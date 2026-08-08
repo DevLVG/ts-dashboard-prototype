@@ -569,7 +569,9 @@ const drawCover = (
   setDisplay(doc, fonts, 27, BLACK);
   doc.text(pdfSafe(snapshot.period.label), PAGE_W / 2, 150, { align: "center" });
   setBody(doc, fonts, 10.5, MUTED, "semibold");
-  doc.text(`Versus ${snapshot.comparisonLabel}`, PAGE_W / 2, 157, { align: "center" });
+  // Scope on the cover too (2026-08-08) — the cover's KPI row below is the
+  // Economics circles, which the Recurring/Non-recurring split does affect.
+  doc.text(`Versus ${snapshot.comparisonLabel} · ${snapshot.scopeLabel}`, PAGE_W / 2, 157, { align: "center" });
 
   let y = 165;
   if (snapshot.period.isOpen) {
@@ -814,7 +816,13 @@ export const generateReportPdf = async (
   const flow: Flow = { doc, y: TOP_Y, chrome };
 
   // ECONOMICS — always present.
-  drawSectionOpener(flow, fonts, "Economics", buildEconomicsCommentary(snapshot));
+  // Scope declared right under the section title (2026-08-08, CEO live
+  // review — "nel report manca il bottone recurring e non recurring"):
+  // Economics is the ONE statement the Recurring/Non-recurring split
+  // affects, so it gets the subtitle, same slot Balance Sheet already uses
+  // for "As at {date}" below — never left implicit, so a reader can't
+  // mistake an "Only Recurring" export for the full P&L.
+  drawSectionOpener(flow, fonts, "Economics", buildEconomicsCommentary(snapshot), snapshot.scopeLabel);
   drawEconomicsTable(flow, fonts, snapshot);
 
   // CASH FLOW — always present (task: "ensure it renders with real data").

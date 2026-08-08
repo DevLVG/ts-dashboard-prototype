@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { AlertTriangle, Scale, Archive, ChevronsRight, ChevronLeft, ChevronRight, Radio, TrendingUp, Wallet, Layers, Repeat, CalendarRange } from "lucide-react";
+import { AlertTriangle, Scale, Archive, ChevronsRight, ChevronLeft, ChevronRight, Radio, TrendingUp, Wallet, Layers, Repeat, CalendarRange, X, History, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlignment, type ComparisonMode, type Scope } from "@/contexts/AlignmentContext";
 import {
@@ -57,8 +57,12 @@ export const StrictBasisNote = (_props: { className?: string }) => null;
 // ------------------------------------------------------- comparison toggle
 
 /** Decision #2 (2026-08-03): ONE comparison shown at a time everywhere — KPI
- * cards, charts, the P&L table — never both PY and Budget together ("fa solo
- * casino" together). Global + persisted, default "Versus Previous Year". */
+ * cards, charts, the P&L table — never more than one together ("fa solo
+ * casino" together). Global + persisted, default "Versus Previous Year".
+ * Third segment "Versus Previous Period" added 2026-08-08 (CEO live-review
+ * request): the window immediately preceding the active one, same length
+ * (`ppWin` in data/alignment.ts) — distinct from Previous Year, which is
+ * always a fixed −12 months regardless of the window's own length. */
 export const ComparisonToggle = () => {
   const { comparisonMode, setComparisonMode } = useAlignment();
   const seg = (m: ComparisonMode, label: string, Icon: typeof TrendingUp) => (
@@ -78,8 +82,9 @@ export const ComparisonToggle = () => {
     </button>
   );
   return (
-    <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
+    <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 flex-wrap">
       {seg("PY", "Versus Previous Year", TrendingUp)}
+      {seg("PP", "Versus Previous Period", History)}
       {seg("BUDGET", "Versus Budget", Wallet)}
     </div>
   );
@@ -313,6 +318,18 @@ export const WindowPicker = ({ months }: { months?: string[] }) => {
     setCustomOpen(false);
   };
 
+  // Clear the in-progress selection (CEO live-review request, 2026-08-08 —
+  // he had a month already picked and couldn't find an obvious way to wipe
+  // it and start over). Resets BOTH the calendar's own start/end and the two
+  // typed inputs, since they share the same draftStart/draftEnd state — one
+  // click empties the panel back to its opening state, ready for a fresh
+  // first click on the calendar. Only shown once there is something to
+  // clear (see the button's own `(draftStart || draftEnd) &&` guard below).
+  const clearDraft = () => {
+    setDraftStart("");
+    setDraftEnd("");
+  };
+
   // Calendar click semantics (fix — 2026-08-08, Marcello live review, real
   // clickable calendar): first click starts a new range (clears end);
   // clicking again either closes the range (if on/after start) or restarts
@@ -415,11 +432,25 @@ export const WindowPicker = ({ months }: { months?: string[] }) => {
           aria-label="Custom range"
           className="absolute left-0 top-full z-50 mt-2 w-[19rem] max-w-[calc(100vw-2rem)] space-y-3 rounded-md border border-border bg-popover p-4 text-popover-foreground shadow-md"
         >
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold text-foreground">Custom range</p>
-            <p className="text-[11px] text-muted-foreground tabular-nums">
-              {draftStart ? monthKeyLabel(draftStart) : "Start"} → {draftEnd ? monthKeyLabel(draftEnd) : "End"}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-[11px] text-muted-foreground tabular-nums">
+                {draftStart ? monthKeyLabel(draftStart) : "Start"} → {draftEnd ? monthKeyLabel(draftEnd) : "End"}
+              </p>
+              {(draftStart || draftEnd) && (
+                <button
+                  type="button"
+                  onClick={clearDraft}
+                  className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[11px] font-semibold text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                  aria-label="Clear selected dates"
+                  title="Clear selected dates"
+                >
+                  <X className="h-3 w-3" />
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Click-driven calendar (fix — 2026-08-08, Marcello live review:
@@ -478,7 +509,35 @@ export const WindowPicker = ({ months }: { months?: string[] }) => {
   );
 };
 
-// ------------------------------------------------------- open-months badge
+// ------------------------------------------------------------- loading state
+
+/** Shared "still working" block for pages whose first load takes long enough
+ * (2026-08-08, CEO live review) to read as frozen — Balance Sheet and Cash
+ * Flow each ran several paginated warehouse fetches with only a single small
+ * muted sentence as any loading signal, easy to miss entirely; the CEO
+ * mistook a genuinely-still-loading page for a broken one mid-demo and asked
+ * for an emergency restart. This is the immediate fix (a clear, hard-to-miss
+ * spinner + message) — NOT a fix for the underlying slowness itself, which
+ * is a separate, measured diagnosis (see the perf investigation notes on
+ * useCashFlowPageData.ts / BalanceSheetLive.tsx). Callers should render this
+ * INSTEAD OF their content while loading (never alongside it) — showing the
+ * two together is what let stale/placeholder "—" figures read as "loaded but
+ * empty" during the wait. */
+export const LoadingState = ({ label }: { label: string }) => (
+  <div
+    role="status"
+    aria-live="polite"
+    className="flex flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card py-16 text-center animate-fade-in"
+  >
+    <Loader2 className="h-8 w-8 animate-spin text-gold" aria-hidden />
+    <p className="text-sm font-semibold text-foreground">{label}</p>
+    <p className="text-xs text-muted-foreground max-w-xs">
+      Pulling live figures from the warehouse — this can take several seconds. The page is working, not stuck.
+    </p>
+  </div>
+);
+
+// ------------------------------------------------------------- open-months badge
 
 /** Spec §0.3 honesty rule: any window reaching past the last closed month
  * carries this badge — revenue is live, costs may still be partial. Reuses

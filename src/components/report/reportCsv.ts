@@ -24,8 +24,16 @@ export const downloadReportCsvs = (snapshot: ReportSnapshot): void => {
   };
 
   // ---- Economics
+  // Scope declared alongside the comparison (2026-08-08, CEO live review —
+  // "nel report manca il bottone recurring e non recurring"): the exported
+  // file must say which view (All lines / Only Recurring) its numbers are,
+  // same as the on-screen structure line already declares the comparison.
   exportStatementCsv({
-    meta: { ...periodMeta, statement: `Economics — ${snapshot.period.label}`, structure: `vs ${snapshot.comparisonLabel}` },
+    meta: {
+      ...periodMeta,
+      statement: `Economics — ${snapshot.period.label}`,
+      structure: `vs ${snapshot.comparisonLabel} · ${snapshot.scopeLabel}`,
+    },
     columns: ["Line item", "This window", snapshot.comparisonLabel, "Delta", "Delta %"],
     rows: snapshot.macroRows.map((r) => {
       // owner-audit #14 (2026-08-04): r.actual can be null (not yet posted).

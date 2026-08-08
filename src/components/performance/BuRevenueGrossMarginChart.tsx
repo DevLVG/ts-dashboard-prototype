@@ -240,7 +240,7 @@ export const BuRevenueGrossMarginChart = ({
   // Horse School/Retail/Membership/B2B, which isn't real. One clear note
   // instead of 7 fabricated-looking bars.
   const gmBudgetNote = isBudgetMode
-    ? "Budget does not allocate cost of goods sold by business unit, so Gross Margin isn't comparable to Budget per BU. Switch to Versus Previous Year for the full breakdown."
+    ? "Budget does not allocate cost of goods sold by business unit, so Gross Margin isn't comparable to Budget per BU. Switch to Versus Previous Year or Versus Previous Period for the full breakdown."
     : undefined;
 
   return (

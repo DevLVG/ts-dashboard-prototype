@@ -110,12 +110,20 @@ const KpiCircle = ({ metric, comparisonLabel, mtdProrated, windowName }: {
         </div>
       </div>
 
-      <div className="flex flex-col items-center gap-0.5 min-h-[2.75rem] justify-center">
+      {/* Delta size (CEO live-review request, 2026-08-08 — "io lo farei anche
+          più grosso"): this is the number the eye lands on first, and it was
+          reading smaller than the circle totals above it. Bumped from
+          text-sm/font-semibold to text-xl-2xl/font-bold (icon and "—"
+          placeholders scaled to match) — still visibly a supporting figure
+          under the circle, not competing with valueSizeClass's 3xl-4xl, but
+          no longer the smallest text on the card. Card padding/gap unchanged
+          so the rest of the layout keeps its rhythm. */}
+      <div className="flex flex-col items-center gap-0.5 min-h-[3.25rem] justify-center">
         {metric.actual === null ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="inline-flex items-center gap-1 text-sm font-semibold text-muted-foreground cursor-help">
-                <Minus className="h-3.5 w-3.5" aria-hidden />
+              <span className="inline-flex items-center gap-1.5 text-xl md:text-2xl font-bold text-muted-foreground cursor-help">
+                <Minus className="h-5 w-5" aria-hidden />
                 —
               </span>
             </TooltipTrigger>
@@ -126,8 +134,8 @@ const KpiCircle = ({ metric, comparisonLabel, mtdProrated, windowName }: {
         ) : metric.comparison === null ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="inline-flex items-center gap-1 text-sm font-semibold text-muted-foreground cursor-help">
-                <Minus className="h-3.5 w-3.5" aria-hidden />
+              <span className="inline-flex items-center gap-1.5 text-xl md:text-2xl font-bold text-muted-foreground cursor-help">
+                <Minus className="h-5 w-5" aria-hidden />
                 —
               </span>
             </TooltipTrigger>
@@ -136,8 +144,8 @@ const KpiCircle = ({ metric, comparisonLabel, mtdProrated, windowName }: {
             </TooltipContent>
           </Tooltip>
         ) : (
-          <span className={cn("inline-flex items-center gap-1 text-sm font-semibold", TONE_TEXT[tone])}>
-            {Icon && <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />}
+          <span className={cn("inline-flex items-center gap-1.5 text-xl md:text-2xl font-bold tracking-tight", TONE_TEXT[tone])}>
+            {Icon && <Icon className="h-5 w-5 shrink-0" aria-hidden />}
             {fmtDeltaSAR(metric.deltaAbs ?? 0)}
             {metric.deltaPct !== null && <Fragment> · {fmtDeltaPct(metric.deltaPct)}</Fragment>}
           </span>

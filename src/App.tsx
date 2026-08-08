@@ -15,6 +15,7 @@ import { CashForecastPage } from "@/components/forecast/CashForecastPage";
 import { AccrualsPage } from "@/components/accruals/AccrualsPage";
 import { VatPrefilePage } from "@/components/vat/VatPrefilePage";
 import { MonthEndClosePage } from "@/components/close/MonthEndClosePage";
+import { MonthByMonthPage } from "@/components/performance/MonthByMonthPage";
 
 const queryClient = new QueryClient();
 
@@ -64,6 +65,11 @@ const App = () => {
                     through Index.tsx's PageType switch — ReportPage mounts
                     its own <DashboardNav/> + role gate. */}
                 <Route path="/report" element={<ReportPage />} />
+                {/* Month by Month (CEO live review, 2026-08-08, item 6): same
+                    standalone-route pattern as Report/Confirmations — own
+                    <DashboardNav/> mount + own role gate, not routed through
+                    Index.tsx's PageType switch. */}
+                <Route path="/monthly" element={<MonthByMonthPage />} />
                 {/* Confirmations (live review #3, 2026-08-03): promoted out of
                     the Treasury workspace tabs into its own page. Standalone
                     route, same pattern as /report — ConfirmationsPage mounts

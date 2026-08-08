@@ -113,7 +113,7 @@
 //   fabricated zero.
 import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useAlignment, type ComparisonMode } from "@/contexts/AlignmentContext";
+import { useAlignment, type ComparisonMode, COMPARISON_LABELS } from "@/contexts/AlignmentContext";
 import { computeMtdProration, type Win, type MtdProration } from "@/data/alignment";
 import { monthKey, monthKeyLabel, shiftMonthKey } from "@/data/liveData";
 import {
@@ -645,7 +645,7 @@ export const useCashFlowPageData = (): CashFlowPageData => {
   };
 
   // ------------------------------------------------------------- circle
-  const comparisonLabel = comparisonMode === "BUDGET" ? "Budget" : "Previous Year";
+  const comparisonLabel = COMPARISON_LABELS[comparisonMode];
 
   const circleActual = cashAtEnd(win.endKey);
   const circleComparison: CashPoint = useMemo(() => {
@@ -663,9 +663,14 @@ export const useCashFlowPageData = (): CashFlowPageData => {
         ? { value: null, isLive: false, unavailableReason: "Budgeted cash position unavailable for this window." }
         : { value: v, isLive: false };
     }
-    return cashAtEnd(shiftMonthKey(win.endKey, -12));
+    // PY/PP-agnostic (2026-08-08 PP addendum): `py` already resolves to
+    // whichever non-Budget comparison window is active (see AlignmentContext)
+    // — was hardcoded to win.endKey-12, which silently ignored PP and always
+    // read Previous Year's cash position even when the toggle said Previous
+    // Period.
+    return cashAtEnd(py.endKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comparisonMode, win.endKey, budgetAvailableForWin, budgetHorizonStart, bookCashByMonth, liveBankTotal, todayKey, budgetRows]);
+  }, [comparisonMode, win.endKey, py.endKey, budgetAvailableForWin, budgetHorizonStart, bookCashByMonth, liveBankTotal, todayKey, budgetRows]);
 
   // -------------------------------------------------------------- rows
   const actualAgg = useMemo(() => sumCfWindow(cfRows, win), [cfRows, win]);
@@ -701,7 +706,7 @@ export const useCashFlowPageData = (): CashFlowPageData => {
   const budgetCapNote = isBudgetMode && !budgetAvailableForWin
     ? `No cash-flow budget exists for ${windowName}${budgetHorizonStart ? ` — Budget comparison is available from ${monthKeyLabel(budgetHorizonStart)} forward.` : "."}`
     : isBudgetMode
-      ? "Detail limited to budget granularity — the cash-flow budget has no component-level split for Operating/Financing. Switch to Previous Year for full component detail."
+      ? "Detail limited to budget granularity — the cash-flow budget has no component-level split for Operating/Financing. Switch to Previous Year or Previous Period for full component detail."
       : null;
 
   const openingActual = cashAtEnd(shiftMonthKey(win.startKey, -1));

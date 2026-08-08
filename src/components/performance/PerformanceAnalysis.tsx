@@ -99,7 +99,7 @@ import { Fragment, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChevronRight, ChevronDown, Info } from "lucide-react";
-import { useAlignment } from "@/contexts/AlignmentContext";
+import { useAlignment, COMPARISON_LABELS } from "@/contexts/AlignmentContext";
 import { WindowPicker, ComparisonToggle, ScopeToggle, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
 import { KpiCircles } from "@/components/overview/KpiCircles";
 import { ComparisonHistogram } from "@/components/overview/ComparisonHistogram";
@@ -478,7 +478,15 @@ const macroHasData = (key: string, tree: Map<PLSection, SectionTree>, sub: Subto
 const LEAF_LINE_PAGE = 20;
 const LEAF_LINE_PAGE_GROW = 50;
 
-const LeafLineRows = ({ moaCode, win, indent }: { moaCode: string; win: Win; indent: number }) => {
+/** One period's real booked lines for a leaf, bounded/paginated exactly as
+ * before this fix. `amountCol` places the figure under whichever of the two
+ * numeric columns (2 = "This window", 3 = the active comparison) this
+ * block's own `win` corresponds to — the other numeric column, and the two
+ * delta columns, stay "—" (no fabricated per-line delta; deltas only ever
+ * exist at the leaf/subtotal grain above). */
+const LeafLineBlock = ({
+  moaCode, win, indent, amountCol,
+}: { moaCode: string; win: Win; indent: number; amountCol: 2 | 3 }) => {
   const [limit, setLimit] = useState(LEAF_LINE_PAGE);
   const { data: lines, isLoading, error } = useLeafLines(moaCode, win, limit);
   const { data: totalCount } = useLeafLineCount(moaCode, win);
@@ -503,9 +511,13 @@ const LeafLineRows = ({ moaCode, win, indent }: { moaCode: string; win: Win; ind
     );
   }
   if (!lines || lines.length === 0) {
+    // Honest empty state — same idiom as every other empty comparison figure
+    // on this page ("—" instead of a fabricated 0) — covers both "nothing
+    // booked" and a comparison window (PY/PP) that predates the warehouse's
+    // data history.
     return (
       <tr className="border-b border-border/10">
-        <td colSpan={5} className="py-2 text-xs text-muted-foreground italic" style={{ paddingLeft: padLeft }}>
+        <td colSpan={5} className="py-1.5 text-xs text-muted-foreground italic" style={{ paddingLeft: padLeft }}>
           No booked lines in this window.
         </td>
       </tr>
@@ -530,8 +542,12 @@ const LeafLineRows = ({ moaCode, win, indent }: { moaCode: string; win: Win; ind
               </span>
             </span>
           </td>
-          <td className="py-1 px-3 text-right tabular-nums text-xs text-muted-foreground">{fmtOrDash(l.amount_sar, 2)}</td>
-          <td className="py-1 px-3 text-right text-xs text-muted-foreground/50">—</td>
+          <td className="py-1 px-3 text-right tabular-nums text-xs text-muted-foreground">
+            {amountCol === 2 ? fmtOrDash(l.amount_sar, 2) : "—"}
+          </td>
+          <td className="py-1 px-3 text-right tabular-nums text-xs text-muted-foreground">
+            {amountCol === 3 ? fmtOrDash(l.amount_sar, 2) : "—"}
+          </td>
           <td className="py-1 px-3 text-right text-xs text-muted-foreground/50">—</td>
           <td className="py-1 pl-3 text-right text-xs text-muted-foreground/50">—</td>
         </tr>
@@ -554,6 +570,42 @@ const LeafLineRows = ({ moaCode, win, indent }: { moaCode: string; win: Win; ind
           )}
         </td>
       </tr>
+    </>
+  );
+};
+
+/** fix (2026-08-08, CEO live review — "pellets and corn" example): opening a
+ * leaf to its real booked lines used to show the CURRENT period's lines only
+ * — the comparison period ("This window" 's counterpart column) stayed stuck
+ * at its own leaf-level total, with no way to see what it was actually made
+ * of. Renders BOTH periods' real lines, each under its own small heading and
+ * its own "Show more" pager, the comparison block placed under whichever
+ * numeric column the active comparison already occupies at the leaf row
+ * above (2 or 3) — so opening a row now always shows real detail on both
+ * sides, never just one. Skipped entirely in Budget mode (`showComparison`
+ * false) — budget_2026 has no line-level source, and rows can't even expand
+ * in Budget view (`canExpand` at the call site), so this never actually
+ * renders with showComparison=false today; kept as an explicit prop rather
+ * than inferred so a future call site can't silently mis-wire it. */
+const LeafLineRows = ({
+  moaCode, win, compWin, comparisonLabel, showComparison, indent,
+}: { moaCode: string; win: Win; compWin: Win; comparisonLabel: string; showComparison: boolean; indent: number }) => {
+  const padLeft = `${indent * 18 + 20}px`;
+  const subHeading = "pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60";
+  return (
+    <>
+      <tr className="border-b border-border/5">
+        <td colSpan={5} className={subHeading} style={{ paddingLeft: padLeft }}>This window — booked lines</td>
+      </tr>
+      <LeafLineBlock moaCode={moaCode} win={win} indent={indent} amountCol={2} />
+      {showComparison && (
+        <>
+          <tr className="border-b border-border/5">
+            <td colSpan={5} className={subHeading} style={{ paddingLeft: padLeft }}>{comparisonLabel} — booked lines</td>
+          </tr>
+          <LeafLineBlock moaCode={moaCode} win={compWin} indent={indent} amountCol={3} />
+        </>
+      )}
     </>
   );
 };
@@ -591,7 +643,7 @@ export const PerformanceAnalysis = () => {
   const priorSub = useMemo(() => deriveSubtotals(priorTree), [priorTree]);
 
   const isBudgetMode = comparisonMode === "BUDGET";
-  const comparisonLabel = isBudgetMode ? "Budget" : "Previous Year";
+  const comparisonLabel = COMPARISON_LABELS[comparisonMode];
   const budgetNaNote = isBudgetMode && !budgetAgg ? `No approved budget exists for ${windowName}.` : null;
 
   const hasAnyData = rows && rows.length > 0;
@@ -1260,7 +1312,7 @@ export const PerformanceAnalysis = () => {
         {isBudgetMode && !budgetNaNote && (
           <p className="text-[11px] text-muted-foreground/80">
             Detail limited to budget granularity — budget_2026 has no line-level equivalent to the managerial chart of
-            accounts, so rows don't expand in Budget view. Switch to Previous Year for full leaf detail.
+            accounts, so rows don't expand in Budget view. Switch to Previous Year or Previous Period for full leaf detail.
           </p>
         )}
 
@@ -1334,7 +1386,14 @@ export const PerformanceAnalysis = () => {
                       </td>
                     </tr>
                     {r.drillMoaCode && r.expanded && (
-                      <LeafLineRows moaCode={r.drillMoaCode} win={win} indent={r.indent + 1} />
+                      <LeafLineRows
+                        moaCode={r.drillMoaCode}
+                        win={win}
+                        compWin={py}
+                        comparisonLabel={comparisonLabel}
+                        showComparison={!isBudgetMode}
+                        indent={r.indent + 1}
+                      />
                     )}
                     </Fragment>
                   );

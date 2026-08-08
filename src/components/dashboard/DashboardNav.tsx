@@ -26,6 +26,7 @@ import {
   Receipt,
   ShieldCheck,
   ClipboardCheck,
+  CalendarDays,
   type LucideIcon,
 } from "lucide-react";
 import { PageType } from "@/types/dashboard";
@@ -57,6 +58,10 @@ interface NavPage {
 // level (see App.tsx) so they're never reachable, not even hidden-but-live.
 const ALL_PAGES: NavPage[] = [
   { id: "performance", label: "Economics", icon: TrendingUp, path: "/performance" },
+  // Month by Month (CEO live review, 2026-08-08, item 6): year-over-year
+  // monthly scan — sits right next to Economics, the screen it reuses all
+  // its figures from.
+  { id: "monthly", label: "Month by Month", icon: CalendarDays, path: "/monthly" },
   { id: "cash", label: "Cash Flow", icon: Banknote, path: "/cash" },
   // Cash Forecast (handbook package job, 2026-08-07): first UI for
   // v_cash_forecast_13w / v_cash_forecast_monthly (migration 045) — sits
@@ -111,7 +116,7 @@ interface NavGroup {
 }
 
 const NAV_GROUPS: NavGroup[] = [
-  { id: "performance-group", label: "Performance", defaultPageId: "performance", pageIds: ["performance", "cash", "cash-forecast", "balance", "report"] },
+  { id: "performance-group", label: "Performance", defaultPageId: "performance", pageIds: ["performance", "monthly", "cash", "cash-forecast", "balance", "report"] },
   // Admin group = Treasury (default, unchanged) · Confirmations · Approvals
   // (Marcello, live review #3, 2026-08-03) — plus Accruals · VAT Pre-Filing ·
   // Month-End Close (handbook package job, 2026-08-07), same close/compliance
@@ -208,7 +213,13 @@ export const DashboardNav = ({ currentPage }: DashboardNavProps) => {
                   squeezed md-but-not-lg band (768–1023px) where the
                   desktop nav groups need the space most. */}
               <p className="md:hidden lg:block mt-0.5 text-sm text-foreground/80 font-normal tracking-wide whitespace-nowrap">
-                CEO Cockpit
+                {/* On-screen label only (CEO live-review request, 2026-08-08):
+                    "CEO Cockpit" -> "CEO Dashboard". Product name, code
+                    identifiers and docs are unchanged — see CEO Cockpit
+                    references elsewhere in this codebase (AlignmentContext,
+                    BalanceSheetLive, this file's own history) which
+                    deliberately still say "Cockpit". */}
+                CEO Dashboard
               </p>
             </div>
           </div>

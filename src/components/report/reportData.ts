@@ -25,10 +25,11 @@
 // already trusts — no new aggregation semantics, just a different grouping of
 // rows already being fetched.
 import { useMemo } from "react";
-import { useAlignment, type ComparisonMode } from "@/contexts/AlignmentContext";
+import { useAlignment, type ComparisonMode, type Scope, COMPARISON_LABELS } from "@/contexts/AlignmentContext";
 import {
-  useBasisRows, aggregatePL, aggregateBudgetWindow, pyWin, resolveWindow, windowIncludesOpenMonths,
-  lastCompleteFromBasis, type Win, type PLAgg, type BudgetAgg, type BasisRow, type WindowPresetId,
+  useBasisRows, aggregatePL, aggregateBudgetWindow, pyWin, ppWin, resolveWindow, windowIncludesOpenMonths,
+  lastCompleteFromBasis, useRecurrence, resolveRecurrence, type Win, type PLAgg, type BudgetAgg, type BasisRow,
+  type WindowPresetId,
 } from "@/data/alignment";
 import {
   useBudgetMonthly, monthKey, monthKeyLabel, shiftMonthKey, endOfMonthLabel,
@@ -39,6 +40,28 @@ import {
   useCashflowMonthly, useBalanceSheet, useBankBalances,
   type CashflowMonthRow, type BalanceSheetRow, type BalanceSheetResult, type BankBalanceRow,
 } from "@/data/statementsLive";
+
+/** PY or PP, whichever the global Comparison toggle has active — added
+ * 2026-08-08 alongside the toggle's third segment. Local helper (this module
+ * computes its own windows rather than reading `useAlignment().py`, so the
+ * report's own PY-only 12-month shift needs the same mode-branch the shared
+ * context applies internally). */
+const comparisonWinFor = (mode: ComparisonMode, w: Win): Win => (mode === "PP" ? ppWin(w) : pyWin(w));
+
+/** All-lines vs recurring-only — added 2026-08-08 (CEO live review: "nel
+ * report manca il bottone recurring e non recurring"). The report page had
+ * no Scope control at all, so its export could never reflect the same
+ * Recurring/Non-recurring split Economics already lets the CEO toggle — a
+ * generated PDF/CSV silently always showed "All", with nothing on the page
+ * saying so. Reuses the EXACT row-level filter `buildTree`'s scope branch
+ * applies on Economics (PerformanceAnalysis.tsx) — "RECURRING" simply drops
+ * non-recurring rows before the SAME `aggregatePL`/`aggregateBudgetWindow`
+ * calls run, so every number downstream (macro rows, KPI tiles, family
+ * movers) is produced by the identical, already-verified arithmetic, just
+ * over a filtered row set. No new aggregation shape invented. */
+const isBudgetNonRecLine = (moa: string): boolean => moa.startsWith("GA-NRP") || moa === "MS-FFC";
+
+export const SCOPE_LABELS: Record<Scope, string> = { ALL: "All lines", RECURRING: "Only Recurring" };
 
 // ------------------------------------------------------------ period model
 
@@ -264,7 +287,7 @@ export const buildFamilyMoves = (
       comparisonByBu.set(bu, b ? b.revenue : null);
     }
   } else {
-    const pyByBu = sumByBu(pyWin(win));
+    const pyByBu = sumByBu(comparisonWinFor(comparisonMode, win));
     for (const bu of actualByBu.keys()) comparisonByBu.set(bu, pyByBu.has(bu) ? pyByBu.get(bu)! : null);
   }
 
@@ -459,6 +482,8 @@ export interface ReportSnapshot {
   period: ReportPeriodOption;
   comparisonMode: ComparisonMode;
   comparisonLabel: string;
+  scope: Scope;
+  scopeLabel: string;
   macroRows: MacroRow[];
   kpi: { revenue: MacroRow; grossMargin: MacroRow; ebitda: MacroRow };
   budgetNaNote: string | null;
@@ -470,27 +495,45 @@ export interface ReportSnapshot {
 }
 
 export const useReportSnapshot = (period: ReportPeriodOption | null): ReportSnapshot | null => {
-  const { comparisonMode } = useAlignment();
+  const { comparisonMode, scope } = useAlignment();
   const { data: basisData, isLoading: l1, isError: e1 } = useBasisRows();
   const { data: budgetRows, isLoading: l2, isError: e2 } = useBudgetMonthly();
   const { data: cfRows, isLoading: l3, isError: e3 } = useCashflowMonthly();
   const { data: bsData, isLoading: l4, isError: e4 } = useBalanceSheet();
   const { data: bankRows, isLoading: l5 } = useBankBalances();
+  const { data: rec } = useRecurrence();
 
   const rows = basisData?.rows;
   const lastComplete = useMemo(() => lastCompleteFromBasis(rows) ?? LAST_CLOSED_MONTH_FALLBACK, [rows]);
 
+  // Row-level scope filter (2026-08-08) — mirrors PerformanceAnalysis.tsx's
+  // `scopedRows`/`buildTree` scope branch exactly: "Only Recurring" drops
+  // non-recurring rows/budget lines before anything downstream aggregates,
+  // rather than a report-only reimplementation of the recurring rule.
+  const scopedRows = useMemo(
+    () => (scope === "RECURRING" ? rows?.filter((r) => resolveRecurrence(r, rec) !== "non-recurring") : rows),
+    [rows, scope, rec],
+  );
+  const scopedBudgetRows = useMemo(
+    () => (scope === "RECURRING" ? budgetRows?.filter((r) => !isBudgetNonRecLine(r.moa_code)) : budgetRows),
+    [budgetRows, scope],
+  );
+
   return useMemo(() => {
     if (!period) return null;
     const win = period.win;
-    const py = pyWin(win);
-    const actual = aggregatePL(rows, "STRICT", win);
-    const priorYear = aggregatePL(rows, "STRICT", py);
-    const budgetRaw = aggregateBudgetWindow(budgetRows, win);
+    const py = comparisonWinFor(comparisonMode, win);
+    const actual = aggregatePL(scopedRows, "STRICT", win);
+    const priorYear = aggregatePL(scopedRows, "STRICT", py);
+    const budgetRaw = aggregateBudgetWindow(scopedBudgetRows, win);
     const macroRows = buildMacroRows(actual, comparisonMode, priorYear, budgetRaw);
     const find = (k: string) => macroRows.find((r) => r.key === k)!;
     const budgetNaNote = comparisonMode === "BUDGET" && !budgetRaw ? `No approved budget exists for ${period.label}.` : null;
-    const familyMoves = buildFamilyMoves(rows, budgetRows, win, comparisonMode);
+    const familyMoves = buildFamilyMoves(scopedRows, scopedBudgetRows, win, comparisonMode);
+    // Cash Flow / Balance Sheet stay UNSCOPED — recurring/non-recurring is a
+    // P&L-only dimension (dim_recurrence tags P&L rows), same as the rest of
+    // the cockpit: neither live page has a Scope control either (see
+    // CashFlowStatementLive.tsx / BalanceSheetLive.tsx).
     const cashFlow = buildCashFlowSnapshot(cfRows, bsData?.rows, bankRows, win);
     const balanceSheet = buildBalanceSheetSnapshot(bsData, win);
 
@@ -499,7 +542,9 @@ export const useReportSnapshot = (period: ReportPeriodOption | null): ReportSnap
       hasError: e1 || e2 || e3 || e4,
       period,
       comparisonMode,
-      comparisonLabel: comparisonMode === "BUDGET" ? "Budget" : "Previous Year",
+      comparisonLabel: COMPARISON_LABELS[comparisonMode],
+      scope,
+      scopeLabel: SCOPE_LABELS[scope],
       macroRows,
       kpi: { revenue: find("Revenue"), grossMargin: find("GrossMargin"), ebitda: find("EBITDAReported") },
       budgetNaNote,
@@ -515,5 +560,5 @@ export const useReportSnapshot = (period: ReportPeriodOption | null): ReportSnap
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as ReportSnapshot;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, rows, budgetRows, cfRows, bsData, bankRows, comparisonMode, l1, l2, l3, l4, l5, e1, e2, e3, e4, lastComplete]);
+  }, [period, scopedRows, scopedBudgetRows, cfRows, bsData, bankRows, comparisonMode, scope, l1, l2, l3, l4, l5, e1, e2, e3, e4, lastComplete]);
 };

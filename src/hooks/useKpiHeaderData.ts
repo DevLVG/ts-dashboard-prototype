@@ -16,7 +16,7 @@
 // Basis: pinned to STRICT everywhere (2026-08-03 decision, see
 // AlignmentContext) — there is no basis toggle left to read.
 import { useMemo } from "react";
-import { useAlignment, type ComparisonMode } from "@/contexts/AlignmentContext";
+import { useAlignment, type ComparisonMode, COMPARISON_LABELS } from "@/contexts/AlignmentContext";
 import {
   useBasisRows, useRecurrence, aggregatePL, aggregateRecurring,
   aggregateBudgetWindow, computeMtdProration, prorateAgg, prorateRecurring,
@@ -51,7 +51,8 @@ export interface KpiHeaderData {
   isError: boolean;
   metrics: KpiHeaderMetric[];
   comparisonMode: ComparisonMode;
-  /** "Previous Year" | "Budget" — plain label for the active comparison. */
+  /** "Previous Year" | "Previous Period" | "Budget" — plain label for the
+   * active comparison (see COMPARISON_LABELS, AlignmentContext.tsx). */
   comparisonLabel: string;
   windowName: string;
   winLabelText: string;
@@ -136,7 +137,10 @@ export const useKpiHeaderData = (): KpiHeaderData => {
   // Empty-window honesty gates (2026-08-03 add-on) — see `monthsCoveredInWin`.
   const noActualData = useMemo(() => monthsCoveredInWin(rows, win) === 0, [rows, win]);
   const noPriorData = useMemo(() => monthsCoveredInWin(rows, py) === 0, [rows, py]);
-  const pyNaReason = noPriorData ? `No previous-year data posted yet for ${windowName}.` : undefined;
+  // Label-agnostic (2026-08-08, PP addendum): reads whichever comparison is
+  // active — "No previous-year…" would be wrong once Previous Period (or,
+  // structurally, Budget) is selected instead.
+  const pyNaReason = noPriorData ? `No ${COMPARISON_LABELS[comparisonMode].toLowerCase()} data posted yet for ${windowName}.` : undefined;
 
   const actual = useMemo(() => aggregatePL(rows, basis, win), [rows, win]);
   const priorRaw = useMemo(() => aggregatePL(rows, basis, py), [rows, py]);
@@ -192,7 +196,7 @@ export const useKpiHeaderData = (): KpiHeaderData => {
   const REC_EBITDA_BUDGET_NA =
     "Budget's non-recurring perimeter (GA-NRP/MS-FFC) differs from the actual's model-based recurrence classification — not directly comparable.";
 
-  const comparisonLabel = comparisonMode === "BUDGET" ? "Budget" : "Previous Year";
+  const comparisonLabel = COMPARISON_LABELS[comparisonMode];
 
   // Costs-unbooked honesty gate (2026-08-04, owner-audit #3/#4) — hoisted
   // above both branches (2026-08-08 fix) so the "Only Recurring" scope

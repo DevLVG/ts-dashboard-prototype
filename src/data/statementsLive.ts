@@ -179,40 +179,88 @@ const isMissingViewError = (err: { code?: string; message?: string }): boolean =
 // so the UI can show the existing error state / let react-query retry.
 const BS_PAGE_TIMEOUT_MS = 20_000;
 
+/** One page of v_balance_sheet_monthly — same per-page retry/abort-timeout
+ * protection as before (QUIC-stall fix, 2026-08-07), factored out so it can
+ * be called either serially (fallback) or in parallel (see below). */
+const fetchBsPage = async (from: number, withCount: boolean) => {
+  try {
+    return await withTransientRetry(async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), BS_PAGE_TIMEOUT_MS);
+      try {
+        return await supabase!
+          .from("v_balance_sheet_monthly")
+          .select(
+            "month,section,subsection,line_item,amount,sort_order,is_adjustment,note,line_code",
+            withCount ? { count: "exact" } : undefined,
+          )
+          .order("month", { ascending: true })
+          .order("sort_order", { ascending: true })
+          .range(from, from + BS_PAGE_SIZE - 1)
+          .abortSignal(controller.signal);
+      } finally {
+        clearTimeout(timeout);
+      }
+    });
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error(`Timed out loading the balance sheet (page starting at row ${from}) — please retry.`);
+    }
+    throw e;
+  }
+};
+
+/** PERF (2026-08-08, CEO live review — same fix as `fetchAllPages` in
+ * data/alignment.ts, see that function's header for the full measured
+ * rationale): page 0 asks PostgREST for the exact total row count
+ * (`count: "exact"`, no extra round trip), then every remaining page fires
+ * CONCURRENTLY instead of waiting on the previous one — this view's own
+ * 2-page fetch measured ~1.8s serial locally (947ms + 842ms, the second page
+ * only STARTING after the first finished), now closer to the slower page's
+ * ~950ms alone. Each page keeps its own retry+20s-abort-timeout protection
+ * (`fetchBsPage`, unchanged) — this only changes WHEN pages are requested,
+ * never how a single page is fetched or retried. Falls back to the original
+ * serial loop if the server ever omits `count`. */
 export const fetchBalanceSheet = async (): Promise<BalanceSheetResult> => {
   if (!supabase) throw new Error("Supabase is not configured");
-  const all: BalanceSheetRow[] = [];
-  for (let from = 0; ; from += BS_PAGE_SIZE) {
-    let data, error;
-    try {
-      ({ data, error } = await withTransientRetry(async () => {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), BS_PAGE_TIMEOUT_MS);
-        try {
-          return await supabase
-            .from("v_balance_sheet_monthly")
-            .select("month,section,subsection,line_item,amount,sort_order,is_adjustment,note,line_code")
-            .order("month", { ascending: true })
-            .order("sort_order", { ascending: true })
-            .range(from, from + BS_PAGE_SIZE - 1)
-            .abortSignal(controller.signal);
-        } finally {
-          clearTimeout(timeout);
-        }
-      }));
-    } catch (e) {
-      if (e instanceof Error && e.name === "AbortError") {
-        throw new Error(`Timed out loading the balance sheet (page starting at row ${from}) — please retry.`);
+
+  const first = await fetchBsPage(0, true);
+  if (first.error) {
+    if (isMissingViewError(first.error)) return { available: false, rows: [] };
+    throw toFriendlyError(first.error);
+  }
+  const firstPage = (first.data ?? []) as BalanceSheetRow[];
+  if (firstPage.length < BS_PAGE_SIZE) return { available: true, rows: firstPage };
+
+  const total = first.count ?? null;
+  if (total === null) {
+    // Defensive fallback — server didn't return a count: the old page-at-a-
+    // time loop, guaranteed correct even if it can't be parallelized.
+    const all = [...firstPage];
+    for (let from = BS_PAGE_SIZE; ; from += BS_PAGE_SIZE) {
+      const { data, error } = await fetchBsPage(from, false);
+      if (error) {
+        if (isMissingViewError(error)) break;
+        throw toFriendlyError(error);
       }
-      throw e;
+      const page = (data ?? []) as BalanceSheetRow[];
+      all.push(...page);
+      if (page.length < BS_PAGE_SIZE) break;
     }
-    if (error) {
-      if (isMissingViewError(error)) return { available: false, rows: [] };
-      throw toFriendlyError(error);
+    return { available: true, rows: all };
+  }
+
+  const pageCount = Math.max(1, Math.ceil(total / BS_PAGE_SIZE));
+  const rest = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, i) => fetchBsPage((i + 1) * BS_PAGE_SIZE, false)),
+  );
+  const all = [...firstPage];
+  for (const r of rest) {
+    if (r.error) {
+      if (isMissingViewError(r.error)) continue;
+      throw toFriendlyError(r.error);
     }
-    const page = (data ?? []) as BalanceSheetRow[];
-    all.push(...page);
-    if (page.length < BS_PAGE_SIZE) break;
+    all.push(...((r.data ?? []) as BalanceSheetRow[]));
   }
   return { available: true, rows: all };
 };

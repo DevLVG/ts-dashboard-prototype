@@ -63,7 +63,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { ChevronRight, ChevronDown, Scale, HardHat, Info, CalendarClock } from "lucide-react";
-import { ScrollHint } from "@/components/chrome/AlignmentChrome";
+import { ScrollHint, LoadingState } from "@/components/chrome/AlignmentChrome";
 import { monthKey, monthKeyLabel, shiftMonthKey, endOfMonthLabel, todayMonthKey } from "@/data/liveData";
 import {
   useBalanceSheet, useBudgetBalanceSheet, useBankBalances,
@@ -534,7 +534,12 @@ export const BalanceSheetLive = () => {
         </p>
       )}
 
-      {isLoading && <p className="text-sm text-muted-foreground">Loading the balance sheet…</p>}
+      {/* 2026-08-08 (CEO live review — mistook a still-loading page for a
+          broken one mid-demo): a hard-to-miss spinner + message, replacing
+          the previous single small muted sentence. Content below is already
+          gated on `!isLoading` (see the conditions further down), so this is
+          a pure swap — no change to what renders once data arrives. */}
+      {isLoading && <LoadingState label="Loading the balance sheet…" />}
       {isError && (
         <p className="text-sm text-destructive">
           {(error as Error | null)?.name === "PermissionDeniedError" ? (error as Error).message : "Could not load the balance sheet from Supabase."}

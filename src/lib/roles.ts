@@ -64,7 +64,7 @@ const CMS_PAGES: PageType[] = ["catalog", "media", "copy", "competitions", "inst
 // component's own header) — proposed, to confirm with Marcello/Luca, same
 // posture as the rest of this file.
 const ALL_PAGES: PageType[] = [
-  "performance", "cash", "cash-forecast", "treasury", "confirmations", "payments", "balance", "report",
+  "performance", "monthly", "cash", "cash-forecast", "treasury", "confirmations", "payments", "balance", "report",
   "accruals", "vat-prefile", "month-close",
   ...CMS_PAGES,
 ];

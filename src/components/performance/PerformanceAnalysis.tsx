@@ -178,11 +178,27 @@ interface SectionTree { total: number; hasData: boolean; families: FamilyNode[] 
  * every total at 0. Every macro row's value is later DERIVED as the sum
  * over this same tree — the displayed total and its expansion can never
  * silently disagree, at any level, in any window. */
+/** `recurrenceSplit` (2026-08-08, CEO mandate — "prima tutta la parte di
+ * corrente, splittata... poi la non corrente, splittata"): an OPTIONAL
+ * further partition of the SAME row set buildTree already walks, read
+ * straight off `resolveRecurrence` — the identical function/policy the
+ * "Only Recurring" scope filter above already uses (unresolved rows default
+ * to recurring, "per loader integrity" — see `aggregateRecurring`'s
+ * identical convention in data/alignment.ts). Nothing here reclassifies a
+ * single row; it only decides which of the two mutually-exclusive,
+ * collectively-exhaustive buckets ("recurring" or "non-recurring") a row
+ * lands in for the OpEx split render below. Because the two buckets are a
+ * strict partition of the same `scope`-filtered row set `buildTree(rows, w,
+ * scope, rec)` (no split) would itself sum, a recurring-split tree's section
+ * total plus the matching non-recurring-split tree's section total always
+ * equals the unsplit section total exactly — verified in the OpEx block's
+ * own render below and in QA. */
 const buildTree = (
   rows: BasisRow[] | undefined,
   w: Win,
   scope: "ALL" | "RECURRING",
   rec: RecurrenceState | undefined,
+  recurrenceSplit?: "recurring" | "non-recurring",
 ): Map<PLSection, SectionTree> => {
   const tree = new Map<PLSection, SectionTree>();
   const leafByCode = new Map<string, LeafNode>();
@@ -216,6 +232,11 @@ const buildTree = (
       const k = monthKey(r.period_month);
       if (!inWin(k, w)) continue;
       if (scope === "RECURRING" && resolveRecurrence(r, rec) === "non-recurring") continue;
+      if (recurrenceSplit) {
+        const isNonRec = resolveRecurrence(r, rec) === "non-recurring";
+        if (recurrenceSplit === "recurring" && isNonRec) continue;
+        if (recurrenceSplit === "non-recurring" && !isNonRec) continue;
+      }
       const leaf = r.moa_code ? leafByCode.get(r.moa_code) : undefined;
       // Verified 2026-08-03: every moa_code on a row tagged to one of the 8
       // PL_SECTIONS is an active moa_gestionale leaf and therefore present
@@ -723,11 +744,227 @@ export const PerformanceAnalysis = () => {
   // — leaves now DO carry a chevron, but it reveals real transaction detail,
   // never a copy of the leaf itself (rule 2 is about redundant tree nodes,
   // not this).
-  interface Row { indent: 0 | 1 | 2 | 3; keyPath: string; label: string; codeTag?: string; actual: number | null; comparison: number | null; expandable: boolean; expanded: boolean; onToggle?: () => void; subtotal?: boolean; emphasis?: boolean; drillMoaCode?: string }
+  // `indent` widened from the original `0 | 1 | 2 | 3` to `number`: the OpEx
+  // recurring/non-recurring split (2026-08-08) nests the existing
+  // section->family->cluster->leaf rendering one level deeper (under its own
+  // "Operating costs — Recurring/Non-recurring" header), so the theoretical
+  // (today unreached — see `sectionFamilySlots`'s comment) family-then-
+  // cluster-then-leaf case for a single OpEx section can reach depth 4.
+  interface Row { indent: number; keyPath: string; label: string; codeTag?: string; actual: number | null; comparison: number | null; expandable: boolean; expanded: boolean; onToggle?: () => void; subtotal?: boolean; emphasis?: boolean; drillMoaCode?: string }
+
+  // ------------------------------------------------- OpEx recurring split
+  //
+  // 2026-08-08, CEO mandate (Marcello, literal request): "prima tutta la
+  // parte di corrente, splittata... poi la non corrente, splittata...
+  // ovviamente senza duplicazioni" — within the operating-costs portion of
+  // this table, show the RECURRING block (exploded into its components)
+  // FIRST, then the NON-RECURRING block (exploded into its components), each
+  // with its own subtotal, tying to the existing "Total operating expenses"
+  // subtotal with no line counted twice.
+  //
+  // Reads recurrence from the DATA (`resolveRecurrence`, the same function/
+  // policy the "Only Recurring" scope toggle already uses) — this component
+  // does not classify a single row itself. A separate track owns the
+  // recurring/non-recurring CLASSIFICATION in the warehouse; this is
+  // presentation only.
+  //
+  // Budget comparison mode is explicitly OUT of scope for the split: budget
+  // has no recurring/non-recurring breakdown at OpEx-section granularity
+  // (only a coarse 2-pattern non-recurring-PROJECT-line rule elsewhere in
+  // this file, `isBudgetNonRecLine`, which doesn't reach GA/MS/People
+  // sub-splits) — inventing one here would be exactly the kind of frontend-
+  // side rule the mandate says not to invent. Budget mode keeps the
+  // pre-existing single-row-per-section rendering unchanged (same "Detail
+  // limited to budget granularity" note already shown above the table).
+  const recurringOpexTree = useMemo(() => buildTree(rows, win, scope, rec, "recurring"), [rows, win, scope, rec]);
+  const nonRecurringOpexTree = useMemo(() => buildTree(rows, win, scope, rec, "non-recurring"), [rows, win, scope, rec]);
+  const recurringOpexTreePriorRaw = useMemo(() => buildTree(rows, py, scope, rec, "recurring"), [rows, py, scope, rec]);
+  const nonRecurringOpexTreePriorRaw = useMemo(() => buildTree(rows, py, scope, rec, "non-recurring"), [rows, py, scope, rec]);
+  const recurringOpexTreePrior = useMemo(
+    () => (mtdPro ? scaleTree(recurringOpexTreePriorRaw, mtdPro.fraction) : recurringOpexTreePriorRaw),
+    [recurringOpexTreePriorRaw, mtdPro],
+  );
+  const nonRecurringOpexTreePrior = useMemo(
+    () => (mtdPro ? scaleTree(nonRecurringOpexTreePriorRaw, mtdPro.fraction) : nonRecurringOpexTreePriorRaw),
+    [nonRecurringOpexTreePriorRaw, mtdPro],
+  );
+
+  const OPEX_SECTIONS: PLSection[] = ["OPEX-GA", "OPEX-MS", "OPEX-People"];
+  const opexSectionLabel = (s: PLSection): string => MACRO_ROWS.find((m) => m.key === s)?.label ?? s;
+
+  /** Renders one OpEx functional section (GA/MS/People) — and, if expanded,
+   * its family/cluster/leaf children — reading from the supplied curTree/
+   * priorTree pair instead of the page's single actual/prior tree. Called
+   * twice (once per recurrence bucket) by the OpEx block below. Every key is
+   * prefixed with `keyPrefix` so the two renders of the SAME section (e.g.
+   * OPEX-GA appears once under Recurring, once under Non-recurring) never
+   * collide in the `expanded` Set or as a React row key — the two rows show
+   * genuinely different amounts for the same moa_code, never a duplicate. */
+  const pushOpexSectionRows = (
+    out: Row[],
+    keyPrefix: string,
+    section: PLSection,
+    label: string,
+    curTree: Map<PLSection, SectionTree>,
+    priorTree: Map<PLSection, SectionTree>,
+  ) => {
+    const curSectionHasData = sectionHasData(curTree, section);
+    const priorSectionHasData = sectionHasData(priorTree, section);
+    const gated = (curTotal: number, priorTotal: number) => ({
+      actual: noActualData || !curSectionHasData ? null : curTotal,
+      comparison: noPriorData || !priorSectionHasData ? null : priorTotal,
+    });
+    const curFamilies = curTree.get(section)!.families;
+    const priorFamilies = priorTree.get(section)!.families;
+    const curSlots = sectionFamilySlots(curFamilies);
+    const sectionKey = `${keyPrefix}:sec:${section}`;
+    const canExpand = curSlots.length > 0;
+    out.push({
+      indent: 1, keyPath: sectionKey, label,
+      ...gated(sectionTotal(curTree, section), sectionTotal(priorTree, section)),
+      expandable: canExpand, expanded: canExpand && expanded.has(sectionKey),
+      onToggle: canExpand ? () => toggle(sectionKey) : undefined,
+    });
+    if (!canExpand || !expanded.has(sectionKey)) return;
+    const soleBu = curFamilies.length === 1 ? curFamilies[0].bu : null;
+    for (const slot of curSlots) {
+      if (slot.kind === "leaf") {
+        const leafP = findLeafInFamilies(priorFamilies, slot.leaf.moaCode);
+        const lineKey = `${keyPrefix}:line:${slot.leaf.moaCode}`;
+        out.push({
+          indent: 2, keyPath: `${keyPrefix}:${slot.leaf.moaCode}`, label: slot.leaf.leafName, codeTag: slot.leaf.moaCode,
+          ...gated(slot.leaf.total, leafP?.total ?? 0),
+          expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+          drillMoaCode: slot.leaf.moaCode,
+        });
+        continue;
+      }
+      if (slot.kind === "cluster") {
+        const bu = soleBu!; // a cluster/leaf slot only appears here when the section has exactly one family
+        const cluExpandKey = `${keyPrefix}:clu:${section}::${bu}::${slot.cluster.clusterCode}`;
+        const priorClu = findClusterInFamilies(priorFamilies, bu, slot.cluster.clusterCode);
+        out.push({
+          indent: 2, keyPath: cluExpandKey, label: slot.cluster.clusterName,
+          ...gated(slot.cluster.total, priorClu?.total ?? 0),
+          expandable: true, expanded: expanded.has(cluExpandKey), onToggle: () => toggle(cluExpandKey),
+        });
+        if (!expanded.has(cluExpandKey)) continue;
+        for (const leaf of slot.cluster.leaves) {
+          const leafP = priorClu?.leaves.find((l) => l.moaCode === leaf.moaCode);
+          const lineKey = `${keyPrefix}:line:${leaf.moaCode}`;
+          out.push({
+            indent: 3, keyPath: `${keyPrefix}:${leaf.moaCode}`, label: leaf.leafName, codeTag: leaf.moaCode,
+            ...gated(leaf.total, leafP?.total ?? 0),
+            expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+            drillMoaCode: leaf.moaCode,
+          });
+        }
+        continue;
+      }
+      // slot.kind === "family" — defensive completeness only: today every
+      // OPEX-GA/OPEX-MS/OPEX-People leaf is bu=CORP by MoA design (see
+      // sectionFamilySlots's own comment above), so this branch never
+      // actually fires; implemented in full anyway so a future MoA change
+      // can't silently drop leaves under this block (mandate: every leaf
+      // always renders).
+      const fam = slot.family;
+      const famExpandKey = `${keyPrefix}:fam:${section}::${fam.bu}`;
+      const famP = findFamilyByBu(priorFamilies, fam.bu);
+      const famSlotsArr = familySlots(fam);
+      const canExpandFam = famSlotsArr.length > 0;
+      out.push({
+        indent: 2, keyPath: famExpandKey, label: fam.buName,
+        ...gated(fam.total, famP?.total ?? 0),
+        expandable: canExpandFam, expanded: expanded.has(famExpandKey),
+        onToggle: canExpandFam ? () => toggle(famExpandKey) : undefined,
+      });
+      if (!canExpandFam || !expanded.has(famExpandKey)) continue;
+      for (const fs of famSlotsArr) {
+        if (fs.kind === "leaf") {
+          const leafP = famP ? findLeafInFamilies([famP], fs.leaf.moaCode) : undefined;
+          const lineKey = `${keyPrefix}:line:${fs.leaf.moaCode}`;
+          out.push({
+            indent: 3, keyPath: `${keyPrefix}:${fs.leaf.moaCode}`, label: fs.leaf.leafName, codeTag: fs.leaf.moaCode,
+            ...gated(fs.leaf.total, leafP?.total ?? 0),
+            expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+            drillMoaCode: fs.leaf.moaCode,
+          });
+          continue;
+        }
+        const cluExpandKey = `${keyPrefix}:clu:${section}::${fam.bu}::${fs.cluster.clusterCode}`;
+        const priorClu = famP?.clusters.find((c) => c.clusterCode === fs.cluster.clusterCode);
+        out.push({
+          indent: 3, keyPath: cluExpandKey, label: fs.cluster.clusterName,
+          ...gated(fs.cluster.total, priorClu?.total ?? 0),
+          expandable: true, expanded: expanded.has(cluExpandKey), onToggle: () => toggle(cluExpandKey),
+        });
+        if (!expanded.has(cluExpandKey)) continue;
+        for (const leaf of fs.cluster.leaves) {
+          const leafP = priorClu?.leaves.find((l) => l.moaCode === leaf.moaCode);
+          const lineKey = `${keyPrefix}:line:${leaf.moaCode}`;
+          out.push({
+            indent: 4, keyPath: `${keyPrefix}:${leaf.moaCode}`, label: leaf.leafName, codeTag: leaf.moaCode,
+            ...gated(leaf.total, leafP?.total ?? 0),
+            expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+            drillMoaCode: leaf.moaCode,
+          });
+        }
+      }
+    }
+  };
 
   const tableRows = useMemo((): Row[] => {
     const out: Row[] = [];
     for (const m of MACRO_ROWS) {
+      // OpEx recurring/non-recurring split (2026-08-08, CEO mandate) — see
+      // the block comment above `pushOpexSectionRows`. Intercepts the 3
+      // functional OpEx macro rows (OPEX-GA/OPEX-MS/OPEX-People) and, in
+      // place of their normal single-row rendering, injects two subtotal
+      // groups — "Operating costs — Recurring" then "Operating costs —
+      // Non-recurring", each exploded into the SAME 3 functional sections —
+      // built from `recurringOpexTree`/`nonRecurringOpexTree`, a strict
+      // partition of the identical row set the unmodified "Total operating
+      // expenses" subtotal below still sums from `actualTree`/`actualSub`
+      // (untouched) — so the two new subtotals always add up to that
+      // existing total, no line counted in both. Skipped in Budget mode
+      // (budget has no recurring split at this granularity — see the
+      // "Detail limited to budget granularity" note already shown above the
+      // table): OPEX-GA/MS/People fall through to their pre-existing
+      // single-row rendering unchanged there.
+      if (m.key === "OPEX-GA" && !isBudgetMode) {
+        const recTotal = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(recurringOpexTree, sec), 0);
+        const recTotalP = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(recurringOpexTreePrior, sec), 0);
+        const hasRecTotal = OPEX_SECTIONS.every((sec) => sectionHasData(recurringOpexTree, sec));
+        const hasRecTotalP = OPEX_SECTIONS.every((sec) => sectionHasData(recurringOpexTreePrior, sec));
+        out.push({
+          indent: 0, keyPath: "OpexRecurring", label: "Operating costs — Recurring",
+          actual: noActualData || !hasRecTotal ? null : recTotal,
+          comparison: noPriorData || !hasRecTotalP ? null : recTotalP,
+          expandable: false, expanded: false, subtotal: true,
+        });
+        for (const sec of OPEX_SECTIONS) {
+          pushOpexSectionRows(out, "rec", sec, opexSectionLabel(sec), recurringOpexTree, recurringOpexTreePrior);
+        }
+
+        const nonRecTotal = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(nonRecurringOpexTree, sec), 0);
+        const nonRecTotalP = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(nonRecurringOpexTreePrior, sec), 0);
+        const hasNonRecTotal = OPEX_SECTIONS.every((sec) => sectionHasData(nonRecurringOpexTree, sec));
+        const hasNonRecTotalP = OPEX_SECTIONS.every((sec) => sectionHasData(nonRecurringOpexTreePrior, sec));
+        out.push({
+          indent: 0, keyPath: "OpexNonRecurring", label: "Operating costs — Non-recurring",
+          actual: noActualData || !hasNonRecTotal ? null : nonRecTotal,
+          comparison: noPriorData || !hasNonRecTotalP ? null : nonRecTotalP,
+          expandable: false, expanded: false, subtotal: true,
+        });
+        for (const sec of OPEX_SECTIONS) {
+          pushOpexSectionRows(out, "nonrec", sec, opexSectionLabel(sec), nonRecurringOpexTree, nonRecurringOpexTreePrior);
+        }
+        continue;
+      }
+      if ((m.key === "OPEX-MS" || m.key === "OPEX-People") && !isBudgetMode) {
+        continue; // already rendered above as part of the OPEX-GA recurring/non-recurring block
+      }
+
       const rawActual = macroValue(m.key, actualTree, actualSub);
       const rawComparison = isBudgetMode ? budgetValueFor(m.key, budgetAgg) : macroValue(m.key, priorTree, priorSub);
       // "Absent ≠ zero" (2026-08-04, owner-audit #3/#4): a row backed by zero
@@ -915,7 +1152,7 @@ export const PerformanceAnalysis = () => {
       }
     }
     return out;
-  }, [actualTree, priorTree, actualSub, priorSub, expanded, isBudgetMode, budgetAgg, noActualData, noPriorData]);
+  }, [actualTree, priorTree, actualSub, priorSub, expanded, isBudgetMode, budgetAgg, noActualData, noPriorData, recurringOpexTree, nonRecurringOpexTree, recurringOpexTreePrior, nonRecurringOpexTreePrior]);
 
   return (
     <div className="space-y-5">

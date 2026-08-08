@@ -194,8 +194,39 @@ export const useKpiHeaderData = (): KpiHeaderData => {
 
   const comparisonLabel = comparisonMode === "BUDGET" ? "Budget" : "Previous Year";
 
+  // Costs-unbooked honesty gate (2026-08-04, owner-audit #3/#4) — hoisted
+  // above both branches (2026-08-08 fix) so the "Only Recurring" scope
+  // branch below can reuse the SAME reason string the "All" scope branch
+  // already uses, rather than duplicating it.
+  const costsUnbookedReason = `Costs not fully posted yet for ${windowName} — figure not yet comparable.`;
+
   const metrics: KpiHeaderMetric[] = useMemo(() => {
     if (scope === "RECURRING" && recActual) {
+      // fix (2026-08-08, CEO — "luglio: i tre cerchi mostrano lo stesso
+      // numero, un mese senza costi sembra utile che non esiste"): a month
+      // with revenue posted but ZERO cost rows at all (no COGS, no OpEx —
+      // recurring or not) made `recActual.recGrossProfit` collapse to
+      // `recRevenue + 0` and `recActual.recEbitda` collapse to
+      // `recGrossProfit + 0`, so Revenue / Gross Margin / Recurring EBITDA
+      // all rendered the IDENTICAL figure — a fabricated "profit" out of
+      // simply-missing cost data. The "All" scope branch below already
+      // guards this exact case with `actual.hasGrossMargin` /
+      // `actual.hasEbitda5` (data/alignment.ts's per-section "absent ≠
+      // zero" coverage flags — true only when >=1 warehouse row actually
+      // landed in that section, independent of its recurring/non-recurring
+      // tag). Reused here as-is: `actual`/`prior` (aggregatePL, computed
+      // above regardless of scope) already carry section coverage that
+      // doesn't depend on the recurring/non-recurring split, so the SAME
+      // flags gate this branch too — extending the identical pattern,
+      // not inventing a new one. `hasEbitda5` (pre-Project-Costs), not
+      // `hasEbitdaReported`: `recEbitda` (= recGrossProfit + recOpex) never
+      // includes Project-Costs, so gating it on Project-Costs coverage would
+      // wrongly blank it out on months where GA/MS/People + Revenue/COGS are
+      // all posted but Leveredge/F&F project costs (routinely late) aren't.
+      const recGrossMarginOk = !noActualData && actual.hasGrossMargin;
+      const recGrossMarginOkP = !noPriorData && prior.hasGrossMargin;
+      const recEbitdaOk = !noActualData && actual.hasEbitda5;
+      const recEbitdaOkP = !noPriorData && prior.hasEbitda5;
       // fix-23-recon (2026-08-04): this metric used to read
       // `recActual.reportedEbitda`, which — by construction — adds every
       // non-recurring revenue/COGS/OpEx/Project-Costs line straight back in
@@ -219,8 +250,20 @@ export const useKpiHeaderData = (): KpiHeaderData => {
       // shows (a different, deliberately-broader figure, unchanged here).
       return [
         buildMetric("revenue", "Revenue", noActualData ? null : recActual.recRevenue, noPriorData ? null : (recPrior?.recRevenue ?? 0), recBudgetRevenue, comparisonMode, budgetNaReason, pyNaReason),
-        buildMetric("grossMargin", "Gross Margin", noActualData ? null : recActual.recGrossProfit, noPriorData ? null : (recPrior?.recGrossProfit ?? 0), null, comparisonMode, "Budget COGS is not split by recurrence.", pyNaReason),
-        buildMetric("ebitda", "Recurring EBITDA (as booked)", noActualData ? null : recActual.recEbitda, noPriorData ? null : (recPrior?.recEbitda ?? 0), null, comparisonMode, REC_EBITDA_BUDGET_NA, pyNaReason),
+        buildMetric(
+          "grossMargin", "Gross Margin",
+          recGrossMarginOk ? recActual.recGrossProfit : null,
+          recGrossMarginOkP ? (recPrior?.recGrossProfit ?? 0) : null,
+          null, comparisonMode, "Budget COGS is not split by recurrence.",
+          noPriorData ? pyNaReason : (!prior.hasGrossMargin ? costsUnbookedReason : pyNaReason),
+        ),
+        buildMetric(
+          "ebitda", "Recurring EBITDA (as booked)",
+          recEbitdaOk ? recActual.recEbitda : null,
+          recEbitdaOkP ? (recPrior?.recEbitda ?? 0) : null,
+          null, comparisonMode, REC_EBITDA_BUDGET_NA,
+          noPriorData ? pyNaReason : (!prior.hasEbitda5 ? costsUnbookedReason : pyNaReason),
+        ),
       ];
     }
     // Costs-unbooked honesty gate (2026-08-04, owner-audit #3/#4): a window
@@ -229,8 +272,8 @@ export const useKpiHeaderData = (): KpiHeaderData => {
     // (data/alignment.ts) are false in that case, so the headline circle
     // reads "—" instead of silently summing an unbooked 0 into a fabricated
     // positive EBITDA. Mirrors the identical gate now applied to the P&L
-    // table (PerformanceAnalysis.tsx).
-    const costsUnbookedReason = `Costs not fully posted yet for ${windowName} — figure not yet comparable.`;
+    // table (PerformanceAnalysis.tsx). (Hoisted above both branches as of
+    // 2026-08-08 — see the comment on its declaration above.)
     return [
       buildMetric("revenue", "Revenue", noActualData ? null : actual.revenue, noPriorData ? null : prior.revenue, budget?.revenue ?? null, comparisonMode, budgetNaReason, pyNaReason),
       buildMetric(
@@ -247,7 +290,7 @@ export const useKpiHeaderData = (): KpiHeaderData => {
         null, comparisonMode, EBITDA_REPORTED_BUDGET_NA, noPriorData ? pyNaReason : (!prior.hasEbitdaReported ? costsUnbookedReason : pyNaReason),
       ),
     ];
-  }, [scope, recActual, recPrior, recBudgetRevenue, actual, prior, budget, comparisonMode, budgetNaReason, pyNaReason, EBITDA_REPORTED_BUDGET_NA, noActualData, noPriorData]);
+  }, [scope, recActual, recPrior, recBudgetRevenue, actual, prior, budget, comparisonMode, budgetNaReason, pyNaReason, EBITDA_REPORTED_BUDGET_NA, REC_EBITDA_BUDGET_NA, noActualData, noPriorData, costsUnbookedReason]);
 
   return {
     isLoading: rowsLoading || budgetLoading,

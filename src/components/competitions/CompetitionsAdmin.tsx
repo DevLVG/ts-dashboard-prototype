@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Plus, Search, Pencil, ImageOff, ShieldAlert, AlertTriangle, Terminal } from "lucide-react";
@@ -35,22 +36,32 @@ export const CompetitionsAdmin = () => {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [editing, setEditing] = useState<Competition | null | "new">(null);
+  // 2026-09-11 fix: demo/example rows (is_placeholder=true — built once, 2026-07-29, to prove the CMS
+  // end-to-end; never real shows) used to always show alongside real competitions, so with zero real
+  // shows loaded the panel looked like "2 draft competitions" instead of "no real competitions yet".
+  // Default OFF — a deliberate opt-in toggle, not a delete, so the demo rows stay available if anyone
+  // needs to re-demonstrate the CMS, but no longer clutter the default view.
+  const [showDemo, setShowDemo] = useState(false);
 
   const statusOptions = useMemo(() => {
     const set = new Set((competitions ?? []).map((c) => c.status));
     return ["ALL", ...Array.from(set).sort()];
   }, [competitions]);
 
+  const realCount = (competitions ?? []).filter((c) => !c.is_placeholder).length;
+  const demoCount = (competitions ?? []).filter((c) => c.is_placeholder).length;
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (competitions ?? []).filter((c) => {
+      if (!showDemo && c.is_placeholder) return false;
       if (statusFilter !== "ALL" && c.status !== statusFilter) return false;
       if (q && !`${c.slug} ${c.name} ${c.venue ?? ""}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [competitions, search, statusFilter]);
+  }, [competitions, search, statusFilter, showDemo]);
 
-  const reviewCount = (competitions ?? []).filter((c) => c.needs_review).length;
+  const reviewCount = (competitions ?? []).filter((c) => c.needs_review && (showDemo || !c.is_placeholder)).length;
 
   return (
     <div className="space-y-6">
@@ -104,6 +115,12 @@ export const CompetitionsAdmin = () => {
               ))}
             </SelectContent>
           </Select>
+          {demoCount > 0 && (
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground pl-1">
+              <Checkbox checked={showDemo} onCheckedChange={(c) => setShowDemo(c === true)} />
+              Show demo / example ({demoCount})
+            </label>
+          )}
         </div>
 
         {!isSupabaseConfigured ? (
@@ -113,7 +130,11 @@ export const CompetitionsAdmin = () => {
         ) : isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : filtered.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No competitions match this filter.</p>
+          <p className="text-sm text-muted-foreground">
+            {realCount === 0 && !showDemo
+              ? `No real competitions loaded yet — Arwa's 2026 race calendar is still pending. ${demoCount} demo/example row${demoCount === 1 ? "" : "s"} exist to prove the CMS works end-to-end; tick "Show demo / example" above to see ${demoCount === 1 ? "it" : "them"}.`
+              : "No competitions match this filter."}
+          </p>
         ) : (
           <ScrollHint>
             <Table>

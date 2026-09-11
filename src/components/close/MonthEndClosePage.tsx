@@ -65,14 +65,17 @@ export const MonthEndClosePage = () => {
   const isLoading = close.isLoading && !close.data;
   const isError = close.isError;
   const rows: MonthlyCloseTaskRow[] = close.data?.available ? close.data.rows : [];
-  const first = rows[0];
 
-  const byBlock = new Map<string, MonthlyCloseTaskRow[]>();
+  // Group by period (2026-09-11 fix: the view now returns the latest TWO periods, not just one —
+  // so both the just-closed and the in-progress month show side by side instead of the tracker
+  // being frozen on whichever period was seeded first). Most recent period first.
+  const byPeriod = new Map<string, MonthlyCloseTaskRow[]>();
   for (const r of rows) {
-    const list = byBlock.get(r.block) ?? [];
+    const list = byPeriod.get(r.period) ?? [];
     list.push(r);
-    byBlock.set(r.block, list);
+    byPeriod.set(r.period, list);
   }
+  const periods = Array.from(byPeriod.keys()).sort((a, b) => (a < b ? 1 : -1));
 
   return (
     <div className="min-h-screen bg-background">
@@ -112,89 +115,106 @@ export const MonthEndClosePage = () => {
           <Card className="p-8 text-center"><p className="text-sm text-muted-foreground">No checklist rows returned.</p></Card>
         ) : (
           <>
-            <Card className="p-5">
-              <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
-                <div>
-                  <div className="text-xs uppercase tracking-wider text-muted-foreground">Closing period</div>
-                  <div className="text-xl font-heading">{periodLabel(first.period)}</div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-bold uppercase tracking-wider border ${LIGHT_META[first.overall_light].chip}`}>
-                    {(() => { const Icon = LIGHT_META[first.overall_light].icon; return <Icon className="h-3.5 w-3.5" />; })()}
-                    {first.overall_light === "green" ? "Complete" : first.overall_light === "red" ? "Attention needed" : "In progress"}
-                  </span>
-                  <DataSourceBadge source="live" sourceLabel="Live data from Supabase (v_monthly_close_status)" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="rounded-lg border border-border p-3">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Progress</div>
-                  <div className="text-lg font-heading tabular-nums">{first.done_tasks}/{first.total_tasks} · {first.pct_complete}%</div>
-                </div>
-                <div className="rounded-lg border border-border p-3">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Blocked</div>
-                  <div className={`text-lg font-heading tabular-nums ${first.blocked_tasks > 0 ? "text-destructive" : ""}`}>{first.blocked_tasks}</div>
-                </div>
-                <div className="rounded-lg border border-border p-3">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Overdue</div>
-                  <div className={`text-lg font-heading tabular-nums ${rows.filter((r) => r.is_overdue).length > 0 ? "text-destructive" : ""}`}>
-                    {rows.filter((r) => r.is_overdue).length}
-                  </div>
-                </div>
-                <div className="rounded-lg border border-border p-3">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Tasks</div>
-                  <div className="text-lg font-heading tabular-nums">{first.total_tasks}</div>
-                </div>
-              </div>
-            </Card>
+            {periods.map((period, periodIdx) => {
+              const periodRows = byPeriod.get(period) ?? [];
+              const head = periodRows[0];
+              const byBlock = new Map<string, MonthlyCloseTaskRow[]>();
+              for (const r of periodRows) {
+                const list = byBlock.get(r.block) ?? [];
+                list.push(r);
+                byBlock.set(r.block, list);
+              }
+              return (
+                <div key={period} className="space-y-5">
+                  {periodIdx > 0 && <div className="border-t border-border/40 pt-1" />}
+                  <Card className="p-5">
+                    <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+                      <div>
+                        <div className="text-xs uppercase tracking-wider text-muted-foreground">
+                          {periodIdx === 0 ? "Closing period — current" : "Closing period — previous"}
+                        </div>
+                        <div className="text-xl font-heading">{periodLabel(head.period)}</div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-bold uppercase tracking-wider border ${LIGHT_META[head.overall_light].chip}`}>
+                          {(() => { const Icon = LIGHT_META[head.overall_light].icon; return <Icon className="h-3.5 w-3.5" />; })()}
+                          {head.overall_light === "green" ? "Complete" : head.overall_light === "red" ? "Attention needed" : "In progress"}
+                        </span>
+                        {periodIdx === 0 && <DataSourceBadge source="live" sourceLabel="Live data from Supabase (v_monthly_close_status)" />}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="rounded-lg border border-border p-3">
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Progress</div>
+                        <div className="text-lg font-heading tabular-nums">{head.done_tasks}/{head.total_tasks} · {head.pct_complete}%</div>
+                      </div>
+                      <div className="rounded-lg border border-border p-3">
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Blocked</div>
+                        <div className={`text-lg font-heading tabular-nums ${head.blocked_tasks > 0 ? "text-destructive" : ""}`}>{head.blocked_tasks}</div>
+                      </div>
+                      <div className="rounded-lg border border-border p-3">
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Overdue</div>
+                        <div className={`text-lg font-heading tabular-nums ${periodRows.filter((r) => r.is_overdue).length > 0 ? "text-destructive" : ""}`}>
+                          {periodRows.filter((r) => r.is_overdue).length}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-border p-3">
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Tasks</div>
+                        <div className="text-lg font-heading tabular-nums">{head.total_tasks}</div>
+                      </div>
+                    </div>
+                  </Card>
 
-            {Array.from(byBlock.entries()).map(([block, items]) => (
-              <Card key={block} className="p-6 shadow-sm animate-fade-in">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                  {BLOCK_LABEL[block] ?? `Block ${block}`}
-                </h3>
-                <ScrollHint>
-                  <table className="w-full min-w-[820px] text-sm">
-                    <thead>
-                      <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
-                        <th className="text-left py-1 pr-2 font-semibold">Task</th>
-                        <th className="text-left py-1 px-2 font-semibold">Owner</th>
-                        <th className="text-center py-1 px-2 font-semibold">Status</th>
-                        <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Due</th>
-                        <th className="text-left py-1 pl-2 font-semibold">Notes</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map((t) => {
-                        const meta = LIGHT_META[t.task_light];
-                        const Icon = meta.icon;
-                        return (
-                          <tr key={t.task_key} className="border-b border-border/10 align-top">
-                            <td className="py-2 pr-2 max-w-[340px]">
-                              <div className="font-medium">{t.task_key}</div>
-                              <div className="text-xs text-muted-foreground">{t.description}</div>
-                            </td>
-                            <td className="py-2 px-2 text-muted-foreground whitespace-nowrap">{t.owner}</td>
-                            <td className="py-2 px-2 text-center">
-                              <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border ${meta.chip}`}>
-                                <Icon className="h-3 w-3" /> {STATUS_LABEL[t.status] ?? t.status}
-                              </span>
-                            </td>
-                            <td className={`py-2 px-2 text-right whitespace-nowrap ${t.is_overdue ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
-                              {fmtDate(t.due_date)}{t.is_overdue && " · overdue"}
-                            </td>
-                            <td className="py-2 pl-2 text-xs text-muted-foreground">
-                              {t.notes ?? "—"}
-                              {t.completed_at && <div className="text-[10px] mt-0.5">done {new Date(t.completed_at).toLocaleDateString()} by {t.completed_by ?? "—"}</div>}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </ScrollHint>
-              </Card>
-            ))}
+                  {Array.from(byBlock.entries()).map(([block, items]) => (
+                    <Card key={`${period}-${block}`} className="p-6 shadow-sm animate-fade-in">
+                      <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                        {BLOCK_LABEL[block] ?? `Block ${block}`}
+                      </h3>
+                      <ScrollHint>
+                        <table className="w-full min-w-[820px] text-sm">
+                          <thead>
+                            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
+                              <th className="text-left py-1 pr-2 font-semibold">Task</th>
+                              <th className="text-left py-1 px-2 font-semibold">Owner</th>
+                              <th className="text-center py-1 px-2 font-semibold">Status</th>
+                              <th className="text-right py-1 px-2 font-semibold whitespace-nowrap">Due</th>
+                              <th className="text-left py-1 pl-2 font-semibold">Notes</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {items.map((t) => {
+                              const meta = LIGHT_META[t.task_light];
+                              const Icon = meta.icon;
+                              return (
+                                <tr key={t.task_key} className="border-b border-border/10 align-top">
+                                  <td className="py-2 pr-2 max-w-[340px]">
+                                    <div className="font-medium">{t.task_key}</div>
+                                    <div className="text-xs text-muted-foreground">{t.description}</div>
+                                  </td>
+                                  <td className="py-2 px-2 text-muted-foreground whitespace-nowrap">{t.owner}</td>
+                                  <td className="py-2 px-2 text-center">
+                                    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border ${meta.chip}`}>
+                                      <Icon className="h-3 w-3" /> {STATUS_LABEL[t.status] ?? t.status}
+                                    </span>
+                                  </td>
+                                  <td className={`py-2 px-2 text-right whitespace-nowrap ${t.is_overdue ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
+                                    {fmtDate(t.due_date)}{t.is_overdue && " · overdue"}
+                                  </td>
+                                  <td className="py-2 pl-2 text-xs text-muted-foreground">
+                                    {t.notes ?? "—"}
+                                    {t.completed_at && <div className="text-[10px] mt-0.5">done {new Date(t.completed_at).toLocaleDateString()} by {t.completed_by ?? "—"}</div>}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </ScrollHint>
+                    </Card>
+                  ))}
+                </div>
+              );
+            })}
           </>
         )}
       </main>

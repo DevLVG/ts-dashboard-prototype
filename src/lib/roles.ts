@@ -63,9 +63,13 @@ const CMS_PAGES: PageType[] = ["catalog", "media", "copy", "competitions", "inst
 // Role grants below are a first-pass call (documented per-page in each
 // component's own header) — proposed, to confirm with Marcello/Luca, same
 // posture as the rest of this file.
+// HR (build 2026-09-12, spec HR-Specifica-CLEVER-HR_2026-09-12_IT.md §5):
+// "voce di menu HR ... visibile ai ruoli Leveredge, CEO e Amministrazione" —
+// all three business roles, same posture as Treasury/Confirmations, not a
+// CMS admin tab.
 const ALL_PAGES: PageType[] = [
   "performance", "monthly", "cash", "cash-forecast", "treasury", "confirmations", "payments", "balance", "report",
-  "accruals", "vat-prefile", "month-close",
+  "accruals", "vat-prefile", "month-close", "hr",
   ...CMS_PAGES,
 ];
 /** "Everything business" = every screen except the CMS admin tabs. */
@@ -82,7 +86,7 @@ export const ROLE_PAGES: Record<Role, PageType[]> = {
   // like confirmations) added 2026-08-07; accruals/vat-prefile withheld —
   // payroll-sensitive / filing-compliance, same class as "payments" and
   // "report" which administration also does not see.
-  administration: ["treasury", "cash", "cash-forecast", "confirmations", "month-close"],
+  administration: ["treasury", "cash", "cash-forecast", "confirmations", "month-close", "hr"],
   unknown: ["performance"],                // Economics only, read-only default landing
 };
 

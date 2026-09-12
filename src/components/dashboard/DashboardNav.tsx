@@ -27,6 +27,7 @@ import {
   ShieldCheck,
   ClipboardCheck,
   CalendarDays,
+  UserCheck,
   type LucideIcon,
 } from "lucide-react";
 import { PageType } from "@/types/dashboard";
@@ -85,6 +86,9 @@ const ALL_PAGES: NavPage[] = [
   { id: "accruals", label: "Accruals", icon: Receipt, path: "/accruals" },
   { id: "vat-prefile", label: "VAT Pre-Filing", icon: ShieldCheck, path: "/vat-prefile" },
   { id: "month-close", label: "Month-End Close", icon: ClipboardCheck, path: "/month-close" },
+  // HR (build 2026-09-12): own top-level nav group (own_group below), not
+  // folded into Admin — spec calls it a dedicated "voce di menu HR".
+  { id: "hr", label: "HR", icon: UserCheck, path: "/hr" },
   { id: "catalog", label: "Catalogue", icon: Package, path: "/catalog" },
   { id: "media", label: "Media", icon: Image, path: "/media" },
   { id: "copy", label: "Site Copy", icon: Languages, path: "/copy" },
@@ -123,6 +127,11 @@ const NAV_GROUPS: NavGroup[] = [
   // neighbourhood.
   { id: "admin-group", label: "Admin", defaultPageId: "treasury", pageIds: ["treasury", "confirmations", "payments", "accruals", "vat-prefile", "month-close"] },
   { id: "marketing-group", label: "Marketing", pageIds: ["catalog", "media", "copy", "competitions", "instructors", "slot-priority"] },
+  // HR (build 2026-09-12): single-item group renders as a plain button
+  // (see the "group.pages.length === 1" branch below) — no dropdown needed
+  // for one screen at the top nav level (the four HR sub-screens live
+  // inside the page itself, as tabs).
+  { id: "hr-group", label: "HR", pageIds: ["hr"] },
 ];
 
 export const DashboardNav = ({ currentPage }: DashboardNavProps) => {

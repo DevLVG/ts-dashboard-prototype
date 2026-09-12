@@ -16,6 +16,7 @@ import { AccrualsPage } from "@/components/accruals/AccrualsPage";
 import { VatPrefilePage } from "@/components/vat/VatPrefilePage";
 import { MonthEndClosePage } from "@/components/close/MonthEndClosePage";
 import { MonthByMonthPage } from "@/components/performance/MonthByMonthPage";
+import { HrPage } from "@/components/hr/HrPage";
 
 const queryClient = new QueryClient();
 
@@ -85,6 +86,12 @@ const App = () => {
                 <Route path="/accruals" element={<AccrualsPage />} />
                 <Route path="/vat-prefile" element={<VatPrefilePage />} />
                 <Route path="/month-close" element={<MonthEndClosePage />} />
+                {/* HR (build 2026-09-12, HR-Specifica-CLEVER-HR_2026-09-12_IT.md):
+                    same standalone-route pattern as Report/Confirmations —
+                    own <DashboardNav/> mount + own role gate. The four HR
+                    sub-screens (Persone/Scheda/Valutazione/Cicli) live as
+                    tabs inside HrPage itself, not as separate routes. */}
+                <Route path="/hr" element={<HrPage />} />
                 <Route path="/analysis" element={<Navigate to="/performance" replace />} />
                 <Route path="/catalog" element={<Index />} />
                 <Route path="/media" element={<Index />} />

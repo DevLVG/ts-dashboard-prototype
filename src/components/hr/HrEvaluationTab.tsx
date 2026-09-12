@@ -3,7 +3,7 @@
 // solo i propri punteggi finché il ciclo non è chiuso — enforced lato DB
 // (RLS "own_or_closed_cycle_read", migration 091), non solo qui: card.evaluations
 // arriva già filtrato da Supabase per l'utente in sessione.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,19 +40,36 @@ export const HrEvaluationTab = ({ personId, cycleId }: Props) => {
 
   const [draft, setDraft] = useState<Record<number, { score: string; comment: string }>>({});
 
+  // Prefill from the server, but MERGE rather than replace: hr_upsert_evaluation's
+  // onSuccess invalidates ["hr","card"], so every single save mid-form triggers a
+  // refetch here — a naive full-replace effect (keyed only on `card`/reviewerEmail)
+  // would wipe out whatever the reviewer had already typed into OTHER, not-yet-saved
+  // rows the instant one row's save round-trip lands, dropping input. Found live
+  // during Playwright verification (2026-09-12): a 4-objective test card lost its
+  // 4th score every time because saving objective 3 raced the still-in-flight edit
+  // on objective 4. Fix: only seed a row's draft ONCE per (personId, cycleId, objective)
+  // — resetKey below changes only when the card itself changes identity (switching
+  // person/cycle), never on a same-card refetch.
+  const resetKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!card) return;
-    const next: Record<number, { score: string; comment: string }> = {};
-    for (const o of card.objectives) {
-      const mine = card.evaluations.find((e) => e.objective_id === o.objective_id && e.reviewer_email.toLowerCase() === reviewerEmail);
-      const proposed = card.proposed.find((p) => p.objective_id === o.objective_id);
-      next[o.objective_id] = {
-        score: mine ? String(mine.score) : (o.component === "hard" && proposed?.proposed_score != null ? String(proposed.proposed_score) : ""),
-        comment: mine?.comment ?? "",
-      };
-    }
-    setDraft(next);
-  }, [card, reviewerEmail]);
+    const resetKey = `${personId}:${cycleId}`;
+    const isFreshCard = resetKeyRef.current !== resetKey;
+    resetKeyRef.current = resetKey;
+    setDraft((prev) => {
+      const next = isFreshCard ? {} : { ...prev };
+      for (const o of card.objectives) {
+        if (!isFreshCard && next[o.objective_id]) continue; // keep the reviewer's in-progress edit
+        const mine = card.evaluations.find((e) => e.objective_id === o.objective_id && e.reviewer_email.toLowerCase() === reviewerEmail);
+        const proposed = card.proposed.find((p) => p.objective_id === o.objective_id);
+        next[o.objective_id] = {
+          score: mine ? String(mine.score) : (o.component === "hard" && proposed?.proposed_score != null ? String(proposed.proposed_score) : ""),
+          comment: mine?.comment ?? "",
+        };
+      }
+      return next;
+    });
+  }, [card, reviewerEmail, personId, cycleId]);
 
   if (isLoading || !card) return <p className="text-sm text-muted-foreground">Caricamento…</p>;
   if (!cycle) return <p className="text-sm text-muted-foreground">Ciclo non trovato.</p>;

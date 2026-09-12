@@ -145,8 +145,13 @@ export const useHrEvaluatedPeople = () =>
     queryKey: ["hr", "people"],
     enabled: isSupabaseConfigured,
     queryFn: async (): Promise<HrEvaluatedPerson[]> => {
+      // v_hr_people_directory (migration 093), not personnel_master directly —
+      // personnel_master has no authenticated RLS policy (service_role_all
+      // only); this narrow, salary-free view is what makes it readable from
+      // the browser. See that migration's header for the full story (found
+      // live during Playwright verification, 2026-09-12).
       const { data, error } = await need()
-        .from("personnel_master")
+        .from("v_hr_people_directory")
         .select("employee_id, full_name, department, job_position, bu, status, hr_evaluated")
         .eq("hr_evaluated", true)
         .order("full_name");
@@ -162,7 +167,7 @@ export const useHrActivatablePeople = () =>
     enabled: isSupabaseConfigured,
     queryFn: async (): Promise<HrEvaluatedPerson[]> => {
       const { data, error } = await need()
-        .from("personnel_master")
+        .from("v_hr_people_directory")
         .select("employee_id, full_name, department, job_position, bu, status, hr_evaluated")
         .eq("status", "active")
         .eq("hr_evaluated", false)

@@ -65,8 +65,18 @@ export const HrEvidencePanel = ({ objectiveId, open, onOpenChange }: Props) => {
   };
 
   const openFile = async (path: string) => {
-    const url = await hrEvidenceSignedUrl(path);
-    if (url) window.open(url, "_blank", "noopener");
+    // iOS Safari blocca window.open dopo un await (il tap non conta piu' come
+    // gesto utente): la finestra va aperta SUBITO, sincrona, e reindirizzata poi.
+    const win = window.open("", "_blank");
+    try {
+      const url = await hrEvidenceSignedUrl(path);
+      if (!url) throw new Error("Link al file non generato");
+      if (win) win.location.href = url;
+      else window.location.assign(url);
+    } catch (e) {
+      win?.close();
+      toast({ title: "Il file non si apre", description: (e as Error).message, variant: "destructive" });
+    }
   };
 
   return (

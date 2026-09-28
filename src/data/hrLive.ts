@@ -369,6 +369,6 @@ export const addHrEvidenceLink = async (objectiveId: number, url: string, actor:
 
 export const hrEvidenceSignedUrl = async (filePath: string): Promise<string | null> => {
   const { data, error } = await need().storage.from("hr-evidence").createSignedUrl(filePath, 3600);
-  if (error) return null;
+  if (error) throw toFriendlyError(error);
   return data.signedUrl;
 };

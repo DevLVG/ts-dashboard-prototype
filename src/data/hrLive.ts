@@ -120,6 +120,7 @@ export interface HrEvaluatedPerson {
 const REVIEWER_LABELS: Record<string, string> = {
   "marcello.piccardo@leveredge.pro": "Marcello",
   "arwa@triosporting.com": "Arwa",
+  "ceo@triosporting.com": "Arwa",
   "admin@triosporting.com": "Marta",
   "direction@triosporting.com": "Marta",
 };

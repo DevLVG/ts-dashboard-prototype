@@ -54,21 +54,21 @@ export const HrPage = () => {
       <DashboardNav currentPage="hr" />
       <main className="container mx-auto px-4 py-6 space-y-5">
         <div>
-          <h1 className="font-heading text-2xl tracking-wide text-foreground">HR — Obiettivi e valutazione</h1>
+          <h1 className="font-heading text-2xl tracking-wide text-foreground">HR — Objectives & Performance Review</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Obiettivi hard, soft e valori per persona; valutazione trimestrale secondo il sistema deciso a gennaio 2026.
+            Hard, soft and values objectives per person; quarterly review under the system agreed in January 2026.
           </p>
         </div>
 
         {!isSupabaseConfigured ? (
-          <p className="text-sm text-destructive">Supabase non configurato — la sezione HR non può caricare.</p>
+          <p className="text-sm text-destructive">Supabase is not configured — the HR section cannot load.</p>
         ) : (
           <Tabs value={tab} onValueChange={setTabAndParam}>
             <TabsList>
-              <TabsTrigger value="people">Persone</TabsTrigger>
-              <TabsTrigger value="card" disabled={!personId}>Scheda</TabsTrigger>
-              <TabsTrigger value="evaluate" disabled={!personId}>Valutazione</TabsTrigger>
-              <TabsTrigger value="cycles">Cicli</TabsTrigger>
+              <TabsTrigger value="people">People</TabsTrigger>
+              <TabsTrigger value="card" disabled={!personId}>Card</TabsTrigger>
+              <TabsTrigger value="evaluate" disabled={!personId}>Evaluation</TabsTrigger>
+              <TabsTrigger value="cycles">Cycles</TabsTrigger>
             </TabsList>
 
             <TabsContent value="people" className="mt-4">
@@ -78,14 +78,14 @@ export const HrPage = () => {
               {personId && cycleId ? (
                 <HrCardTab personId={personId} cycleId={cycleId} role={role} />
               ) : (
-                <p className="text-sm text-muted-foreground">Seleziona una persona dalla schermata Persone.</p>
+                <p className="text-sm text-muted-foreground">Select a person from the People screen.</p>
               )}
             </TabsContent>
             <TabsContent value="evaluate" className="mt-4">
               {personId && cycleId ? (
                 <HrEvaluationTab personId={personId} cycleId={cycleId} />
               ) : (
-                <p className="text-sm text-muted-foreground">Seleziona una persona dalla schermata Persone.</p>
+                <p className="text-sm text-muted-foreground">Select a person from the People screen.</p>
               )}
             </TabsContent>
             <TabsContent value="cycles" className="mt-4">

@@ -16,7 +16,7 @@ import {
   useHrCard, useHrReviewerWeights, useHrCycles, useUpsertEvaluation, type HrComponent,
 } from "@/data/hrLive";
 
-const COMPONENT_LABEL: Record<HrComponent, string> = { hard: "Obiettivi hard (50%)", soft: "Obiettivi soft (20%)", value: "Attitudine e valori (30%)" };
+const COMPONENT_LABEL: Record<HrComponent, string> = { hard: "Hard objectives (50%)", soft: "Soft objectives (20%)", value: "Attitude & values (30%)" };
 const requiresComment = (score: number) => [1, 2, 5].includes(score);
 
 interface Props { personId: string; cycleId: string }
@@ -71,13 +71,13 @@ export const HrEvaluationTab = ({ personId, cycleId }: Props) => {
     });
   }, [card, reviewerEmail, personId, cycleId]);
 
-  if (isLoading || !card) return <p className="text-sm text-muted-foreground">Caricamento…</p>;
-  if (!cycle) return <p className="text-sm text-muted-foreground">Ciclo non trovato.</p>;
+  if (isLoading || !card) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (!cycle) return <p className="text-sm text-muted-foreground">Cycle not found.</p>;
   if (!isReviewer) {
     return (
       <Card className="p-6 shadow-sm">
         <p className="text-sm text-muted-foreground">
-          Il tuo account ({reviewerEmail || "sessione senza email"}) non è tra i valutatori assegnati a questa persona.
+          Your account ({reviewerEmail || "session without email"}) is not among the reviewers assigned to this person.
         </p>
       </Card>
     );
@@ -86,7 +86,7 @@ export const HrEvaluationTab = ({ personId, cycleId }: Props) => {
     return (
       <Card className="p-6 shadow-sm">
         <p className="text-sm text-muted-foreground">
-          Il ciclo "{cycle.label}" non è aperto alla valutazione (stato: {cycle.status}).
+          Cycle "{cycle.label}" is not open for evaluation (status: {cycle.status}).
         </p>
       </Card>
     );
@@ -96,26 +96,26 @@ export const HrEvaluationTab = ({ personId, cycleId }: Props) => {
     const d = draft[objectiveId];
     const scoreNum = parseFloat(d?.score ?? "");
     if (Number.isNaN(scoreNum) || scoreNum < 1 || scoreNum > 5) {
-      toast({ title: "Punteggio non valido", description: "Inserisci un valore tra 1 e 5.", variant: "destructive" });
+      toast({ title: "Invalid score", description: "Enter a value between 1 and 5.", variant: "destructive" });
       return;
     }
     if (requiresComment(scoreNum) && !(d.comment ?? "").trim()) {
-      toast({ title: "Commento obbligatorio", description: "Un punteggio di 1, 2 o 5 richiede un breve commento.", variant: "destructive" });
+      toast({ title: "Comment required", description: "A score of 1, 2 or 5 requires a short comment.", variant: "destructive" });
       return;
     }
     try {
       await upsert.mutateAsync({ p_objective_id: objectiveId, p_score: scoreNum, p_comment: d.comment || null });
-      toast({ title: "Punteggio salvato" });
+      toast({ title: "Score saved" });
       refetch();
     } catch (e) {
-      toast({ title: "Errore nel salvataggio", description: (e as Error).message, variant: "destructive" });
+      toast({ title: "Save failed", description: (e as Error).message, variant: "destructive" });
     }
   };
 
   return (
     <div className="space-y-5">
       <div className="text-xs text-muted-foreground">
-        Ciclo "{cycle.label}" — stai valutando come <Badge variant="outline">{reviewerEmail}</Badge>. I tuoi punteggi restano visibili solo a te finché il ciclo non viene chiuso.
+        Cycle "{cycle.label}" — you are reviewing as <Badge variant="outline">{reviewerEmail}</Badge>. Your scores remain visible only to you until the cycle is closed.
       </div>
       {(["hard", "soft", "value"] as const).map((component) => {
         const rows = card.objectives.filter((o) => o.component === component);
@@ -137,7 +137,7 @@ export const HrEvaluationTab = ({ personId, cycleId }: Props) => {
                       <p className="text-xs text-muted-foreground">{o.description}</p>
                       {component === "hard" && proposed && (
                         <p className="text-xs text-muted-foreground mt-1">
-                          Proposta sistema: <span className="font-medium">{proposed.proposed_score ?? "manuale"}</span> — {proposed.proposed_basis}
+                          System proposal: <span className="font-medium">{proposed.proposed_score ?? "manual"}</span> — {proposed.proposed_basis}
                         </p>
                       )}
                     </div>
@@ -151,17 +151,17 @@ export const HrEvaluationTab = ({ personId, cycleId }: Props) => {
                     />
                     <Textarea
                       className="flex-1 min-w-[200px] h-9 min-h-9 py-2"
-                      placeholder={requiresComment(scoreNum) ? "Commento obbligatorio per 1, 2 o 5…" : "Commento (opzionale)…"}
+                      placeholder={requiresComment(scoreNum) ? "Comment required for 1, 2 or 5…" : "Comment (optional)…"}
                       value={d.comment}
                       onChange={(e) => setDraft((prev) => ({ ...prev, [o.objective_id]: { ...prev[o.objective_id], comment: e.target.value } }))}
                     />
                     <Button size="sm" onClick={() => save(o.objective_id)} disabled={upsert.isPending}>
-                      {upsert.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salva"}
+                      {upsert.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
                     </Button>
                   </div>
                   {deviation != null && Math.abs(deviation) > 0.01 && (
                     <p className="text-xs text-amber-500">
-                      Scostamento dalla proposta: {deviation > 0 ? "+" : ""}{deviation.toFixed(1)}
+                      Deviation from proposal: {deviation > 0 ? "+" : ""}{deviation.toFixed(1)}
                     </p>
                   )}
                 </div>

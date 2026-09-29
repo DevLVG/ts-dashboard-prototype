@@ -31,8 +31,11 @@ import { PageType } from "@/types/dashboard";
 export type Role = "leveredge" | "ceo" | "administration" | "unknown";
 
 const ROLE_EMAILS: Record<Exclude<Role, "unknown">, string[]> = {
-  leveredge: ["marcello.piccardo@leveredge.pro", "analyst@leveredge.pro", "ceo@triosporting.com"],
-  ceo: ["arwa@triosporting.com"],
+  leveredge: ["marcello.piccardo@leveredge.pro", "analyst@leveredge.pro"],
+  // 2026-09-29 (Arwa via Marta): ceo@triosporting.com is now ARWA's login —
+  // moved from "leveredge" (internal test) to "ceo". arwa@triosporting.com kept
+  // mapped as a fallback; DB-side hr_is_leveredge_actor() updated in lockstep.
+  ceo: ["ceo@triosporting.com", "arwa@triosporting.com"],
   administration: ["direction@triosporting.com", "admin@triosporting.com"],
 };
 

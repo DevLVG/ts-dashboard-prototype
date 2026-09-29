@@ -24,7 +24,7 @@ const PAGE_W = 210, MARGIN = 16, CONTENT_W = PAGE_W - MARGIN * 2;
 const fmtScore = (v: number | null) => (v == null ? "—" : v.toFixed(2));
 const fmtSAR = (v: number | null) => (v == null ? "—" : new Intl.NumberFormat("en-US").format(Math.round(v)) + " SAR");
 
-const componentLabel: Record<string, string> = { hard: "Obiettivi hard (50%)", soft: "Obiettivi soft (20%)", value: "Attitudine e valori (30%)" };
+const componentLabel: Record<string, string> = { hard: "Hard objectives (50%)", soft: "Soft objectives (20%)", value: "Attitude & values (30%)" };
 
 export const generateHrOutcomePdf = async (
   score: HrScoreRow,
@@ -43,7 +43,7 @@ export const generateHrOutcomePdf = async (
   doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
   doc.setTextColor(...BLACK);
-  doc.text("Trio Sporting — Esito valutazione", PAGE_W - MARGIN, y + 8, { align: "right" });
+  doc.text("Trio Sporting — Evaluation outcome", PAGE_W - MARGIN, y + 8, { align: "right" });
   y += 18;
   doc.setDrawColor(...GOLD_DEEP);
   doc.setLineWidth(0.4);
@@ -57,25 +57,25 @@ export const generateHrOutcomePdf = async (
   doc.setFontSize(9);
   doc.setTextColor(...MUTED);
   doc.text(`${score.job_position ?? ""}${score.department ? " — " + score.department : ""}`, MARGIN, y); y += 5;
-  doc.text(`Ciclo: ${cycleLabel}`, MARGIN, y); y += 10;
+  doc.text(`Cycle: ${cycleLabel}`, MARGIN, y); y += 10;
 
   // Summary tile
   doc.setFillColor(...CREAM);
   doc.roundedRect(MARGIN, y, CONTENT_W, 26, 2, 2, "F");
   doc.setFontSize(9);
   doc.setTextColor(...MUTED);
-  doc.text("Punteggio finale", MARGIN + 6, y + 7);
-  doc.text("Fascia bonus", MARGIN + 60, y + 7);
-  doc.text("Aumento", MARGIN + 110, y + 7);
+  doc.text("Final score", MARGIN + 6, y + 7);
+  doc.text("Bonus band", MARGIN + 60, y + 7);
+  doc.text("Salary increase", MARGIN + 110, y + 7);
   doc.text("Up or out", MARGIN + 155, y + 7);
   doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...BLACK);
   doc.text(fmtScore(score.final_score), MARGIN + 6, y + 17);
-  doc.text(score.bonus_months == null ? "—" : `${score.bonus_months} mensilità`, MARGIN + 60, y + 17);
+  doc.text(score.bonus_months == null ? "—" : `${score.bonus_months} month${score.bonus_months === 1 ? "" : "s"}`, MARGIN + 60, y + 17);
   doc.text(fmtSAR(score.salary_increase_sar), MARGIN + 110, y + 17);
   doc.setTextColor(...(score.up_or_out_flag ? DESTRUCTIVE : SUCCESS));
-  doc.text(score.up_or_out_flag ? "SI — revisione" : "No", MARGIN + 155, y + 17);
+  doc.text(score.up_or_out_flag ? "YES — review" : "No", MARGIN + 155, y + 17);
   y += 32;
 
   for (const component of ["hard", "soft", "value"] as const) {
@@ -97,7 +97,7 @@ export const generateHrOutcomePdf = async (
     autoTable(doc, {
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
-      head: [["Voce", "Descrizione / target", "Peso", "Punteggi valutatori"]],
+      head: [["Item", "Description / target", "Weight", "Reviewer scores"]],
       body,
       styles: { font: "helvetica", fontSize: 8, textColor: BLACK },
       headStyles: { fillColor: CREAM, textColor: BLACK, fontStyle: "bold" },
@@ -110,9 +110,9 @@ export const generateHrOutcomePdf = async (
   doc.setFontSize(7);
   doc.setTextColor(...MUTED);
   doc.text(
-    `Documento generato automaticamente alla chiusura del ciclo — CLEVER HR. ${new Date().toLocaleString()}`,
+    `Automatically generated at cycle close — CLEVER HR. ${new Date().toLocaleString()}`,
     MARGIN, 290,
   );
 
-  doc.save(`HR-Esito-${score.full_name.replace(/\s+/g, "-")}-${score.cycle_id}.pdf`);
+  doc.save(`HR-Outcome-${score.full_name.replace(/\s+/g, "-")}-${score.cycle_id}.pdf`);
 };

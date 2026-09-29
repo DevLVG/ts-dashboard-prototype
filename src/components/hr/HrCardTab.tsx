@@ -20,7 +20,7 @@ import { HrEvidencePanel } from "@/components/hr/HrEvidencePanel";
 
 const fmtScore = (v: number | null) => (v == null ? "—" : v.toFixed(2));
 const fmtSAR = (v: number | null) => (v == null ? "—" : new Intl.NumberFormat("en-US").format(Math.round(v)) + " SAR");
-const COMPONENT_LABEL: Record<HrComponent, string> = { hard: "Obiettivi hard (50%)", soft: "Obiettivi soft (20%)", value: "Attitudine e valori (30%)" };
+const COMPONENT_LABEL: Record<HrComponent, string> = { hard: "Hard objectives (50%)", soft: "Soft objectives (20%)", value: "Attitude & values (30%)" };
 
 interface Props { personId: string; cycleId: string; role: Role }
 
@@ -42,12 +42,12 @@ export const HrCardTab = ({ personId, cycleId }: Props) => {
     try {
       await generateHrOutcomePdf(score, cycle?.label ?? cycleId, card.objectives, card.evaluations);
     } catch (e) {
-      toast({ title: "Errore nella generazione del PDF", description: (e as Error).message, variant: "destructive" });
+      toast({ title: "PDF generation failed", description: (e as Error).message, variant: "destructive" });
     }
   };
 
-  if (isError) return <p className="text-sm text-destructive">Non è stato possibile caricare la scheda.</p>;
-  if (isLoading || !card) return <p className="text-sm text-muted-foreground">Caricamento…</p>;
+  if (isError) return <p className="text-sm text-destructive">Could not load the card.</p>;
+  if (isLoading || !card) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
   return (
     <div className="space-y-5">
@@ -56,12 +56,12 @@ export const HrCardTab = ({ personId, cycleId }: Props) => {
           <div>
             <h3 className="text-xl font-heading tracking-wide">{person?.full_name ?? personId}</h3>
             <p className="text-xs text-muted-foreground mt-1">
-              {person?.job_position ?? "—"}{person?.department ? ` · ${person.department}` : ""} · Ciclo: {cycle?.label ?? cycleId}
+              {person?.job_position ?? "—"}{person?.department ? ` · ${person.department}` : ""} · Cycle: {cycle?.label ?? cycleId}
             </p>
           </div>
           {cycle?.status === "closed" && score && (
             <Button variant="outline" size="sm" className="gap-1.5" onClick={handlePdf}>
-              <FileDown className="h-4 w-4" /> Scarica esito PDF
+              <FileDown className="h-4 w-4" /> Download outcome PDF
             </Button>
           )}
         </div>
@@ -70,18 +70,18 @@ export const HrCardTab = ({ personId, cycleId }: Props) => {
           <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-destructive" />
             <span className="text-destructive font-medium">
-              Revisione obbligatoria (up or out) — un valore ha punteggio 1 o 2, oppure il finale è 1 o 2. Richiede il confronto con MD e CEO.
+              Mandatory review (up or out) — a value scored 1 or 2, or the final score is 1 or 2. Requires a review with MD and CEO.
             </span>
           </div>
         )}
 
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
-          <SummaryTile label="Punteggio finale" value={fmtScore(score?.final_score ?? null)} />
-          <SummaryTile label="Fascia bonus" value={score?.bonus_months == null ? "—" : `${score.bonus_months} mensilità`} />
+          <SummaryTile label="Final score" value={fmtScore(score?.final_score ?? null)} />
+          <SummaryTile label="Bonus band" value={score?.bonus_months == null ? "—" : `${score.bonus_months} month${score.bonus_months === 1 ? "" : "s"}`} />
           <SummaryTile label="Bonus" value={fmtSAR(score?.bonus_amount_sar ?? null)} />
-          <SummaryTile label="Aumento" value={fmtSAR(score?.salary_increase_sar ?? null)} />
+          <SummaryTile label="Salary increase" value={fmtSAR(score?.salary_increase_sar ?? null)} />
           <SummaryTile
-            label="Copertura valutatori"
+            label="Reviewer coverage"
             value={score ? `${score.reviewers_with_score}/${score.reviewers_expected}` : "—"}
             tone={score?.all_scored_complete ? "text-emerald-400" : "text-amber-500"}
           />
@@ -89,8 +89,8 @@ export const HrCardTab = ({ personId, cycleId }: Props) => {
 
         {weights && weights.length > 0 && (
           <p className="text-xs text-muted-foreground mt-3">
-            Valutatori: {weights.map((w) => `${reviewerLabel(w.reviewer_email)} ${w.weight_pct}%`).join(" · ")}
-            {weights.some((w) => w.source === "manual_override") && " (pesi personalizzati)"}
+            Reviewers: {weights.map((w) => `${reviewerLabel(w.reviewer_email)} ${w.weight_pct}%`).join(" · ")}
+            {weights.some((w) => w.source === "manual_override") && " (custom weights)"}
           </p>
         )}
       </Card>
@@ -104,13 +104,13 @@ export const HrCardTab = ({ personId, cycleId }: Props) => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Voce</TableHead>
-                  <TableHead>Target / indicatori</TableHead>
-                  <TableHead className="text-right">Peso</TableHead>
-                  {component === "hard" && <TableHead className="text-right">Risultato</TableHead>}
-                  {component === "hard" && <TableHead>Proposta</TableHead>}
-                  <TableHead>Punteggi valutatori</TableHead>
-                  {component === "hard" && <TableHead className="text-right">Prove</TableHead>}
+                  <TableHead>Item</TableHead>
+                  <TableHead>Target / indicators</TableHead>
+                  <TableHead className="text-right">Weight</TableHead>
+                  {component === "hard" && <TableHead className="text-right">Result</TableHead>}
+                  {component === "hard" && <TableHead>Proposed</TableHead>}
+                  <TableHead>Reviewer scores</TableHead>
+                  {component === "hard" && <TableHead className="text-right">Evidence</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>

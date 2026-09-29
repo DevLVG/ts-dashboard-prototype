@@ -55,24 +55,24 @@ export const HrPeopleTab = ({ role, cycleId, onOpenCard }: Props) => {
 
   const statusFor = (employeeId: string): { label: string; tone: string } => {
     const count = objCounts?.[employeeId] ?? 0;
-    if (!currentCycle) return { label: "nessun ciclo", tone: "text-muted-foreground" };
-    if (count === 0) return { label: "obiettivi da assegnare", tone: "border-amber-500/40 text-amber-500" };
-    if (currentCycle.status === "scheduled") return { label: "in attesa apertura", tone: "text-muted-foreground" };
-    if (currentCycle.status === "closed") return { label: "chiusa", tone: "border-muted-foreground/40 text-muted-foreground" };
+    if (!currentCycle) return { label: "no cycle", tone: "text-muted-foreground" };
+    if (count === 0) return { label: "objectives to assign", tone: "border-amber-500/40 text-amber-500" };
+    if (currentCycle.status === "scheduled") return { label: "awaiting opening", tone: "text-muted-foreground" };
+    if (currentCycle.status === "closed") return { label: "closed", tone: "border-muted-foreground/40 text-muted-foreground" };
     const s = scoreByPerson[employeeId];
-    if (s?.all_scored_complete) return { label: "valutazione completa", tone: "border-emerald-500/40 text-emerald-400" };
-    return { label: "in valutazione", tone: "border-sky-500/40 text-sky-400" };
+    if (s?.all_scored_complete) return { label: "evaluation complete", tone: "border-emerald-500/40 text-emerald-400" };
+    return { label: "under evaluation", tone: "border-sky-500/40 text-sky-400" };
   };
 
   const handleActivate = async () => {
     if (!pickPersonId) return;
     try {
       await setEvaluated.mutateAsync({ p_person_id: pickPersonId, p_evaluated: true, p_actor: actor });
-      toast({ title: "Persona attivata per la valutazione HR" });
+      toast({ title: "Person activated for HR evaluation" });
       setActivateOpen(false);
       setPickPersonId("");
     } catch (e) {
-      toast({ title: "Errore", description: (e as Error).message, variant: "destructive" });
+      toast({ title: "Error", description: (e as Error).message, variant: "destructive" });
     }
   };
 
@@ -80,32 +80,32 @@ export const HrPeopleTab = ({ role, cycleId, onOpenCard }: Props) => {
     <Card className="p-6 shadow-sm space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h3 className="text-xl font-heading tracking-wide">PERSONE VALUTATE</h3>
+          <h3 className="text-xl font-heading tracking-wide">EVALUATED PEOPLE</h3>
           <p className="text-xs text-muted-foreground mt-1">
-            Ciclo corrente: {currentCycle?.label ?? "nessun ciclo aperto"}
+            Current cycle: {currentCycle?.label ?? "no open cycle"}
           </p>
         </div>
         {canManage && (
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setActivateOpen(true)}>
-            <UserPlus className="h-4 w-4" /> Attiva persona
+            <UserPlus className="h-4 w-4" /> Activate person
           </Button>
         )}
       </div>
 
       {isError ? (
-        <p className="text-sm text-destructive">Non è stato possibile caricare le persone valutate.</p>
+        <p className="text-sm text-destructive">Could not load the evaluated people.</p>
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Caricamento…</p>
+        <p className="text-sm text-muted-foreground">Loading…</p>
       ) : !people || people.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nessuna persona attivata per la valutazione HR.</p>
+        <p className="text-sm text-muted-foreground">No person activated for HR evaluation yet.</p>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Nome</TableHead>
-              <TableHead>Ruolo / Reparto</TableHead>
-              <TableHead>Stato ciclo</TableHead>
-              <TableHead className="text-right">Punteggio finale</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Role / Department</TableHead>
+              <TableHead>Cycle status</TableHead>
+              <TableHead className="text-right">Final score</TableHead>
               <TableHead className="text-right"></TableHead>
             </TableRow>
           </TableHeader>
@@ -128,7 +128,7 @@ export const HrPeopleTab = ({ role, cycleId, onOpenCard }: Props) => {
                   </TableCell>
                   <TableCell className="text-right">
                     <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onOpenCard(p.employee_id, cycleId); }}>
-                      Apri
+                      Open
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -140,10 +140,10 @@ export const HrPeopleTab = ({ role, cycleId, onOpenCard }: Props) => {
 
       <Dialog open={activateOpen} onOpenChange={setActivateOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Attiva una persona per la valutazione HR</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Activate a person for HR evaluation</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <Select value={pickPersonId} onValueChange={setPickPersonId}>
-              <SelectTrigger><SelectValue placeholder="Scegli una persona attiva in anagrafica…" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="Pick an active person from the registry…" /></SelectTrigger>
               <SelectContent>
                 {(activatable ?? []).map((p) => (
                   <SelectItem key={p.employee_id} value={p.employee_id}>
@@ -153,7 +153,7 @@ export const HrPeopleTab = ({ role, cycleId, onOpenCard }: Props) => {
               </SelectContent>
             </Select>
             <Button className="gap-1.5 w-full" onClick={handleActivate} disabled={!pickPersonId || setEvaluated.isPending}>
-              <Plus className="h-4 w-4" /> Attiva
+              <Plus className="h-4 w-4" /> Activate
             </Button>
           </div>
         </DialogContent>

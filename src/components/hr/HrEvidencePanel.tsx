@@ -40,10 +40,10 @@ export const HrEvidencePanel = ({ objectiveId, open, onOpenChange }: Props) => {
     setBusy(true);
     try {
       await uploadHrEvidenceFile(objectiveId, file, actor);
-      toast({ title: "Prova allegata" });
+      toast({ title: "Evidence attached" });
       refresh();
     } catch (e) {
-      toast({ title: "Errore nel caricamento", description: (e as Error).message, variant: "destructive" });
+      toast({ title: "Upload failed", description: (e as Error).message, variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -55,10 +55,10 @@ export const HrEvidencePanel = ({ objectiveId, open, onOpenChange }: Props) => {
     try {
       await addHrEvidenceLink(objectiveId, linkUrl.trim(), actor);
       setLinkUrl("");
-      toast({ title: "Collegamento aggiunto" });
+      toast({ title: "Link added" });
       refresh();
     } catch (e) {
-      toast({ title: "Errore", description: (e as Error).message, variant: "destructive" });
+      toast({ title: "Error", description: (e as Error).message, variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -70,24 +70,24 @@ export const HrEvidencePanel = ({ objectiveId, open, onOpenChange }: Props) => {
     const win = window.open("", "_blank");
     try {
       const url = await hrEvidenceSignedUrl(path);
-      if (!url) throw new Error("Link al file non generato");
+      if (!url) throw new Error("File link could not be generated");
       if (win) win.location.href = url;
       else window.location.assign(url);
     } catch (e) {
       win?.close();
-      toast({ title: "Il file non si apre", description: (e as Error).message, variant: "destructive" });
+      toast({ title: "The file could not be opened", description: (e as Error).message, variant: "destructive" });
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Prove per questo obiettivo</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Evidence for this objective</DialogTitle></DialogHeader>
         <div className="space-y-3">
           {isLoading ? (
-            <p className="text-sm text-muted-foreground">Caricamento…</p>
+            <p className="text-sm text-muted-foreground">Loading…</p>
           ) : !evidence || evidence.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nessuna prova allegata — l'obiettivo è "non dimostrato".</p>
+            <p className="text-sm text-muted-foreground">No evidence attached — the objective counts as "not demonstrated".</p>
           ) : (
             <ul className="space-y-1.5">
               {evidence.map((e) => (
@@ -108,13 +108,13 @@ export const HrEvidencePanel = ({ objectiveId, open, onOpenChange }: Props) => {
           )}
 
           <div className="pt-2 border-t space-y-2">
-            <label className="text-xs text-muted-foreground">Allega file</label>
+            <label className="text-xs text-muted-foreground">Attach a file</label>
             <Input type="file" disabled={busy} onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
-            <label className="text-xs text-muted-foreground">Oppure incolla un collegamento</label>
+            <label className="text-xs text-muted-foreground">Or paste a link</label>
             <div className="flex gap-2">
               <Input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://…" disabled={busy} />
               <Button size="sm" variant="outline" className="gap-1.5" onClick={handleLink} disabled={busy || !linkUrl.trim()}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LinkIcon className="h-4 w-4" />} Aggiungi
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LinkIcon className="h-4 w-4" />} Add
               </Button>
             </div>
           </div>

@@ -43,18 +43,18 @@ export const HrCyclesTab = ({ role }: Props) => {
   const handleOpen = async (cycleId: string) => {
     try {
       await openCycleMut.mutateAsync({ p_cycle_id: cycleId, p_actor: actor });
-      toast({ title: "Ciclo aperto" });
+      toast({ title: "Cycle opened" });
     } catch (e) {
-      toast({ title: "Errore", description: (e as Error).message, variant: "destructive" });
+      toast({ title: "Error", description: (e as Error).message, variant: "destructive" });
     }
   };
 
   const handleClose = async (cycleId: string) => {
     try {
       await closeCycleMut.mutateAsync({ p_cycle_id: cycleId, p_actor: actor });
-      toast({ title: "Ciclo chiuso — i punteggi sono congelati" });
+      toast({ title: "Cycle closed — scores are frozen" });
     } catch (e) {
-      toast({ title: "Errore", description: (e as Error).message, variant: "destructive" });
+      toast({ title: "Error", description: (e as Error).message, variant: "destructive" });
     }
   };
 
@@ -75,28 +75,28 @@ export const HrCyclesTab = ({ role }: Props) => {
         // eslint-disable-next-line no-await-in-loop
         await copyObjectivesToCard(src as Parameters<typeof copyObjectivesToCard>[0], p.employee_id, toCycleId, actor);
       }
-      toast({ title: "Obiettivi copiati nel nuovo ciclo" });
+      toast({ title: "Objectives copied into the new cycle" });
     } catch (e) {
-      toast({ title: "Errore nella copia", description: (e as Error).message, variant: "destructive" });
+      toast({ title: "Copy failed", description: (e as Error).message, variant: "destructive" });
     } finally {
       setCopying(null);
     }
   };
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Caricamento…</p>;
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
   return (
     <Card className="p-6 shadow-sm">
-      <h3 className="text-xl font-heading tracking-wide mb-3">CICLI DI VALUTAZIONE</h3>
+      <h3 className="text-xl font-heading tracking-wide mb-3">EVALUATION CYCLES</h3>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Ciclo</TableHead>
-            <TableHead>Periodo</TableHead>
-            <TableHead>Tipo</TableHead>
-            <TableHead>Stato</TableHead>
-            <TableHead>Aperto/chiuso da</TableHead>
-            {canManage && <TableHead className="text-right">Azioni</TableHead>}
+            <TableHead>Cycle</TableHead>
+            <TableHead>Period</TableHead>
+            <TableHead>Kind</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Opened/closed by</TableHead>
+            {canManage && <TableHead className="text-right">Actions</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -106,7 +106,7 @@ export const HrCyclesTab = ({ role }: Props) => {
               <TableRow key={c.cycle_id}>
                 <TableCell className="font-medium">{c.label}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{c.period_start} → {c.period_end}</TableCell>
-                <TableCell><Badge variant="outline">{c.kind === "final" ? "Finale" : "Trimestrale"}</Badge></TableCell>
+                <TableCell><Badge variant="outline">{c.kind === "final" ? "Final" : "Quarterly"}</Badge></TableCell>
                 <TableCell><Badge variant="outline" className={STATUS_TONE[c.status]}>{c.status}</Badge></TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {c.status === "closed" ? c.closed_by : c.status === "open" || c.status === "closing" ? c.opened_by : "—"}
@@ -117,20 +117,20 @@ export const HrCyclesTab = ({ role }: Props) => {
                       <>
                         {prev && (
                           <Button variant="ghost" size="sm" className="gap-1" disabled={copying === c.cycle_id} onClick={() => handleCopyForward(prev.cycle_id, c.cycle_id)}>
-                            {copying === c.cycle_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />} Copia obiettivi
+                            {copying === c.cycle_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />} Copy objectives
                           </Button>
                         )}
                         <Button variant="outline" size="sm" className="gap-1" onClick={() => handleOpen(c.cycle_id)} disabled={openCycleMut.isPending}>
-                          <Unlock className="h-3.5 w-3.5" /> Apri
+                          <Unlock className="h-3.5 w-3.5" /> Open
                         </Button>
                       </>
                     )}
                     {(c.status === "open" || c.status === "closing") && (
                       <Button variant="outline" size="sm" className="gap-1" onClick={() => handleClose(c.cycle_id)} disabled={closeCycleMut.isPending}>
-                        <Lock className="h-3.5 w-3.5" /> Chiudi
+                        <Lock className="h-3.5 w-3.5" /> Close
                       </Button>
                     )}
-                    {c.status === "closed" && <span className="text-xs text-muted-foreground">congelato</span>}
+                    {c.status === "closed" && <span className="text-xs text-muted-foreground">frozen</span>}
                   </TableCell>
                 )}
               </TableRow>
@@ -139,7 +139,7 @@ export const HrCyclesTab = ({ role }: Props) => {
         </TableBody>
       </Table>
       <p className="text-xs text-muted-foreground mt-3">
-        "Copia obiettivi" riprende dal ciclo precedente per ogni persona che non ha ancora una scheda nel ciclo selezionato — non sovrascrive chi ne ha già una.
+        "Copy objectives" carries objectives forward from the previous cycle for every person without a card in the selected cycle — it never overwrites an existing card.
       </p>
     </Card>
   );

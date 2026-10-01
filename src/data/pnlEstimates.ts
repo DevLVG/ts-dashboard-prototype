@@ -166,6 +166,17 @@ const fetchCogsRatioEstimates = async (): Promise<EstimateComponentRow[]> => {
   return (data ?? []) as EstimateComponentRow[];
 };
 
+const fetchContractEstimates = async (): Promise<EstimateComponentRow[]> => {
+  if (!supabase) throw new Error("Supabase is not configured");
+  // Leveredge's own fee + the Leveredge-administered marketing spend
+  // (migration 109) — schedule-based, from the signed engagement letters
+  // of 30 Sep 2026, NOT run-rate. Replaces the old Project-Costs run-rate
+  // entirely.
+  const { data, error } = await supabase.from("v_pnl_contract_estimate_lines").select("*").limit(2000);
+  if (error) throw toFriendlyError(error);
+  return (data ?? []) as EstimateComponentRow[];
+};
+
 const toBasisRow = (r: EstimateComponentRow): BasisRow => ({
   period_month: r.period_month,
   section: r.section,
@@ -210,14 +221,20 @@ export const useEstimateBasisRows = () => {
     staleTime: 5 * 60 * 1000,
     enabled: isSupabaseConfigured,
   });
+  const contractQ = useQuery({
+    queryKey: ["v_pnl_contract_estimate_lines"],
+    queryFn: fetchContractEstimates,
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+  });
   const rows = useMemo(
-    () => [...(componentQ.data ?? []), ...(unbilledQ.data ?? []), ...(runrateQ.data ?? []), ...(cogsRatioQ.data ?? [])].map(toBasisRow),
-    [componentQ.data, unbilledQ.data, runrateQ.data, cogsRatioQ.data],
+    () => [...(componentQ.data ?? []), ...(unbilledQ.data ?? []), ...(runrateQ.data ?? []), ...(cogsRatioQ.data ?? []), ...(contractQ.data ?? [])].map(toBasisRow),
+    [componentQ.data, unbilledQ.data, runrateQ.data, cogsRatioQ.data, contractQ.data],
   );
   return {
     data: rows,
-    isLoading: componentQ.isLoading || unbilledQ.isLoading || runrateQ.isLoading || cogsRatioQ.isLoading,
-    isError: componentQ.isError || unbilledQ.isError || runrateQ.isError || cogsRatioQ.isError,
+    isLoading: componentQ.isLoading || unbilledQ.isLoading || runrateQ.isLoading || cogsRatioQ.isLoading || contractQ.isLoading,
+    isError: componentQ.isError || unbilledQ.isError || runrateQ.isError || cogsRatioQ.isError || contractQ.isError,
   };
 };
 

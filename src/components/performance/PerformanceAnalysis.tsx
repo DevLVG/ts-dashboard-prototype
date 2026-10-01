@@ -412,6 +412,13 @@ interface Subtotals {
   // design the more conservative/disclosing direction for a figure that
   // feeds a CEO/CFO decision.
   isEstimateGrossMargin: boolean; isEstimateOpexTotal: boolean; isEstimateEbitda5: boolean; isEstimateEbitdaReported: boolean; isEstimateEbit: boolean; isEstimateNetResult: boolean;
+  // recurringEbit (2026-10-01, partner decision — Recurring-scope P&L):
+  // Recurring EBIT = Recurring EBITDA (ebitda5, already pre-Project-Costs)
+  // + D&A — deliberately SKIPS Project-Costs (Leveredge's own fee is
+  // non-recurring by definition) rather than hiding the regular `ebit`
+  // row, which is still post-Project-Costs. Only meaningful/shown in
+  // Recurring scope.
+  recurringEbit: number; hasRecurringEbit: boolean; isEstimateRecurringEbit: boolean;
 }
 const deriveSubtotals = (tree: Map<PLSection, SectionTree>): Subtotals => {
   const revenue = sectionTotal(tree, "Revenue");
@@ -453,9 +460,14 @@ const deriveSubtotals = (tree: Map<PLSection, SectionTree>): Subtotals => {
   const isEstimateEbit = isEstimateEbitdaReported || sectionIsEstimate(tree, "D&A");
   const isEstimateNetResult = isEstimateEbit || sectionIsEstimate(tree, "NON-OP");
 
+  const recurringEbit = ebitda5 + da;
+  const hasRecurringEbit = hasEbitda5 && sectionHasData(tree, "D&A");
+  const isEstimateRecurringEbit = isEstimateEbitda5 || sectionIsEstimate(tree, "D&A");
+
   return {
     grossMargin, opexTotal, ebitda5, ebitdaReported, ebit, netResult, hasGrossMargin, hasOpexTotal, hasEbitda5, hasEbitdaReported, hasEbit, hasNetResult,
     isEstimateGrossMargin, isEstimateOpexTotal, isEstimateEbitda5, isEstimateEbitdaReported, isEstimateEbit, isEstimateNetResult,
+    recurringEbit, hasRecurringEbit, isEstimateRecurringEbit,
   };
 };
 
@@ -1141,17 +1153,24 @@ export const PerformanceAnalysis = () => {
           pushOpexSectionRows(out, "rec", sec, opexSectionLabel(sec), recurringOpexTree, recurringOpexTreePrior);
         }
 
-        const nonRecTotal = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(nonRecurringOpexTree, sec), 0);
-        const nonRecTotalP = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(nonRecurringOpexTreePrior, sec), 0);
-        const nonRecIsEstimate = OPEX_SECTIONS.some((sec) => sectionIsEstimate(nonRecurringOpexTree, sec));
-        out.push({
-          indent: 0, keyPath: "OpexNonRecurring", label: "Operating costs — Non-recurring",
-          actual: noActualData || !actualSub.hasOpexTotal ? null : nonRecTotal,
-          comparison: noPriorData || !priorSub.hasOpexTotal ? null : nonRecTotalP,
-          expandable: false, expanded: false, subtotal: true, isEstimate: nonRecIsEstimate,
-        });
-        for (const sec of OPEX_SECTIONS) {
-          pushOpexSectionRows(out, "nonrec", sec, opexSectionLabel(sec), nonRecurringOpexTree, nonRecurringOpexTreePrior);
+        // 2026-10-01 (partner decision — Recurring-scope P&L): in Recurring
+        // scope the non-recurring OpEx split is not shown at all — a
+        // "Recurring P&L" means recurring lines only, not recurring AND
+        // non-recurring broken out side by side. Only the ALL scope keeps
+        // showing both groups (unchanged pre-existing behaviour).
+        if (scope === "ALL") {
+          const nonRecTotal = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(nonRecurringOpexTree, sec), 0);
+          const nonRecTotalP = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(nonRecurringOpexTreePrior, sec), 0);
+          const nonRecIsEstimate = OPEX_SECTIONS.some((sec) => sectionIsEstimate(nonRecurringOpexTree, sec));
+          out.push({
+            indent: 0, keyPath: "OpexNonRecurring", label: "Operating costs — Non-recurring",
+            actual: noActualData || !actualSub.hasOpexTotal ? null : nonRecTotal,
+            comparison: noPriorData || !priorSub.hasOpexTotal ? null : nonRecTotalP,
+            expandable: false, expanded: false, subtotal: true, isEstimate: nonRecIsEstimate,
+          });
+          for (const sec of OPEX_SECTIONS) {
+            pushOpexSectionRows(out, "nonrec", sec, opexSectionLabel(sec), nonRecurringOpexTree, nonRecurringOpexTreePrior);
+          }
         }
         continue;
       }
@@ -1159,16 +1178,34 @@ export const PerformanceAnalysis = () => {
         continue; // already rendered above as part of the OPEX-GA recurring/non-recurring block
       }
 
-      const rawActual = macroValue(m.key, actualTree, actualSub);
-      const rawComparison = isBudgetMode ? budgetValueFor(m.key, budgetAgg) : macroValue(m.key, priorTree, priorSub);
+      // 2026-10-01 (partner decision): Recurring scope shows Revenue, COGS,
+      // Gross margin, Operating costs — Recurring, Recurring EBITDA, D&A,
+      // Recurring EBIT as the bottom line — nothing below that. Project
+      // costs (Leveredge's own fee, non-recurring by definition),
+      // "EBITDA (reported)", the below-EBIT NON-OP statutory lines and Net
+      // income are all specific to the full statutory P&L and are skipped
+      // entirely in this scope, not just hidden behind a toggle — the ALL
+      // scope renders every one of them exactly as before, unchanged.
+      if (scope === "RECURRING" && ["Project-Costs", "EBITDAReported", "NonOpFin", "NonOpGains", "Zakat", "NetResult"].includes(m.key)) {
+        continue;
+      }
+      const recurringLabel = scope === "RECURRING"
+        ? (m.key === "EBITDA5" ? "Recurring EBITDA" : m.key === "EBIT" ? "Recurring EBIT" : m.label)
+        : m.label;
+      const rawActual = (scope === "RECURRING" && m.key === "EBIT") ? actualSub.recurringEbit : macroValue(m.key, actualTree, actualSub);
+      const rawComparison = isBudgetMode
+        ? budgetValueFor(m.key, budgetAgg)
+        : (scope === "RECURRING" && m.key === "EBIT") ? priorSub.recurringEbit : macroValue(m.key, priorTree, priorSub);
       // "Absent ≠ zero" (2026-08-04, owner-audit #3/#4): a row backed by zero
       // posted warehouse rows renders "—", not a fabricated 0 — whether the
       // WHOLE window is unfed (noActualData/noPriorData) or just this row's
       // underlying section/subtotal hasn't been booked yet (macroHasData).
-      const actual = noActualData || !macroHasData(m.key, actualTree, actualSub) ? null : rawActual;
+      const recurringEbitActive = scope === "RECURRING" && m.key === "EBIT";
+      const actual = noActualData || !(recurringEbitActive ? actualSub.hasRecurringEbit : macroHasData(m.key, actualTree, actualSub)) ? null : rawActual;
       const comparison = isBudgetMode
         ? rawComparison
-        : (noPriorData || !macroHasData(m.key, priorTree, priorSub) ? null : rawComparison);
+        : (noPriorData || !(recurringEbitActive ? priorSub.hasRecurringEbit : macroHasData(m.key, priorTree, priorSub)) ? null : rawComparison);
+      const macroIsEstimateActive = recurringEbitActive ? actualSub.isEstimateRecurringEbit : macroIsEstimate(m.key, actualTree, actualSub);
 
       // Gross margin family explosion (fix-24, rule 5): family revenue -
       // family direct costs, one row per revenue family, ties to the macro
@@ -1232,7 +1269,7 @@ export const PerformanceAnalysis = () => {
       out.push({
         indent: 0,
         keyPath: m.key,
-        label: m.label,
+        label: recurringLabel,
         codeTag: drillCode,
         actual,
         comparison,
@@ -1242,7 +1279,7 @@ export const PerformanceAnalysis = () => {
         subtotal: m.subtotal,
         emphasis: m.emphasis,
         drillMoaCode: !m.section ? drillCode : undefined,
-        isEstimate: macroIsEstimate(m.key, actualTree, actualSub),
+        isEstimate: macroIsEstimateActive,
       });
       if (!m.section || !sectionKey || !expanded.has(sectionKey) || isBudgetMode) continue;
       const section = m.section;
@@ -1349,7 +1386,7 @@ export const PerformanceAnalysis = () => {
       }
     }
     return out;
-  }, [actualTree, priorTree, actualSub, priorSub, expanded, isBudgetMode, budgetAgg, noActualData, noPriorData, recurringOpexTree, nonRecurringOpexTree, recurringOpexTreePrior, nonRecurringOpexTreePrior]);
+  }, [actualTree, priorTree, actualSub, priorSub, expanded, isBudgetMode, budgetAgg, noActualData, noPriorData, recurringOpexTree, nonRecurringOpexTree, recurringOpexTreePrior, nonRecurringOpexTreePrior, scope]);
 
   return (
     <div className="space-y-5">
@@ -1415,7 +1452,7 @@ export const PerformanceAnalysis = () => {
       <Card className="p-5 space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            P&amp;L — {windowName}
+            {scope === "RECURRING" ? "Recurring P&L" : "P&L"} — {windowName}
           </h2>
           {mtdPro && (
             <Tooltip>

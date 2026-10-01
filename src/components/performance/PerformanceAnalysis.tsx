@@ -1467,7 +1467,7 @@ export const PerformanceAnalysis = () => {
                         </span>
                       </td>
                       <td className="py-1.5 px-3 text-right tabular-nums">
-                        {r.isEstimate ? (
+                        {r.isEstimate && r.actual !== null ? (
                           <span className="inline-flex items-center gap-1.5">
                             <span className="italic text-amber-400">{fmtOrDash(r.actual)}</span>
                             <Tooltip>

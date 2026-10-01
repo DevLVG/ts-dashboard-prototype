@@ -9,8 +9,10 @@
 // that is missing a real posting (payroll arrives late, supplier bills
 // arrive late) shows a believable number instead of a false zero, while
 // every other screen keeps reading actuals exactly as before.
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase, isSupabaseConfigured, toFriendlyError } from "@/lib/supabaseClient";
+import type { BasisRow } from "@/data/alignment";
 
 export interface PnlEstimateRow {
   period_month: string; // "YYYY-MM-01"
@@ -54,6 +56,94 @@ export const usePnlYtd = () =>
     staleTime: 5 * 60 * 1000,
     enabled: isSupabaseConfigured,
   });
+
+// ---------------------------------------------------------------------
+// Component-grain estimate rows, reshaped as BasisRow so they can be
+// spliced directly into the SAME `rows` array the P&L table/KPI circles
+// already aggregate (buildTree / aggregatePL just sum `amount_sar` by
+// section/bu/moa_code, agnostic to where a row came from — this is the
+// whole point: the existing, battle-tested aggregation logic needs ZERO
+// changes to "already include the estimated lines" in every total).
+// `source: "estimate"` is the marker buildTree uses to tag a leaf/
+// cluster/family/section as partly-estimated (see PerformanceAnalysis.tsx
+// buildTree, 2026-10-01 addition).
+// ---------------------------------------------------------------------
+interface EstimateComponentRow {
+  period_month: string;
+  section: string;
+  bu: string | null;
+  moa_code: string | null;
+  leaf: string | null;
+  source_month: string | null;
+  source_amount_sar: number;
+  estimate_sar: number;
+  method: string;
+  is_estimate: true;
+}
+
+const fetchComponentEstimates = async (): Promise<EstimateComponentRow[]> => {
+  if (!supabase) throw new Error("Supabase is not configured");
+  const { data, error } = await supabase.from("v_pnl_estimate_lines").select("*").limit(2000);
+  if (error) throw toFriendlyError(error);
+  return (data ?? []) as EstimateComponentRow[];
+};
+
+const fetchUnbilledOutflowEstimates = async (): Promise<EstimateComponentRow[]> => {
+  if (!supabase) throw new Error("Supabase is not configured");
+  // Table is seeded empty (migration 097) until the bank-outflow-matching
+  // workstream starts writing rows — isMissingRelation-style tolerance
+  // isn't needed here (the view always exists), an empty result is normal.
+  const { data, error } = await supabase.from("v_pnl_unbilled_outflow_estimate_lines").select("*").limit(2000);
+  if (error) throw toFriendlyError(error);
+  return (data ?? []) as EstimateComponentRow[];
+};
+
+const toBasisRow = (r: EstimateComponentRow): BasisRow => ({
+  period_month: r.period_month,
+  section: r.section,
+  bu: r.bu,
+  cluster: null,
+  leaf: r.leaf,
+  moa_code: r.moa_code,
+  source: "estimate",
+  amount_sar: r.estimate_sar,
+  recurrence: "recurring", // every estimated category (salaries/GOSI/EOSB/depreciation/ordinary supplier costs) is a recurring operating cost by nature
+  drift_flag: null,
+});
+
+/** Fetches both estimate sources (carry-forward component estimates +
+ * unbilled-outflow estimates) and shapes them as BasisRow[], ready to
+ * concatenate onto `useBasisRows()`'s own rows. One hook, one shape, used
+ * by both PerformanceAnalysis.tsx (the main P&L table) and
+ * useKpiHeaderData.ts (the KPI circles/histogram above it) so every total
+ * on the Economics page agrees. */
+export const useEstimateBasisRows = () => {
+  const componentQ = useQuery({
+    queryKey: ["v_pnl_estimate_lines"],
+    queryFn: fetchComponentEstimates,
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+  });
+  const unbilledQ = useQuery({
+    queryKey: ["v_pnl_unbilled_outflow_estimate_lines"],
+    queryFn: fetchUnbilledOutflowEstimates,
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+  });
+  const rows = useMemo(
+    () => [...(componentQ.data ?? []), ...(unbilledQ.data ?? [])].map(toBasisRow),
+    [componentQ.data, unbilledQ.data],
+  );
+  return { data: rows, isLoading: componentQ.isLoading || unbilledQ.isLoading, isError: componentQ.isError || unbilledQ.isError };
+};
+
+/** Concatenates actual warehouse rows with the shaped estimate rows.
+ * Order doesn't matter (every consumer just sums `amount_sar`). A plain
+ * export (not a hook) so it's trivial to unit-test and reuse. */
+export const mergeEstimateRows = (actualRows: BasisRow[] | undefined, estimateRows: BasisRow[] | undefined): BasisRow[] => [
+  ...(actualRows ?? []),
+  ...(estimateRows ?? []),
+];
 
 /** Collapses the (section, bu) rows for ONE section into a single
  * company-wide total, carrying is_estimate=true if ANY bu's slice of this

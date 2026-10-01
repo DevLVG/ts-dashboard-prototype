@@ -24,6 +24,7 @@ import {
 } from "@/data/alignment";
 import { useBudgetMonthly, monthKey } from "@/data/liveData";
 import { comparePct } from "@/lib/format";
+import { useEstimateBasisRows, mergeEstimateRows } from "@/data/pnlEstimates";
 
 export type KpiKey = "revenue" | "grossMargin" | "ebitda";
 
@@ -128,8 +129,13 @@ export const useKpiHeaderData = (): KpiHeaderData => {
   const { data: basisData, isLoading: rowsLoading, isError } = useBasisRows();
   const { data: rec } = useRecurrence();
   const { data: budgetRows, isLoading: budgetLoading } = useBudgetMonthly();
-
-  const rows = basisData?.rows;
+  // Estimate layer (Marcello, 2026-10-01): same merge PerformanceAnalysis.tsx
+  // applies to its own rows, so the KPI circles/histogram above the P&L
+  // table never disagree with the table below them. See
+  // data/pnlEstimates.ts's header comment for why this is additive rows,
+  // not a change to aggregatePL itself.
+  const { data: estimateRows } = useEstimateBasisRows();
+  const rows = useMemo(() => mergeEstimateRows(basisData?.rows, estimateRows), [basisData, estimateRows]);
   const basis = "STRICT" as const; // pinned everywhere — see AlignmentContext
 
   const mtdPro = useMemo(() => (preset === "MTD" ? computeMtdProration(todayKey) : null), [preset, todayKey]);

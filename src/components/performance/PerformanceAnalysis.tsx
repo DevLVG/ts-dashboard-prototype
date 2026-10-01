@@ -97,12 +97,14 @@
 //     "togli tutto" — keeping only the small `OpenMonthsBadge`.
 import { Fragment, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChevronRight, ChevronDown, Info } from "lucide-react";
 import { useAlignment, COMPARISON_LABELS } from "@/contexts/AlignmentContext";
 import { WindowPicker, ComparisonToggle, ScopeToggle, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
 import { KpiCircles } from "@/components/overview/KpiCircles";
 import { PnlEstimateCard } from "@/components/performance/PnlEstimateCard";
+import { useEstimateBasisRows, mergeEstimateRows } from "@/data/pnlEstimates";
 import { ComparisonHistogram } from "@/components/overview/ComparisonHistogram";
 import { BuRevenueGrossMarginChart, type BuChartDatum } from "@/components/performance/BuRevenueGrossMarginChart";
 import {
@@ -163,14 +165,29 @@ const REVENUE_BUS: { bu: string; buName: string }[] = (() => {
   return out;
 })();
 
-interface LeafNode { moaCode: string; leafName: string; total: number }
-interface ClusterNode { clusterCode: string; clusterName: string; total: number; leaves: LeafNode[] }
-interface FamilyNode { bu: string; buName: string; total: number; clusters: ClusterNode[] }
+// `isEstimate` (2026-10-01, Marcello — P&L MTD/YTD estimate layer): true
+// when ANY row contributing to this node's total came from the estimate
+// layer (source === "estimate" — see data/pnlEstimates.ts), propagated
+// bottom-up exactly like `total` itself, so a cluster/family/section/
+// macro-subtotal is flagged the moment ANY descendant leaf is
+// estimate-influenced, never silently absorbed into a clean-looking
+// actual number.
+interface LeafNode { moaCode: string; leafName: string; total: number; isEstimate: boolean }
+interface ClusterNode { clusterCode: string; clusterName: string; total: number; leaves: LeafNode[]; isEstimate: boolean }
+interface FamilyNode { bu: string; buName: string; total: number; clusters: ClusterNode[]; isEstimate: boolean }
 // `hasData`: true only when >=1 warehouse row actually landed in this
 // section for the window (2026-08-04, owner-audit #3/#4 — "absent ≠ zero").
 // A section with zero matching rows must render "—", never a fabricated 0
 // with a meaningless delta — same rule Cash Flow already applies.
-interface SectionTree { total: number; hasData: boolean; families: FamilyNode[] }
+// `unmatchedEstimateTotal`/`unmatchedIsEstimate`: an estimate row CAN
+// arrive with no moa_code (clever_unbilled_outflows — "cost paid, invoice
+// missing", mapped only to a section guess, never a specific leaf, see
+// migration 097). Such a row has nowhere to land in the leaf/cluster/
+// family tree below, so it's summed directly into the SECTION total here
+// instead — still inside `section.total` (every total already includes
+// it), just not drillable to a specific leaf, which is honest: there IS
+// no specific leaf, only a section-level guess.
+interface SectionTree { total: number; hasData: boolean; isEstimate: boolean; families: FamilyNode[]; unmatchedEstimateTotal: number }
 
 /** Builds the section -> family (BU) -> cluster -> leaf tree for one
  * window/scope. The skeleton (every family/cluster/leaf `data/moaTree.ts`
@@ -205,25 +222,25 @@ const buildTree = (
   const leafByCode = new Map<string, LeafNode>();
   const familyByKey = new Map<string, FamilyNode>();
   const clusterByKey = new Map<string, ClusterNode>();
-  for (const s of PL_SECTIONS) tree.set(s, { total: 0, hasData: false, families: [] });
+  for (const s of PL_SECTIONS) tree.set(s, { total: 0, hasData: false, isEstimate: false, families: [], unmatchedEstimateTotal: 0 });
   for (const def of MOA_PL_LEAVES) {
     const section = tree.get(def.plSection as PLSection);
     if (!section) continue; // defensive: moaTree.ts only ever emits the 8 PL sections above
     const famKey = `${def.plSection}::${def.bu}`;
     let fam = familyByKey.get(famKey);
     if (!fam) {
-      fam = { bu: def.bu, buName: buFamilyName(def.bu), total: 0, clusters: [] };
+      fam = { bu: def.bu, buName: buFamilyName(def.bu), total: 0, clusters: [], isEstimate: false };
       familyByKey.set(famKey, fam);
       section.families.push(fam);
     }
     const cluKey = `${famKey}::${def.clusterCode}`;
     let clu = clusterByKey.get(cluKey);
     if (!clu) {
-      clu = { clusterCode: def.clusterCode, clusterName: def.clusterName, total: 0, leaves: [] };
+      clu = { clusterCode: def.clusterCode, clusterName: def.clusterName, total: 0, leaves: [], isEstimate: false };
       clusterByKey.set(cluKey, clu);
       fam.clusters.push(clu);
     }
-    const leaf: LeafNode = { moaCode: def.moaCode, leafName: def.leafName, total: 0 };
+    const leaf: LeafNode = { moaCode: def.moaCode, leafName: def.leafName, total: 0, isEstimate: false };
     clu.leaves.push(leaf);
     leafByCode.set(def.moaCode, leaf);
   }
@@ -238,6 +255,7 @@ const buildTree = (
         if (recurrenceSplit === "recurring" && isNonRec) continue;
         if (recurrenceSplit === "non-recurring" && !isNonRec) continue;
       }
+      const isEstimateRow = r.source === "estimate";
       const leaf = r.moa_code ? leafByCode.get(r.moa_code) : undefined;
       // Verified 2026-08-03: every moa_code on a row tagged to one of the 8
       // PL_SECTIONS is an active moa_gestionale leaf and therefore present
@@ -248,16 +266,29 @@ const buildTree = (
       // either way because every total is DERIVED from the leaves below it.
       if (leaf) {
         leaf.total += r.amount_sar;
+        if (isEstimateRow) leaf.isEstimate = true;
         tree.get(r.section as PLSection)!.hasData = true;
+      } else if (isEstimateRow) {
+        // No specific moa_code (clever_unbilled_outflows — section-level
+        // guess only, see SectionTree's `unmatchedEstimateTotal` comment
+        // above): still counted in the section total, just not drillable.
+        const section2 = tree.get(r.section as PLSection)!;
+        section2.unmatchedEstimateTotal += r.amount_sar;
+        section2.hasData = true;
       }
     }
   }
   for (const section of tree.values()) {
     for (const fam of section.families) {
-      for (const clu of fam.clusters) clu.total = clu.leaves.reduce((s, l) => s + l.total, 0);
+      for (const clu of fam.clusters) {
+        clu.total = clu.leaves.reduce((s, l) => s + l.total, 0);
+        clu.isEstimate = clu.leaves.some((l) => l.isEstimate);
+      }
       fam.total = fam.clusters.reduce((s, c) => s + c.total, 0);
+      fam.isEstimate = fam.clusters.some((c) => c.isEstimate);
     }
-    section.total = section.families.reduce((s, f) => s + f.total, 0);
+    section.total = section.families.reduce((s, f) => s + f.total, 0) + section.unmatchedEstimateTotal;
+    section.isEstimate = section.families.some((f) => f.isEstimate) || section.unmatchedEstimateTotal !== 0;
   }
   return tree;
 };
@@ -276,13 +307,19 @@ const scaleTree = (tree: Map<PLSection, SectionTree>, fraction: number): Map<PLS
         leaves: c.leaves.map((l) => ({ ...l, total: l.total * fraction })),
       })),
     }));
-    out.set(section, { total: node.total * fraction, hasData: node.hasData, families });
+    out.set(section, {
+      total: node.total * fraction, hasData: node.hasData, isEstimate: node.isEstimate, families,
+      unmatchedEstimateTotal: node.unmatchedEstimateTotal * fraction,
+    });
   }
   return out;
 };
 
 const sectionTotal = (tree: Map<PLSection, SectionTree>, s: PLSection): number => tree.get(s)?.total ?? 0;
 const sectionHasData = (tree: Map<PLSection, SectionTree>, s: PLSection): boolean => tree.get(s)?.hasData ?? false;
+/** True if ANY part of this section's total (any leaf, or an unmatched
+ * section-level guess) came from the estimate layer. 2026-10-01. */
+const sectionIsEstimate = (tree: Map<PLSection, SectionTree>, s: PLSection): boolean => tree.get(s)?.isEstimate ?? false;
 
 /** Finds one specific leaf (by moa_code) anywhere in a section — used for
  * the below-EBIT statutory lines (fix-24), which each pin to exactly one
@@ -351,6 +388,11 @@ const sectionFamilySlots = (families: FamilyNode[]): NodeSlot[] =>
 interface Subtotals {
   grossMargin: number; opexTotal: number; ebitda5: number; ebitdaReported: number; ebit: number; netResult: number;
   hasGrossMargin: boolean; hasOpexTotal: boolean; hasEbitda5: boolean; hasEbitdaReported: boolean; hasEbit: boolean; hasNetResult: boolean;
+  // isEstimate* (2026-10-01): OR (not AND, unlike has*) — a composite figure
+  // is flagged the moment ANY contributing section carries an estimate, by
+  // design the more conservative/disclosing direction for a figure that
+  // feeds a CEO/CFO decision.
+  isEstimateGrossMargin: boolean; isEstimateOpexTotal: boolean; isEstimateEbitda5: boolean; isEstimateEbitdaReported: boolean; isEstimateEbit: boolean; isEstimateNetResult: boolean;
 }
 const deriveSubtotals = (tree: Map<PLSection, SectionTree>): Subtotals => {
   const revenue = sectionTotal(tree, "Revenue");
@@ -372,7 +414,17 @@ const deriveSubtotals = (tree: Map<PLSection, SectionTree>): Subtotals => {
   const hasEbit = hasEbitdaReported && sectionHasData(tree, "D&A");
   const hasNetResult = hasEbit && sectionHasData(tree, "NON-OP");
 
-  return { grossMargin, opexTotal, ebitda5, ebitdaReported, ebit, netResult, hasGrossMargin, hasOpexTotal, hasEbitda5, hasEbitdaReported, hasEbit, hasNetResult };
+  const isEstimateGrossMargin = sectionIsEstimate(tree, "Revenue") || sectionIsEstimate(tree, "COGS");
+  const isEstimateOpexTotal = sectionIsEstimate(tree, "OPEX-GA") || sectionIsEstimate(tree, "OPEX-MS") || sectionIsEstimate(tree, "OPEX-People");
+  const isEstimateEbitda5 = isEstimateGrossMargin || isEstimateOpexTotal;
+  const isEstimateEbitdaReported = isEstimateEbitda5 || sectionIsEstimate(tree, "Project-Costs");
+  const isEstimateEbit = isEstimateEbitdaReported || sectionIsEstimate(tree, "D&A");
+  const isEstimateNetResult = isEstimateEbit || sectionIsEstimate(tree, "NON-OP");
+
+  return {
+    grossMargin, opexTotal, ebitda5, ebitdaReported, ebit, netResult, hasGrossMargin, hasOpexTotal, hasEbitda5, hasEbitdaReported, hasEbit, hasNetResult,
+    isEstimateGrossMargin, isEstimateOpexTotal, isEstimateEbitda5, isEstimateEbitdaReported, isEstimateEbit, isEstimateNetResult,
+  };
 };
 
 /** Budget value for a macro row key — null where budget_2026 structurally
@@ -462,6 +514,22 @@ const macroHasData = (key: string, tree: Map<PLSection, SectionTree>, sub: Subto
     case "NetResult": return sub.hasNetResult;
     case "NonOpFin": case "NonOpGains": case "Zakat": return sectionHasData(tree, "NON-OP");
     default: return sectionHasData(tree, key as PLSection);
+  }
+};
+
+/** Mirrors `macroHasData` exactly, for the "est." marker (2026-10-01). */
+const macroIsEstimate = (key: string, tree: Map<PLSection, SectionTree>, sub: Subtotals): boolean => {
+  switch (key) {
+    case "GrossMargin": return sub.isEstimateGrossMargin;
+    case "OpexTotal": return sub.isEstimateOpexTotal;
+    case "EBITDA5": return sub.isEstimateEbitda5;
+    case "EBITDAReported": return sub.isEstimateEbitdaReported;
+    case "EBIT": return sub.isEstimateEbit;
+    case "NetResult": return sub.isEstimateNetResult;
+    case "NonOpFin": return findLeafInTree(tree, "NON-OP", MACRO_LEAF_CODE.NonOpFin)?.isEstimate ?? false;
+    case "NonOpGains": return findLeafInTree(tree, "NON-OP", MACRO_LEAF_CODE.NonOpGains)?.isEstimate ?? false;
+    case "Zakat": return findLeafInTree(tree, "NON-OP", MACRO_LEAF_CODE.Zakat)?.isEstimate ?? false;
+    default: return sectionIsEstimate(tree, key as PLSection);
   }
 };
 
@@ -618,7 +686,14 @@ export const PerformanceAnalysis = () => {
   const { data: basisData, isLoading, error: basisError } = useBasisRows();
   const { data: rec, error: recError } = useRecurrence();
   const { data: budgetRowsAll, isLoading: budgetLoading } = useBudgetMonthly();
-  const rows = basisData?.rows;
+  // Estimate layer (Marcello, 2026-10-01): actual warehouse rows + the
+  // shaped carry-forward/unbilled-outflow estimate rows, so every section
+  // row / subtotal / EBITDA / net result below already includes the
+  // estimated lines — buildTree/deriveSubtotals just sum `amount_sar`,
+  // unaware of provenance, except for the `isEstimate` marker they also now
+  // track (see buildTree below) so the table can show "est." inline.
+  const { data: estimateRows } = useEstimateBasisRows();
+  const rows = useMemo(() => mergeEstimateRows(basisData?.rows, estimateRows), [basisData, estimateRows]);
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (key: string) => setExpanded((prev) => {
@@ -803,7 +878,7 @@ export const PerformanceAnalysis = () => {
   // "Operating costs — Recurring/Non-recurring" header), so the theoretical
   // (today unreached — see `sectionFamilySlots`'s comment) family-then-
   // cluster-then-leaf case for a single OpEx section can reach depth 4.
-  interface Row { indent: number; keyPath: string; label: string; codeTag?: string; actual: number | null; comparison: number | null; expandable: boolean; expanded: boolean; onToggle?: () => void; subtotal?: boolean; emphasis?: boolean; drillMoaCode?: string }
+  interface Row { indent: number; keyPath: string; label: string; codeTag?: string; actual: number | null; comparison: number | null; expandable: boolean; expanded: boolean; onToggle?: () => void; subtotal?: boolean; emphasis?: boolean; drillMoaCode?: string; isEstimate?: boolean }
 
   // ------------------------------------------------- OpEx recurring split
   //
@@ -875,9 +950,10 @@ export const PerformanceAnalysis = () => {
     // curSplitTree/priorSplitTree) — see the function comment above.
     const curSectionHasData = sectionHasData(actualTree, section);
     const priorSectionHasData = sectionHasData(priorTree, section);
-    const gated = (curTotal: number, priorTotal: number) => ({
+    const gated = (curTotal: number, priorTotal: number, isEstimate = false) => ({
       actual: noActualData || !curSectionHasData ? null : curTotal,
       comparison: noPriorData || !priorSectionHasData ? null : priorTotal,
+      isEstimate,
     });
     const curFamilies = curSplitTree.get(section)!.families;
     const priorFamilies = priorSplitTree.get(section)!.families;
@@ -886,7 +962,7 @@ export const PerformanceAnalysis = () => {
     const canExpand = curSlots.length > 0;
     out.push({
       indent: 1, keyPath: sectionKey, label,
-      ...gated(sectionTotal(curSplitTree, section), sectionTotal(priorSplitTree, section)),
+      ...gated(sectionTotal(curSplitTree, section), sectionTotal(priorSplitTree, section), sectionIsEstimate(curSplitTree, section)),
       expandable: canExpand, expanded: canExpand && expanded.has(sectionKey),
       onToggle: canExpand ? () => toggle(sectionKey) : undefined,
     });
@@ -898,7 +974,7 @@ export const PerformanceAnalysis = () => {
         const lineKey = `${keyPrefix}:line:${slot.leaf.moaCode}`;
         out.push({
           indent: 2, keyPath: `${keyPrefix}:${slot.leaf.moaCode}`, label: slot.leaf.leafName, codeTag: slot.leaf.moaCode,
-          ...gated(slot.leaf.total, leafP?.total ?? 0),
+          ...gated(slot.leaf.total, leafP?.total ?? 0, slot.leaf.isEstimate),
           expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
           drillMoaCode: slot.leaf.moaCode,
         });
@@ -910,7 +986,7 @@ export const PerformanceAnalysis = () => {
         const priorClu = findClusterInFamilies(priorFamilies, bu, slot.cluster.clusterCode);
         out.push({
           indent: 2, keyPath: cluExpandKey, label: slot.cluster.clusterName,
-          ...gated(slot.cluster.total, priorClu?.total ?? 0),
+          ...gated(slot.cluster.total, priorClu?.total ?? 0, slot.cluster.isEstimate),
           expandable: true, expanded: expanded.has(cluExpandKey), onToggle: () => toggle(cluExpandKey),
         });
         if (!expanded.has(cluExpandKey)) continue;
@@ -919,7 +995,7 @@ export const PerformanceAnalysis = () => {
           const lineKey = `${keyPrefix}:line:${leaf.moaCode}`;
           out.push({
             indent: 3, keyPath: `${keyPrefix}:${leaf.moaCode}`, label: leaf.leafName, codeTag: leaf.moaCode,
-            ...gated(leaf.total, leafP?.total ?? 0),
+            ...gated(leaf.total, leafP?.total ?? 0, leaf.isEstimate),
             expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
             drillMoaCode: leaf.moaCode,
           });
@@ -939,7 +1015,7 @@ export const PerformanceAnalysis = () => {
       const canExpandFam = famSlotsArr.length > 0;
       out.push({
         indent: 2, keyPath: famExpandKey, label: fam.buName,
-        ...gated(fam.total, famP?.total ?? 0),
+        ...gated(fam.total, famP?.total ?? 0, fam.isEstimate),
         expandable: canExpandFam, expanded: expanded.has(famExpandKey),
         onToggle: canExpandFam ? () => toggle(famExpandKey) : undefined,
       });
@@ -950,7 +1026,7 @@ export const PerformanceAnalysis = () => {
           const lineKey = `${keyPrefix}:line:${fs.leaf.moaCode}`;
           out.push({
             indent: 3, keyPath: `${keyPrefix}:${fs.leaf.moaCode}`, label: fs.leaf.leafName, codeTag: fs.leaf.moaCode,
-            ...gated(fs.leaf.total, leafP?.total ?? 0),
+            ...gated(fs.leaf.total, leafP?.total ?? 0, fs.leaf.isEstimate),
             expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
             drillMoaCode: fs.leaf.moaCode,
           });
@@ -960,7 +1036,7 @@ export const PerformanceAnalysis = () => {
         const priorClu = famP?.clusters.find((c) => c.clusterCode === fs.cluster.clusterCode);
         out.push({
           indent: 3, keyPath: cluExpandKey, label: fs.cluster.clusterName,
-          ...gated(fs.cluster.total, priorClu?.total ?? 0),
+          ...gated(fs.cluster.total, priorClu?.total ?? 0, fs.cluster.isEstimate),
           expandable: true, expanded: expanded.has(cluExpandKey), onToggle: () => toggle(cluExpandKey),
         });
         if (!expanded.has(cluExpandKey)) continue;
@@ -969,7 +1045,7 @@ export const PerformanceAnalysis = () => {
           const lineKey = `${keyPrefix}:line:${leaf.moaCode}`;
           out.push({
             indent: 4, keyPath: `${keyPrefix}:${leaf.moaCode}`, label: leaf.leafName, codeTag: leaf.moaCode,
-            ...gated(leaf.total, leafP?.total ?? 0),
+            ...gated(leaf.total, leafP?.total ?? 0, leaf.isEstimate),
             expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
             drillMoaCode: leaf.moaCode,
           });
@@ -1012,11 +1088,12 @@ export const PerformanceAnalysis = () => {
         // reusing this shared gate instead).
         const recTotal = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(recurringOpexTree, sec), 0);
         const recTotalP = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(recurringOpexTreePrior, sec), 0);
+        const recIsEstimate = OPEX_SECTIONS.some((sec) => sectionIsEstimate(recurringOpexTree, sec));
         out.push({
           indent: 0, keyPath: "OpexRecurring", label: "Operating costs — Recurring",
           actual: noActualData || !actualSub.hasOpexTotal ? null : recTotal,
           comparison: noPriorData || !priorSub.hasOpexTotal ? null : recTotalP,
-          expandable: false, expanded: false, subtotal: true,
+          expandable: false, expanded: false, subtotal: true, isEstimate: recIsEstimate,
         });
         for (const sec of OPEX_SECTIONS) {
           pushOpexSectionRows(out, "rec", sec, opexSectionLabel(sec), recurringOpexTree, recurringOpexTreePrior);
@@ -1024,11 +1101,12 @@ export const PerformanceAnalysis = () => {
 
         const nonRecTotal = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(nonRecurringOpexTree, sec), 0);
         const nonRecTotalP = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(nonRecurringOpexTreePrior, sec), 0);
+        const nonRecIsEstimate = OPEX_SECTIONS.some((sec) => sectionIsEstimate(nonRecurringOpexTree, sec));
         out.push({
           indent: 0, keyPath: "OpexNonRecurring", label: "Operating costs — Non-recurring",
           actual: noActualData || !actualSub.hasOpexTotal ? null : nonRecTotal,
           comparison: noPriorData || !priorSub.hasOpexTotal ? null : nonRecTotalP,
-          expandable: false, expanded: false, subtotal: true,
+          expandable: false, expanded: false, subtotal: true, isEstimate: nonRecIsEstimate,
         });
         for (const sec of OPEX_SECTIONS) {
           pushOpexSectionRows(out, "nonrec", sec, opexSectionLabel(sec), nonRecurringOpexTree, nonRecurringOpexTreePrior);
@@ -1064,7 +1142,7 @@ export const PerformanceAnalysis = () => {
           expandable: canExpandGM,
           expanded: canExpandGM && expanded.has(gmExpandKey),
           onToggle: canExpandGM ? () => toggle(gmExpandKey) : undefined,
-          subtotal: m.subtotal, emphasis: m.emphasis,
+          subtotal: m.subtotal, emphasis: m.emphasis, isEstimate: actualSub.isEstimateGrossMargin,
         });
         if (canExpandGM && expanded.has(gmExpandKey)) {
           const cogsFamilies = actualTree.get("COGS")!.families;
@@ -1087,6 +1165,7 @@ export const PerformanceAnalysis = () => {
               actual: noActualData || !actualSub.hasGrossMargin ? null : famGmActual,
               comparison: noPriorData || !priorSub.hasGrossMargin ? null : famGmPrior,
               expandable: false, expanded: false,
+              isEstimate: revFam.isEstimate || (cogsFam?.isEstimate ?? false),
             });
           }
         }
@@ -1121,6 +1200,7 @@ export const PerformanceAnalysis = () => {
         subtotal: m.subtotal,
         emphasis: m.emphasis,
         drillMoaCode: !m.section ? drillCode : undefined,
+        isEstimate: macroIsEstimate(m.key, actualTree, actualSub),
       });
       if (!m.section || !sectionKey || !expanded.has(sectionKey) || isBudgetMode) continue;
       const section = m.section;
@@ -1132,9 +1212,10 @@ export const PerformanceAnalysis = () => {
       // every depth, not just at the top (2026-08-04, owner-audit #3/#4).
       const curSectionHasData = sectionHasData(actualTree, section);
       const priorSectionHasData = sectionHasData(priorTree, section);
-      const gated = (curTotal: number, priorTotal: number) => ({
+      const gated = (curTotal: number, priorTotal: number, isEstimate = false) => ({
         actual: noActualData || !curSectionHasData ? null : curTotal,
         comparison: noPriorData || !priorSectionHasData ? null : priorTotal,
+        isEstimate,
       });
 
       // Single-child collapse (fix-24): `curSlots` is the section's family
@@ -1150,7 +1231,7 @@ export const PerformanceAnalysis = () => {
           const lineKey = `line:${slot.leaf.moaCode}`;
           out.push({
             indent: 1, keyPath: slot.leaf.moaCode, label: slot.leaf.leafName, codeTag: slot.leaf.moaCode,
-            ...gated(slot.leaf.total, leafP?.total ?? 0),
+            ...gated(slot.leaf.total, leafP?.total ?? 0, slot.leaf.isEstimate),
             expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
             drillMoaCode: slot.leaf.moaCode,
           });
@@ -1162,7 +1243,7 @@ export const PerformanceAnalysis = () => {
           const priorClu = findClusterInFamilies(priorFamilies, bu, slot.cluster.clusterCode);
           out.push({
             indent: 1, keyPath: cluExpandKey, label: slot.cluster.clusterName,
-            ...gated(slot.cluster.total, priorClu?.total ?? 0),
+            ...gated(slot.cluster.total, priorClu?.total ?? 0, slot.cluster.isEstimate),
             expandable: true, expanded: expanded.has(cluExpandKey), onToggle: () => toggle(cluExpandKey),
           });
           if (!expanded.has(cluExpandKey)) continue;
@@ -1171,7 +1252,7 @@ export const PerformanceAnalysis = () => {
             const lineKey = `line:${leaf.moaCode}`;
             out.push({
               indent: 2, keyPath: leaf.moaCode, label: leaf.leafName, codeTag: leaf.moaCode,
-              ...gated(leaf.total, leafP?.total ?? 0),
+              ...gated(leaf.total, leafP?.total ?? 0, leaf.isEstimate),
               expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
               drillMoaCode: leaf.moaCode,
             });
@@ -1186,7 +1267,7 @@ export const PerformanceAnalysis = () => {
         const canExpandFam = famSlotsArr.length > 0;
         out.push({
           indent: 1, keyPath: famExpandKey, label: fam.buName,
-          ...gated(fam.total, famP?.total ?? 0),
+          ...gated(fam.total, famP?.total ?? 0, fam.isEstimate),
           expandable: canExpandFam, expanded: expanded.has(famExpandKey),
           onToggle: canExpandFam ? () => toggle(famExpandKey) : undefined,
         });
@@ -1197,7 +1278,7 @@ export const PerformanceAnalysis = () => {
             const lineKey = `line:${fs.leaf.moaCode}`;
             out.push({
               indent: 2, keyPath: fs.leaf.moaCode, label: fs.leaf.leafName, codeTag: fs.leaf.moaCode,
-              ...gated(fs.leaf.total, leafP?.total ?? 0),
+              ...gated(fs.leaf.total, leafP?.total ?? 0, fs.leaf.isEstimate),
               expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
               drillMoaCode: fs.leaf.moaCode,
             });
@@ -1208,7 +1289,7 @@ export const PerformanceAnalysis = () => {
           const priorClu = famP?.clusters.find((c) => c.clusterCode === fs.cluster.clusterCode);
           out.push({
             indent: 2, keyPath: cluExpandKey, label: fs.cluster.clusterName,
-            ...gated(fs.cluster.total, priorClu?.total ?? 0),
+            ...gated(fs.cluster.total, priorClu?.total ?? 0, fs.cluster.isEstimate),
             expandable: true, expanded: expanded.has(cluExpandKey), onToggle: () => toggle(cluExpandKey),
           });
           if (!expanded.has(cluExpandKey)) continue;
@@ -1217,7 +1298,7 @@ export const PerformanceAnalysis = () => {
             const lineKey = `line:${leaf.moaCode}`;
             out.push({
               indent: 3, keyPath: leaf.moaCode, label: leaf.leafName, codeTag: leaf.moaCode,
-              ...gated(leaf.total, leafP?.total ?? 0),
+              ...gated(leaf.total, leafP?.total ?? 0, leaf.isEstimate),
               expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
               drillMoaCode: leaf.moaCode,
             });
@@ -1385,7 +1466,31 @@ export const PerformanceAnalysis = () => {
                           )}
                         </span>
                       </td>
-                      <td className="py-1.5 px-3 text-right tabular-nums">{fmtOrDash(r.actual)}</td>
+                      <td className="py-1.5 px-3 text-right tabular-nums">
+                        {r.isEstimate ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="italic text-amber-400">{fmtOrDash(r.actual)}</span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Badge
+                                  variant="outline"
+                                  className="cursor-help text-[9px] font-bold uppercase tracking-wider border-amber-500/40 bg-amber-500/10 text-amber-400"
+                                >
+                                  est.
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-xs text-xs">
+                                Includes an estimate — salaries/GOSI/end-of-service or depreciation carried
+                                forward from the last real posting (pro-rated if this month is still open), or
+                                a supplier cost paid with no bill booked yet. Disappears automatically once the
+                                real posting lands — never written to Qoyod.
+                              </TooltipContent>
+                            </Tooltip>
+                          </span>
+                        ) : (
+                          fmtOrDash(r.actual)
+                        )}
+                      </td>
                       <td className="py-1.5 px-3 text-right tabular-nums text-muted-foreground">{fmtOrDash(r.comparison)}</td>
                       <td className={`py-1.5 px-3 text-right tabular-nums ${good === null ? "text-muted-foreground" : good ? "text-success" : "text-destructive"}`}>
                         {deltaAbs === null ? "—" : fmtDeltaSAR(deltaAbs)}

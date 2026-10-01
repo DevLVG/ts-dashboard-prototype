@@ -431,7 +431,20 @@ const deriveSubtotals = (tree: Map<PLSection, SectionTree>): Subtotals => {
   const hasEbitda5 = hasGrossMargin && hasOpexTotal;
   const hasEbitdaReported = hasEbitda5 && sectionHasData(tree, "Project-Costs");
   const hasEbit = hasEbitdaReported && sectionHasData(tree, "D&A");
-  const hasNetResult = hasEbit && sectionHasData(tree, "NON-OP");
+  // 2026-10-01 (coordinator, same-day follow-up): Net income = EBIT +
+  // actual non-operating items — when NON-OP has no rows at all, treat it
+  // as a real 0 (there were no financial charges/gains/zakat to book)
+  // rather than blocking the whole figure behind "—". Deliberately NOT
+  // gated on sectionHasData(NON-OP) anymore (every other hasX above still
+  // is — this is the one explicit exception, not a general relaxation).
+  // The value itself (`netResult = ebit + nonOp` below) already defaults
+  // NON-OP to 0 via sectionTotal's `?? 0`; only the GATE changes here.
+  // isEstimateNetResult (below) still ORs in sectionIsEstimate(NON-OP),
+  // so Net income correctly carries the "est." badge whenever EBIT does
+  // (NON-OP itself is never estimated — see the design note's §15.3 for
+  // why: Gains & disposals can be a real gain, not just a cost, so a
+  // cost-only run-rate shortfall formula would be unsafe there).
+  const hasNetResult = hasEbit;
 
   const isEstimateGrossMargin = sectionIsEstimate(tree, "Revenue") || sectionIsEstimate(tree, "COGS");
   const isEstimateOpexTotal = sectionIsEstimate(tree, "OPEX-GA") || sectionIsEstimate(tree, "OPEX-MS") || sectionIsEstimate(tree, "OPEX-People");

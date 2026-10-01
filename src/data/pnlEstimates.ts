@@ -147,10 +147,21 @@ const fetchUnbilledOutflowEstimates = async (): Promise<EstimateComponentRow[]> 
 
 const fetchRunrateEstimates = async (): Promise<EstimateComponentRow[]> => {
   if (!supabase) throw new Error("Supabase is not configured");
-  // Run-rate cost-family estimates (migrations 099-101): COGS, OPEX-GA,
-  // OPEX-MS, Project-Costs — structurally-late cost families, 3-month
-  // average baseline, de-duplicated against actuals + unbilled outflows.
+  // Flat run-rate cost-family estimates (migrations 099-105): OPEX-GA,
+  // OPEX-MS, Project-Costs only as of migration 105 (COGS moved to the
+  // revenue-scaled ratio method below) — 3-month average baseline,
+  // de-duplicated against actuals + unbilled outflows.
   const { data, error } = await supabase.from("v_pnl_runrate_estimate_lines").select("*").limit(2000);
+  if (error) throw toFriendlyError(error);
+  return (data ?? []) as EstimateComponentRow[];
+};
+
+const fetchCogsRatioEstimates = async (): Promise<EstimateComponentRow[]> => {
+  if (!supabase) throw new Error("Supabase is not configured");
+  // COGS estimate scaled to each business unit's ACTUAL revenue this
+  // month (migration 105) — fixes a BU with zero revenue this month
+  // getting a non-zero COGS estimate under the old flat run-rate.
+  const { data, error } = await supabase.from("v_pnl_cogs_ratio_estimate_lines").select("*").limit(2000);
   if (error) throw toFriendlyError(error);
   return (data ?? []) as EstimateComponentRow[];
 };
@@ -193,14 +204,20 @@ export const useEstimateBasisRows = () => {
     staleTime: 5 * 60 * 1000,
     enabled: isSupabaseConfigured,
   });
+  const cogsRatioQ = useQuery({
+    queryKey: ["v_pnl_cogs_ratio_estimate_lines"],
+    queryFn: fetchCogsRatioEstimates,
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+  });
   const rows = useMemo(
-    () => [...(componentQ.data ?? []), ...(unbilledQ.data ?? []), ...(runrateQ.data ?? [])].map(toBasisRow),
-    [componentQ.data, unbilledQ.data, runrateQ.data],
+    () => [...(componentQ.data ?? []), ...(unbilledQ.data ?? []), ...(runrateQ.data ?? []), ...(cogsRatioQ.data ?? [])].map(toBasisRow),
+    [componentQ.data, unbilledQ.data, runrateQ.data, cogsRatioQ.data],
   );
   return {
     data: rows,
-    isLoading: componentQ.isLoading || unbilledQ.isLoading || runrateQ.isLoading,
-    isError: componentQ.isError || unbilledQ.isError || runrateQ.isError,
+    isLoading: componentQ.isLoading || unbilledQ.isLoading || runrateQ.isLoading || cogsRatioQ.isLoading,
+    isError: componentQ.isError || unbilledQ.isError || runrateQ.isError || cogsRatioQ.isError,
   };
 };
 

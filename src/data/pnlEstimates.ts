@@ -58,6 +58,53 @@ export const usePnlYtd = () =>
   });
 
 // ---------------------------------------------------------------------
+// v_pnl_ytd_monthly (one row per month, Jan of the current year -> the
+// current month) — used by PnlEstimateCard so it can follow WHATEVER
+// month/window the page's global period selector has active, instead of
+// being pinned to "now" like v_pnl_mtd/v_pnl_ytd are. Found live
+// 2026-10-01: the card kept showing October while the page had September
+// selected — fixed by reading this per-month view and summing whichever
+// months fall inside the active `win`, exactly like the main table's own
+// `inWin` filter.
+// ---------------------------------------------------------------------
+const fetchYtdMonthly = async (): Promise<PnlEstimateRow[]> => {
+  if (!supabase) throw new Error("Supabase is not configured");
+  const { data, error } = await supabase.from("v_pnl_ytd_monthly").select("*").limit(5000);
+  if (error) throw toFriendlyError(error);
+  return (data ?? []) as PnlEstimateRow[];
+};
+
+export const usePnlYtdMonthly = () =>
+  useQuery({
+    queryKey: ["v_pnl_ytd_monthly"],
+    queryFn: fetchYtdMonthly,
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+  });
+
+/** Same shape as `sectionTotal` but summed only over the months of `rows`
+ * that fall inside `win` (Win = {startKey,endKey} as "YYYY-MM" strings —
+ * same contract as PerformanceAnalysis.tsx's own `inWin`). */
+export const sectionTotalInWin = (
+  rows: PnlEstimateRow[] | undefined,
+  section: string,
+  win: { startKey: string; endKey: string },
+) => {
+  const matching = (rows ?? []).filter((r) => {
+    if (r.section !== section) return false;
+    const k = r.period_month.slice(0, 7);
+    return k >= win.startKey && k <= win.endKey;
+  });
+  if (matching.length === 0) return null;
+  const actual_sar = matching.reduce((s, r) => s + r.actual_sar, 0);
+  const estimate_sar = matching.reduce((s, r) => s + r.estimate_sar, 0);
+  const total_sar = matching.reduce((s, r) => s + r.total_sar, 0);
+  const is_estimate = matching.some((r) => r.is_estimate);
+  const methods = [...new Set(matching.filter((r) => r.is_estimate && r.method).map((r) => r.method as string))];
+  return { actual_sar, estimate_sar, total_sar, is_estimate, methods, sourceDetails: [] as string[] };
+};
+
+// ---------------------------------------------------------------------
 // Component-grain estimate rows, reshaped as BasisRow so they can be
 // spliced directly into the SAME `rows` array the P&L table/KPI circles
 // already aggregate (buildTree / aggregatePL just sum `amount_sar` by
@@ -98,6 +145,16 @@ const fetchUnbilledOutflowEstimates = async (): Promise<EstimateComponentRow[]> 
   return (data ?? []) as EstimateComponentRow[];
 };
 
+const fetchRunrateEstimates = async (): Promise<EstimateComponentRow[]> => {
+  if (!supabase) throw new Error("Supabase is not configured");
+  // Run-rate cost-family estimates (migrations 099-101): COGS, OPEX-GA,
+  // OPEX-MS, Project-Costs — structurally-late cost families, 3-month
+  // average baseline, de-duplicated against actuals + unbilled outflows.
+  const { data, error } = await supabase.from("v_pnl_runrate_estimate_lines").select("*").limit(2000);
+  if (error) throw toFriendlyError(error);
+  return (data ?? []) as EstimateComponentRow[];
+};
+
 const toBasisRow = (r: EstimateComponentRow): BasisRow => ({
   period_month: r.period_month,
   section: r.section,
@@ -130,11 +187,21 @@ export const useEstimateBasisRows = () => {
     staleTime: 5 * 60 * 1000,
     enabled: isSupabaseConfigured,
   });
+  const runrateQ = useQuery({
+    queryKey: ["v_pnl_runrate_estimate_lines"],
+    queryFn: fetchRunrateEstimates,
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+  });
   const rows = useMemo(
-    () => [...(componentQ.data ?? []), ...(unbilledQ.data ?? [])].map(toBasisRow),
-    [componentQ.data, unbilledQ.data],
+    () => [...(componentQ.data ?? []), ...(unbilledQ.data ?? []), ...(runrateQ.data ?? [])].map(toBasisRow),
+    [componentQ.data, unbilledQ.data, runrateQ.data],
   );
-  return { data: rows, isLoading: componentQ.isLoading || unbilledQ.isLoading, isError: componentQ.isError || unbilledQ.isError };
+  return {
+    data: rows,
+    isLoading: componentQ.isLoading || unbilledQ.isLoading || runrateQ.isLoading,
+    isError: componentQ.isError || unbilledQ.isError || runrateQ.isError,
+  };
 };
 
 /** Concatenates actual warehouse rows with the shaped estimate rows.

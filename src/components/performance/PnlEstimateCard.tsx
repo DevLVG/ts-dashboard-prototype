@@ -1,19 +1,24 @@
 // PnlEstimateCard — "People Costs & Depreciation: Actual vs Estimate"
-// (Marcello, 2026-10-01). Deliberately a SEPARATE, self-contained card
-// rather than a rework of the existing explodable P&L table below it:
-// that table reads v_pnl_basis/pnl_management directly and serves every
-// window the global period selector offers; this card answers a narrower,
-// always-current question ("what does THIS month and this YTD look like
-// right now, including what's still estimated") and is pinned to
-// TODAY — v_pnl_mtd/v_pnl_ytd are always "current month" / "Jan->now",
-// never the arbitrary window the big table can be scrolled to. Minimal,
-// additive, does not touch the big table's logic.
-import { useState } from "react";
+// (Marcello, 2026-10-01). A SEPARATE, self-contained card rather than a
+// rework of the explodable P&L table below it — that table carries the
+// full section/EBITDA/net-result breakdown; this card is a quick,
+// always-visible breakdown of the two line items business rule A/B name
+// explicitly (salaries/GOSI/EOSB and depreciation).
+//
+// FOLLOWS THE PAGE'S GLOBAL WINDOW (fixed 2026-10-01 — found live: the
+// card kept showing October while the page had September selected).
+// Reads v_pnl_ytd_monthly (one row per month, Jan of the current year ->
+// now) and sums whichever months fall inside the active `win` from
+// useAlignment() — the SAME window the big table and the KPI circles use,
+// via the SAME inWin-style month-key comparison. No more local MTD/YTD
+// toggle: "follow the selected month" means following THE selection, not
+// offering a second, independent one.
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Info } from "lucide-react";
-import { usePnlMtd, usePnlYtd, sectionTotal } from "@/data/pnlEstimates";
+import { usePnlYtdMonthly, sectionTotalInWin } from "@/data/pnlEstimates";
+import { useAlignment } from "@/contexts/AlignmentContext";
 import { fmtSAR } from "@/lib/format";
 
 const METHOD_LABELS: Record<string, string> = {
@@ -27,7 +32,13 @@ const SECTIONS: { key: string; label: string }[] = [
   { key: "D&A", label: "Depreciation & amortisation" },
 ];
 
-const Row = ({ label, data }: { label: string; data: ReturnType<typeof sectionTotal> }) => {
+const methodLabel = (m: string): string => {
+  if (METHOD_LABELS[m]) return METHOD_LABELS[m];
+  if (m.startsWith("run_rate_3mo_avg")) return `3-month run-rate average ${m.slice("run_rate_3mo_avg".length)}`.trim();
+  return m;
+};
+
+const Row = ({ label, data }: { label: string; data: ReturnType<typeof sectionTotalInWin> }) => {
   if (!data) {
     return (
       <div className="flex items-center justify-between py-2 border-b border-border/10 last:border-0">
@@ -36,7 +47,7 @@ const Row = ({ label, data }: { label: string; data: ReturnType<typeof sectionTo
       </div>
     );
   }
-  const methodText = data.methods.map((m) => METHOD_LABELS[m] ?? m).join("; ");
+  const methodText = data.methods.map(methodLabel).join("; ");
   return (
     <div className="flex items-center justify-between py-2 border-b border-border/10 last:border-0 gap-3">
       <span className="text-sm">{label}</span>
@@ -59,9 +70,6 @@ const Row = ({ label, data }: { label: string; data: ReturnType<typeof sectionTo
                 Actual booked so far: {fmtSAR(data.actual_sar)} · Estimated: {fmtSAR(data.estimate_sar)}
               </p>
               <p className="text-muted-foreground">{methodText || "Estimated — actual not posted yet."}</p>
-              {data.sourceDetails.length > 0 && (
-                <p className="text-muted-foreground">{data.sourceDetails.join("; ")}</p>
-              )}
               <p className="text-muted-foreground">
                 Disappears automatically once the real posting lands — this is never written to Qoyod.
               </p>
@@ -74,17 +82,8 @@ const Row = ({ label, data }: { label: string; data: ReturnType<typeof sectionTo
 };
 
 export const PnlEstimateCard = () => {
-  const [win, setWin] = useState<"MTD" | "YTD">("MTD");
-  const { data: mtdRows, isLoading: mtdLoading } = usePnlMtd();
-  const { data: ytdRows, isLoading: ytdLoading } = usePnlYtd();
-  const rows = win === "MTD" ? mtdRows : ytdRows;
-  const isLoading = win === "MTD" ? mtdLoading : ytdLoading;
-
-  const periodLabel = rows && rows.length > 0
-    ? (win === "MTD"
-        ? new Date(rows[0].period_month).toLocaleDateString("en-GB", { month: "long", year: "numeric" })
-        : `Jan → ${new Date(rows[0].period_month).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}`)
-    : "";
+  const { win, windowName } = useAlignment();
+  const { data: rows, isLoading } = usePnlYtdMonthly();
 
   return (
     <Card className="p-5 shadow-sm">
@@ -96,33 +95,19 @@ export const PnlEstimateCard = () => {
             <TooltipContent side="top" className="max-w-xs text-xs">
               Salaries, GOSI, end-of-service and depreciation are allowed to show as an estimate
               (carried forward from the last real posting, pro-rated for the days elapsed this
-              month) whenever the real posting hasn't landed yet — never as a false zero.
-              Supplier costs paid but not yet billed can also appear here, under the section the
-              payment was guessed to belong to. Marcello's rule, 2026-10-01.
+              month) whenever the real posting hasn't landed yet — never as a false zero. Follows
+              the period selector above. Marcello's rule, 2026-10-01.
             </TooltipContent>
           </Tooltip>
         </h3>
-        <div className="inline-flex rounded-md border border-border overflow-hidden text-xs">
-          {(["MTD", "YTD"] as const).map((w) => (
-            <button
-              key={w}
-              onClick={() => setWin(w)}
-              className={`px-2.5 py-1 font-medium transition-colors ${
-                win === w ? "bg-gold/20 text-gold" : "text-muted-foreground hover:bg-muted/40"
-              }`}
-            >
-              {w === "MTD" ? "Month to date" : "Year to date"}
-            </button>
-          ))}
-        </div>
       </div>
-      <p className="text-xs text-muted-foreground mb-3">{periodLabel}</p>
+      <p className="text-xs text-muted-foreground mb-3">{windowName}</p>
 
       {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {!isLoading && (
         <div>
           {SECTIONS.map((s) => (
-            <Row key={s.key} label={s.label} data={sectionTotal(rows, s.key)} />
+            <Row key={s.key} label={s.label} data={sectionTotalInWin(rows, s.key, win)} />
           ))}
         </div>
       )}

@@ -45,6 +45,10 @@ export interface KpiHeaderMetric {
   comparisonUnavailableReason?: string;
   deltaAbs: number | null;
   deltaPct: number | null;
+  /** True when `actual` includes at least one estimated line (2026-10-01,
+   * run-rate follow-up — "add the est. badge on circles too"). Revenue is
+   * never estimated, so this is always false for the revenue metric. */
+  isEstimate?: boolean;
 }
 
 export interface KpiHeaderData {
@@ -95,6 +99,25 @@ const monthsCoveredInWin = (rows: { period_month: string }[] | undefined, w: Win
   return covered.size;
 };
 
+/** True if any merged row (actual + estimate layer) for one of `sections`
+ * falls inside `w` and came from the estimate layer (`source==="estimate"`
+ * — see data/pnlEstimates.ts). Deliberately local, not added to
+ * aggregatePL (see monthsCoveredInWin's comment above for why). */
+const sectionsHaveEstimateInWin = (
+  rows: { period_month: string; section: string; source: string }[] | undefined,
+  w: Win,
+  sections: string[],
+): boolean => {
+  if (!rows) return false;
+  for (const r of rows) {
+    if (r.source !== "estimate") continue;
+    if (!sections.includes(r.section)) continue;
+    const k = monthKey(r.period_month);
+    if (k >= w.startKey && k <= w.endKey) return true;
+  }
+  return false;
+};
+
 const buildMetric = (
   key: KpiKey,
   label: string,
@@ -104,6 +127,7 @@ const buildMetric = (
   comparisonMode: ComparisonMode,
   budgetNaReason?: string,
   pyNaReason?: string,
+  isEstimate?: boolean,
 ): KpiHeaderMetric => {
   const comparison = comparisonMode === "BUDGET" ? budget : py;
   const deltaAbs = actual === null || comparison === null ? null : actual - comparison;
@@ -121,8 +145,13 @@ const buildMetric = (
       : undefined,
     deltaAbs,
     deltaPct,
+    isEstimate: actual !== null && !!isEstimate,
   };
 };
+
+const GROSS_MARGIN_SECTIONS = ["Revenue", "COGS"];
+const EBITDA5_SECTIONS = ["Revenue", "COGS", "OPEX-GA", "OPEX-MS", "OPEX-People"]; // pre-project-costs — also what "Recurring EBITDA (as booked)" depends on
+const EBITDA_REPORTED_SECTIONS = [...EBITDA5_SECTIONS, "Project-Costs"];
 
 export const useKpiHeaderData = (): KpiHeaderData => {
   const { win, py, preset, todayKey, comparisonMode, scope, windowName, winLabelText } = useAlignment();
@@ -266,6 +295,7 @@ export const useKpiHeaderData = (): KpiHeaderData => {
           recGrossMarginOkP ? (recPrior?.recGrossProfit ?? 0) : null,
           null, comparisonMode, "Budget COGS is not split by recurrence.",
           noPriorData ? pyNaReason : (!prior.hasGrossMargin ? costsUnbookedReason : pyNaReason),
+          sectionsHaveEstimateInWin(rows, win, GROSS_MARGIN_SECTIONS),
         ),
         buildMetric(
           "ebitda", "Recurring EBITDA (as booked)",
@@ -273,6 +303,7 @@ export const useKpiHeaderData = (): KpiHeaderData => {
           recEbitdaOkP ? (recPrior?.recEbitda ?? 0) : null,
           null, comparisonMode, REC_EBITDA_BUDGET_NA,
           noPriorData ? pyNaReason : (!prior.hasEbitda5 ? costsUnbookedReason : pyNaReason),
+          sectionsHaveEstimateInWin(rows, win, EBITDA5_SECTIONS),
         ),
       ];
     }
@@ -292,15 +323,17 @@ export const useKpiHeaderData = (): KpiHeaderData => {
         noPriorData || !prior.hasGrossMargin ? null : prior.grossMargin,
         budget ? budget.revenue + budget.cogs : null,
         comparisonMode, budgetNaReason, noPriorData ? pyNaReason : (!prior.hasGrossMargin ? costsUnbookedReason : pyNaReason),
+        sectionsHaveEstimateInWin(rows, win, GROSS_MARGIN_SECTIONS),
       ),
       buildMetric(
         "ebitda", "EBITDA (reported)",
         noActualData || !actual.hasEbitdaReported ? null : actual.ebitdaReported,
         noPriorData || !prior.hasEbitdaReported ? null : prior.ebitdaReported,
         null, comparisonMode, EBITDA_REPORTED_BUDGET_NA, noPriorData ? pyNaReason : (!prior.hasEbitdaReported ? costsUnbookedReason : pyNaReason),
+        sectionsHaveEstimateInWin(rows, win, EBITDA_REPORTED_SECTIONS),
       ),
     ];
-  }, [scope, recActual, recPrior, recBudgetRevenue, actual, prior, budget, comparisonMode, budgetNaReason, pyNaReason, EBITDA_REPORTED_BUDGET_NA, REC_EBITDA_BUDGET_NA, noActualData, noPriorData, costsUnbookedReason]);
+  }, [scope, recActual, recPrior, recBudgetRevenue, actual, prior, budget, comparisonMode, budgetNaReason, pyNaReason, EBITDA_REPORTED_BUDGET_NA, REC_EBITDA_BUDGET_NA, noActualData, noPriorData, costsUnbookedReason, rows, win]);
 
   return {
     isLoading: rowsLoading || budgetLoading,

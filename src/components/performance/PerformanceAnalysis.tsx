@@ -174,7 +174,15 @@ const REVENUE_BUS: { bu: string; buName: string }[] = (() => {
 // actual number.
 interface LeafNode { moaCode: string; leafName: string; total: number; isEstimate: boolean }
 interface ClusterNode { clusterCode: string; clusterName: string; total: number; leaves: LeafNode[]; isEstimate: boolean }
-interface FamilyNode { bu: string; buName: string; total: number; clusters: ClusterNode[]; isEstimate: boolean }
+// `unmatchedEstimateTotal` (2026-10-01, run-rate follow-up, migrations
+// 099-101): a run-rate cost-family estimate carries a real `bu` (it DOES
+// know which business line, e.g. Feed/Bedding/Horse Care -> LIV) but no
+// specific `moa_code` (the estimate is a cluster-level average, not one
+// leaf) — same "nowhere to land in the leaf tree" situation as the
+// section-level bucket below, but attributable to a family, so it lands
+// there instead and the business-unit breakdown (Gross margin by family)
+// stays correct.
+interface FamilyNode { bu: string; buName: string; total: number; clusters: ClusterNode[]; isEstimate: boolean; unmatchedEstimateTotal: number }
 // `hasData`: true only when >=1 warehouse row actually landed in this
 // section for the window (2026-08-04, owner-audit #3/#4 — "absent ≠ zero").
 // A section with zero matching rows must render "—", never a fabricated 0
@@ -229,7 +237,7 @@ const buildTree = (
     const famKey = `${def.plSection}::${def.bu}`;
     let fam = familyByKey.get(famKey);
     if (!fam) {
-      fam = { bu: def.bu, buName: buFamilyName(def.bu), total: 0, clusters: [], isEstimate: false };
+      fam = { bu: def.bu, buName: buFamilyName(def.bu), total: 0, clusters: [], isEstimate: false, unmatchedEstimateTotal: 0 };
       familyByKey.set(famKey, fam);
       section.families.push(fam);
     }
@@ -269,11 +277,21 @@ const buildTree = (
         if (isEstimateRow) leaf.isEstimate = true;
         tree.get(r.section as PLSection)!.hasData = true;
       } else if (isEstimateRow) {
-        // No specific moa_code (clever_unbilled_outflows — section-level
-        // guess only, see SectionTree's `unmatchedEstimateTotal` comment
-        // above): still counted in the section total, just not drillable.
+        // No specific moa_code: a run-rate estimate (migrations 099-101)
+        // DOES know its bu (e.g. LIV for Feed/Bedding/Horse Care) — lands
+        // on that family so the BU breakdown stays correct. An unbilled-
+        // outflow estimate (migrations 097/098) has no bu guess either —
+        // falls through to the section-level bucket, still inside
+        // section.total (every total already includes it), just not
+        // drillable to a specific family/leaf, which is honest: there IS
+        // no specific one, only a section-level guess.
         const section2 = tree.get(r.section as PLSection)!;
-        section2.unmatchedEstimateTotal += r.amount_sar;
+        const fam2 = r.bu ? familyByKey.get(`${r.section}::${r.bu}`) : undefined;
+        if (fam2) {
+          fam2.unmatchedEstimateTotal += r.amount_sar;
+        } else {
+          section2.unmatchedEstimateTotal += r.amount_sar;
+        }
         section2.hasData = true;
       }
     }
@@ -284,8 +302,8 @@ const buildTree = (
         clu.total = clu.leaves.reduce((s, l) => s + l.total, 0);
         clu.isEstimate = clu.leaves.some((l) => l.isEstimate);
       }
-      fam.total = fam.clusters.reduce((s, c) => s + c.total, 0);
-      fam.isEstimate = fam.clusters.some((c) => c.isEstimate);
+      fam.total = fam.clusters.reduce((s, c) => s + c.total, 0) + fam.unmatchedEstimateTotal;
+      fam.isEstimate = fam.clusters.some((c) => c.isEstimate) || fam.unmatchedEstimateTotal !== 0;
     }
     section.total = section.families.reduce((s, f) => s + f.total, 0) + section.unmatchedEstimateTotal;
     section.isEstimate = section.families.some((f) => f.isEstimate) || section.unmatchedEstimateTotal !== 0;
@@ -301,6 +319,7 @@ const scaleTree = (tree: Map<PLSection, SectionTree>, fraction: number): Map<PLS
     const families = node.families.map((fam) => ({
       ...fam,
       total: fam.total * fraction,
+      unmatchedEstimateTotal: fam.unmatchedEstimateTotal * fraction,
       clusters: fam.clusters.map((c) => ({
         ...c,
         total: c.total * fraction,
@@ -839,7 +858,17 @@ export const PerformanceAnalysis = () => {
         : 'EBITDA (reported) / EBIT / Net income show "—" until booked.';
       return `Project costs (Leveredge/F&F) not fully posted for ${windowName} — ${levGapSummary(missingLevMonths)}. ${suffix}`;
     }
-    if (actualSub.hasEbitdaReported) return null;
+    if (actualSub.hasEbitdaReported) {
+      // 2026-10-01 (run-rate follow-up): every family that's still missing
+      // its actual IS now covered by an estimate (that's exactly what
+      // flips hasEbitdaReported true below without touching the gate
+      // itself — see deriveSubtotals, unchanged) — so a real, estimate-
+      // inclusive number IS showing. Say so instead of staying silent,
+      // whenever this window actually contains an estimated line.
+      return actualSub.isEstimateEbitdaReported
+        ? "Includes estimates for costs not yet booked — figures update automatically as invoices and payroll are posted."
+        : null;
+    }
     return `Some cost lines are not fully posted yet for ${windowName} — EBITDA / EBITDA (reported) / EBIT / Net income show "—" until costs are booked.`;
   }, [noActualData, isBudgetMode, actualSub, missingLevMonths, windowName, scope]);
 

@@ -23,6 +23,7 @@
 import { Fragment } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useKpiHeaderData, type KpiHeaderMetric } from "@/hooks/useKpiHeaderData";
 import { fmtSAR, fmtDeltaSAR, fmtDeltaPct } from "@/lib/format";
@@ -105,8 +106,23 @@ const KpiCircle = ({ metric, comparisonLabel, mtdProrated, windowName }: {
         }
       >
         <div className="flex flex-col items-center px-2 text-center">
-          <p className={cn("font-heading tracking-tight leading-none", valueSizeClass(valueStr))}>{valueStr}</p>
+          <p className={cn("font-heading tracking-tight leading-none", valueSizeClass(valueStr), metric.isEstimate && "italic text-amber-400")}>{valueStr}</p>
           <p className="mt-1 text-[10px] uppercase tracking-widest text-muted-foreground">SAR</p>
+          {metric.isEstimate && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant="outline"
+                  className="mt-1.5 cursor-help text-[9px] font-bold uppercase tracking-wider border-amber-500/40 bg-amber-500/10 text-amber-400"
+                >
+                  est.
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-xs text-xs">
+                Includes an estimate for costs not yet booked — updates automatically as invoices and payroll are posted.
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </div>
 

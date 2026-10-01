@@ -102,6 +102,7 @@ import { ChevronRight, ChevronDown, Info } from "lucide-react";
 import { useAlignment, COMPARISON_LABELS } from "@/contexts/AlignmentContext";
 import { WindowPicker, ComparisonToggle, ScopeToggle, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
 import { KpiCircles } from "@/components/overview/KpiCircles";
+import { PnlEstimateCard } from "@/components/performance/PnlEstimateCard";
 import { ComparisonHistogram } from "@/components/overview/ComparisonHistogram";
 import { BuRevenueGrossMarginChart, type BuChartDatum } from "@/components/performance/BuRevenueGrossMarginChart";
 import {
@@ -1255,6 +1256,14 @@ export const PerformanceAnalysis = () => {
         </p>
       )}
       {recError && <p className="text-xs text-destructive/70">Recurrence data unavailable — {recError instanceof Error ? recError.message : String(recError)} (Only Recurring scope may be incomplete.)</p>}
+
+      {/* ---------- Always-current P&L estimate layer (Marcello, 2026-10-01) ---------- */}
+      {/* Standalone, pinned to "right now" (current month / calendar YTD) —
+          deliberately NOT tied to the global window selector above, which
+          can scroll to any past window where this estimate layer does not
+          apply. Reads v_pnl_mtd / v_pnl_ytd (migrations 094-097), never
+          v_pnl_basis — zero risk to the explodable table below. */}
+      <PnlEstimateCard />
 
       {/* ---------- KPI circles + comparison histogram ---------- */}
       {/* fix-4-kpi, commit 91ce209 — both components are standalone (read

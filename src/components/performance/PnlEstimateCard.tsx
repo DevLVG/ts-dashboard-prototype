@@ -34,6 +34,8 @@ const SECTIONS: { key: string; label: string }[] = [
 
 const methodLabel = (m: string): string => {
   if (METHOD_LABELS[m]) return METHOD_LABELS[m];
+  if (m.startsWith("run_rate_clean_12mo_median")) return `median of up to 12 clean months ${m.slice("run_rate_clean_12mo_median".length)}`.trim();
+  if (m.startsWith("cost_to_revenue_ratio_clean_window")) return `cost-to-revenue ratio, clean baseline window ${m.slice("cost_to_revenue_ratio_clean_window".length)}`.trim();
   if (m.startsWith("run_rate_3mo_avg")) return `3-month run-rate average ${m.slice("run_rate_3mo_avg".length)}`.trim();
   return m;
 };

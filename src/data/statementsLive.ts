@@ -10,6 +10,58 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase, isSupabaseConfigured, toFriendlyError } from "@/lib/supabaseClient";
 
+// ------------------------------------------- transient-network retry (2026-08-07)
+//
+// Root cause (JOB 1, intermittent ~20s stall, ~1-in-5-8 page loads):
+// Chrome DevTools captures on the stalled loads showed ERR_QUIC_PROTOCOL_ERROR
+// on exactly the requests below (Supabase/Cloudflare edge advertises HTTP/3;
+// a QUIC handshake that stalls on a flaky network path — office wifi/VPN UDP
+// interference — is a well-documented Chromium failure mode with no
+// automatic fast fallback to h2 on that connection). It is NOT something the
+// Supabase JS client (browser `fetch`) can force off — protocol selection
+// (h3/QUIC vs h2) is negotiated by the browser/OS below the fetch API, no
+// client option exists to pin it. So "force HTTP/1.1 or /2" was evaluated
+// and is not implementable from this codebase; it would need a server-side
+// change on Supabase's Cloudflare edge (outside our infrastructure).
+// What IS actionable, and is what actually fires the 20s stall today: each
+// page of v_balance_sheet_monthly (2 sequential pages, ~1980 rows) already
+// carries a 20s abort timeout (owner-audit #9, 2026-08-04) — that timeout
+// firing at exactly 20s and surfacing as a hard error to the user IS the
+// reported symptom. QUIC connection failures are transient by nature (the
+// same request over a fresh connection typically succeeds in <1s): bounded
+// retry with backoff turns a dead 20s wait + visible error into 1-2 silent
+// retries that resolve in ~1-2s. Applied to every paginated statement fetch
+// in this file (balance sheet, budget balance sheet, AR/AP aging) since all
+// four hit the same Supabase edge and share the same failure mode.
+const RETRY_BACKOFF_MS = [400, 1200]; // 2 retries: ~0.4s, then ~1.2s
+
+/** Retries `fn` on transient network failures only — AbortError (our own
+ * page timeout) and TypeError (`fetch` network failure, which is how the
+ * browser surfaces ERR_QUIC_PROTOCOL_ERROR to JS: no error.code, just
+ * "TypeError: Failed to fetch" / "TypeError: network error"). PostgREST
+ * logical errors (permission denied, missing relation, bad query) return
+ * normally through `fn`'s own {data,error} shape and are never retried here
+ * — only connection-level failures throw, so only those hit this catch. */
+// Exported (2026-08-07, handbook-package job) so the same helper backs the
+// four newly-surfaced read-only screens (cash forecast, EOSB/leave accruals,
+// VAT pre-file checks, month-end close) in their own data-access files —
+// same Supabase/Cloudflare edge, same QUIC failure mode, no reason to
+// duplicate the retry logic.
+export async function withTransientRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const transient = e instanceof Error && (e.name === "AbortError" || e instanceof TypeError);
+      if (!transient || attempt === RETRY_BACKOFF_MS.length) throw e;
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS[attempt]));
+    }
+  }
+  throw lastErr;
+}
+
 // ------------------------------------------------------------- cash flow
 
 export interface CashflowMonthRow {
@@ -90,6 +142,8 @@ export interface BalanceSheetRow {
   sort_order: number;
   is_adjustment: boolean;
   note: string | null;
+  /** Stable key (e.g. "A_BANK") — join key against v_budget_balance_sheet_monthly. */
+  line_code: string;
 }
 
 export interface BalanceSheetResult {
@@ -116,23 +170,97 @@ const isMissingViewError = (err: { code?: string; message?: string }): boolean =
   );
 };
 
+// Per-request timeout (2026-08-04, owner-audit #9): a hung request in this
+// pagination loop (e.g. starved of connections by other queries firing on
+// the same page load) previously left `isLoading` true forever — no error,
+// no console output, matching the mobile-viewport symptom exactly (Playwright
+// capture: 0 console/page-error events, page stuck on "Loading…"). Each page
+// now aborts after 20s and surfaces a real error instead of hanging silently,
+// so the UI can show the existing error state / let react-query retry.
+const BS_PAGE_TIMEOUT_MS = 20_000;
+
+/** One page of v_balance_sheet_monthly — same per-page retry/abort-timeout
+ * protection as before (QUIC-stall fix, 2026-08-07), factored out so it can
+ * be called either serially (fallback) or in parallel (see below). */
+const fetchBsPage = async (from: number, withCount: boolean) => {
+  try {
+    return await withTransientRetry(async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), BS_PAGE_TIMEOUT_MS);
+      try {
+        return await supabase!
+          .from("v_balance_sheet_monthly")
+          .select(
+            "month,section,subsection,line_item,amount,sort_order,is_adjustment,note,line_code",
+            withCount ? { count: "exact" } : undefined,
+          )
+          .order("month", { ascending: true })
+          .order("sort_order", { ascending: true })
+          .range(from, from + BS_PAGE_SIZE - 1)
+          .abortSignal(controller.signal);
+      } finally {
+        clearTimeout(timeout);
+      }
+    });
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error(`Timed out loading the balance sheet (page starting at row ${from}) — please retry.`);
+    }
+    throw e;
+  }
+};
+
+/** PERF (2026-08-08, CEO live review — same fix as `fetchAllPages` in
+ * data/alignment.ts, see that function's header for the full measured
+ * rationale): page 0 asks PostgREST for the exact total row count
+ * (`count: "exact"`, no extra round trip), then every remaining page fires
+ * CONCURRENTLY instead of waiting on the previous one — this view's own
+ * 2-page fetch measured ~1.8s serial locally (947ms + 842ms, the second page
+ * only STARTING after the first finished), now closer to the slower page's
+ * ~950ms alone. Each page keeps its own retry+20s-abort-timeout protection
+ * (`fetchBsPage`, unchanged) — this only changes WHEN pages are requested,
+ * never how a single page is fetched or retried. Falls back to the original
+ * serial loop if the server ever omits `count`. */
 export const fetchBalanceSheet = async (): Promise<BalanceSheetResult> => {
   if (!supabase) throw new Error("Supabase is not configured");
-  const all: BalanceSheetRow[] = [];
-  for (let from = 0; ; from += BS_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from("v_balance_sheet_monthly")
-      .select("month,section,subsection,line_item,amount,sort_order,is_adjustment,note")
-      .order("month", { ascending: true })
-      .order("sort_order", { ascending: true })
-      .range(from, from + BS_PAGE_SIZE - 1);
-    if (error) {
-      if (isMissingViewError(error)) return { available: false, rows: [] };
-      throw toFriendlyError(error);
+
+  const first = await fetchBsPage(0, true);
+  if (first.error) {
+    if (isMissingViewError(first.error)) return { available: false, rows: [] };
+    throw toFriendlyError(first.error);
+  }
+  const firstPage = (first.data ?? []) as BalanceSheetRow[];
+  if (firstPage.length < BS_PAGE_SIZE) return { available: true, rows: firstPage };
+
+  const total = first.count ?? null;
+  if (total === null) {
+    // Defensive fallback — server didn't return a count: the old page-at-a-
+    // time loop, guaranteed correct even if it can't be parallelized.
+    const all = [...firstPage];
+    for (let from = BS_PAGE_SIZE; ; from += BS_PAGE_SIZE) {
+      const { data, error } = await fetchBsPage(from, false);
+      if (error) {
+        if (isMissingViewError(error)) break;
+        throw toFriendlyError(error);
+      }
+      const page = (data ?? []) as BalanceSheetRow[];
+      all.push(...page);
+      if (page.length < BS_PAGE_SIZE) break;
     }
-    const page = (data ?? []) as BalanceSheetRow[];
-    all.push(...page);
-    if (page.length < BS_PAGE_SIZE) break;
+    return { available: true, rows: all };
+  }
+
+  const pageCount = Math.max(1, Math.ceil(total / BS_PAGE_SIZE));
+  const rest = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, i) => fetchBsPage((i + 1) * BS_PAGE_SIZE, false)),
+  );
+  const all = [...firstPage];
+  for (const r of rest) {
+    if (r.error) {
+      if (isMissingViewError(r.error)) continue;
+      throw toFriendlyError(r.error);
+    }
+    all.push(...((r.data ?? []) as BalanceSheetRow[]));
   }
   return { available: true, rows: all };
 };
@@ -267,11 +395,20 @@ const fetchAging = async <T>(view: string): Promise<AgingResult<T>> => {
   if (!supabase) throw new Error("Supabase is not configured");
   const all: T[] = [];
   for (let from = 0; ; from += AGING_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from(view)
-      .select("*")
-      .order("residual_amount", { ascending: false })
-      .range(from, from + AGING_PAGE_SIZE - 1);
+    const { data, error } = await withTransientRetry(async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), BS_PAGE_TIMEOUT_MS);
+      try {
+        return await supabase
+          .from(view)
+          .select("*")
+          .order("residual_amount", { ascending: false })
+          .range(from, from + AGING_PAGE_SIZE - 1)
+          .abortSignal(controller.signal);
+      } finally {
+        clearTimeout(timeout);
+      }
+    });
     if (error) {
       if (isMissingViewError(error)) return { available: false, rows: [] };
       throw toFriendlyError(error);
@@ -299,6 +436,127 @@ export const useApAging = () =>
     queryKey: ["ap_aging_v2"],
     queryFn: () => fetchAging<ApAgingRow>("ap_aging_v2"),
     staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data && !query.state.data.available ? 60_000 : false,
+  });
+
+// ------------------------------------------ realized DSO reference (v075)
+//
+// v_ar_realized_dso_trailing12m (migration 075, 2026-08-04): a single-row
+// "as of today" snapshot — amount-weighted average days between invoice
+// date and actual payment allocation, over the trailing 365 days, legacy
+// 2020-2021 cohort excluded (same cutoff as v_legacy_receivables). See the
+// migration header + DsoCard.tsx for why this REPLACES the book-value
+// trailing-average method (v_working_capital_monthly.receivables runs
+// negative every month — not a comparable basis to today's gross AR).
+
+export interface RealizedDsoRow {
+  sample_count: number;
+  sample_amount_sar: number | null;
+  weighted_avg_days: number | null;
+}
+
+export const useRealizedDsoTrailing12m = () =>
+  useQuery({
+    queryKey: ["v_ar_realized_dso_trailing12m"],
+    queryFn: async (): Promise<AgingResult<RealizedDsoRow>> => {
+      if (!supabase) throw new Error("Supabase is not configured");
+      const { data, error } = await supabase.from("v_ar_realized_dso_trailing12m").select("*").maybeSingle();
+      if (error) {
+        if (isMissingViewError(error)) return { available: false, rows: [] };
+        throw toFriendlyError(error);
+      }
+      return { available: true, rows: data ? [data as RealizedDsoRow] : [] };
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data && !query.state.data.available ? 60_000 : false,
+  });
+
+// ------------------------------------------------ balance-sheet budget (v2)
+//
+// v_budget_balance_sheet_monthly (migration 068, 2026-08-03): a SIMPLE
+// DERIVED balance-sheet budget — no client-approved line-by-line BS budget
+// exists (budget_2026 covers P&L + cash flow only). Computed by
+// scripts/build_budget_balance_sheet.py as a month-by-month roll-forward
+// from the 2026-06-30 actual balance sheet, driven by the already-approved
+// P&L+CF budget; ties assets=liabilities+equity by construction (verified
+// for all 18 months before load). Full method: Budget_Load_Report_2026-07-19
+// .md addendum 2026-08-03. Covers Jul-2026 -> Dec-2027 only — any other
+// month degrades to "no budget for this month", never a fabricated figure.
+// UI label is plain "Budget" everywhere (Marcello, 2026-08-03: no
+// "derived" badges/tags) — the method is documented, not surfaced per-figure.
+export interface BudgetBalanceSheetRow {
+  period_month: string; // "YYYY-MM-01"
+  line_code: string;
+  section: "Assets" | "Liabilities" | "Equity";
+  subsection: string;
+  line_item: string;
+  budget_amount_sar: number;
+  method_note: string;
+  version_id: string;
+}
+
+export interface BudgetBalanceSheetResult {
+  /** False while the view has not been created/populated yet. */
+  available: boolean;
+  rows: BudgetBalanceSheetRow[];
+}
+
+// fix-27 perf check (2026-08-04): timed the two views directly against
+// Supabase (3 runs each) — this one is the FAST side, not the slow path:
+// v_budget_balance_sheet_monthly ~100-270ms for its single 558-row page vs
+// v_balance_sheet_monthly's ~500-800ms PER page (and it needs two sequential
+// pages). The Budget branch was never the bottleneck; it just lacked the
+// same defensive guard as fetchBalanceSheet above (owner-audit #9) against a
+// stalled connection hanging forever with no error — added here for
+// consistency/safety, not because this query is slow.
+export const fetchBudgetBalanceSheet = async (): Promise<BudgetBalanceSheetResult> => {
+  if (!supabase) throw new Error("Supabase is not configured");
+  const all: BudgetBalanceSheetRow[] = [];
+  for (let from = 0; ; from += BS_PAGE_SIZE) {
+    let data, error;
+    try {
+      ({ data, error } = await withTransientRetry(async () => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), BS_PAGE_TIMEOUT_MS);
+        try {
+          return await supabase
+            .from("v_budget_balance_sheet_monthly")
+            .select("period_month,line_code,section,subsection,line_item,budget_amount_sar,method_note,version_id")
+            .order("period_month", { ascending: true })
+            .range(from, from + BS_PAGE_SIZE - 1)
+            .abortSignal(controller.signal);
+        } finally {
+          clearTimeout(timeout);
+        }
+      }));
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") {
+        throw new Error(`Timed out loading the budget balance sheet (page starting at row ${from}) — please retry.`);
+      }
+      throw e;
+    }
+    if (error) {
+      if (isMissingViewError(error)) return { available: false, rows: [] };
+      throw toFriendlyError(error);
+    }
+    const page = (data ?? []) as BudgetBalanceSheetRow[];
+    all.push(...page);
+    if (page.length < BS_PAGE_SIZE) break;
+  }
+  return { available: true, rows: all };
+};
+
+export const useBudgetBalanceSheet = () =>
+  useQuery({
+    queryKey: ["v_budget_balance_sheet_monthly"],
+    queryFn: fetchBudgetBalanceSheet,
+    staleTime: 10 * 60 * 1000,
     enabled: isSupabaseConfigured,
     retry: false,
     refetchInterval: (query) =>

@@ -6,12 +6,18 @@
 // exactly like the aging / balance-sheet hooks — so the panel ships before the backend lands and
 // populates itself the moment the view/table appear (no reload).
 //
-// WRITE-BACK: this layer is READ-ONLY on purpose. Recording a CEO decision (approve/hold/adjust)
-// against payment_run_item is the go-live step and needs an approver-scoped write path (RLS policy
-// or a service-key Edge Function) that is not yet signed off (auth model + Treasury Decision-Rules).
-// The panel therefore records decisions in an in-session ledger and shows the exact payload that
-// will be written — it never mutates production.
-import { useQuery } from "@tanstack/react-query";
+// WRITE-BACK (live since 2026-09-11, migrations 083+084): recording a CEO decision now INSERTs
+// directly into payment_decision_log — durable, with actor (the signed-in user's email from the
+// Supabase session) + timestamp + a jsonb diff snapshot of the bill/decision. This is deliberately
+// NOT routed through payment_run/payment_run_item (that heavier workflow still needs the Treasury
+// Decision-Rules sign-off — thresholds, vendor tiers, cash buffer, approvers — a separate business
+// decision, correctly out of scope here) — run_id/item_id are left NULL, which the schema allows.
+// authenticated has INSERT + SELECT only on payment_decision_log (never UPDATE/DELETE) — the trail
+// is audit-only by grant, not just by convention (same pattern as treasury_action_log, migration 059).
+// This does NOT make the panel a live payment tool: nothing here posts to Qoyod, sends money, or
+// talks to a bank. Payment EXECUTION stays manual, by design (segregation of duties) — a human takes
+// the exported payment-run file (see usePaymentRunExport below) into the bank.
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase, isSupabaseConfigured, toFriendlyError } from "@/lib/supabaseClient";
 import type { AgingBucket } from "@/data/statementsLive";
 
@@ -116,6 +122,100 @@ export const usePaymentDecisionLog = () =>
     refetchInterval: (query) =>
       query.state.data && !query.state.data.available ? 60_000 : false,
   });
+
+// ---------------------------------------------------- payment priority (score)
+//
+// v_ready_to_pay.score (034) is a hard NULL — the §B.1 weights were
+// unconfirmed at the time. Migration 050 turns those weights into editable
+// DATA (payment_priority_config) and computes a real, live-reranking
+// priority_score in v_payment_priority. It is still is_draft (score_is_draft)
+// until Arwa/Marcello confirm in-tool, so the panel joins it in ALONGSIDE
+// v_ready_to_pay and badges it "Proposed — to confirm" rather than presenting
+// it as settled ranking logic.
+
+export interface PaymentPriorityRow {
+  qoyod_bill_id: number | null;
+  vendor_qoyod_id: number | null;
+  payee: string | null;
+  bill_number: string | null;
+  due_date: string | null;
+  amount: number | null;
+  days_overdue: number | null;
+  aging_bucket: AgingBucket;
+  tier: number | null;
+  is_critical: boolean | null;
+  tier_confirmed: boolean | null;
+  score_is_draft: boolean | null;
+  tier_component: number | null;
+  overdue_component: number | null;
+  amount_component: number | null;
+  due_soon_component: number | null;
+  priority_score: number | null;
+  risk_if_delayed: string | null;
+}
+
+export const usePaymentPriority = () =>
+  useQuery({
+    queryKey: ["v_payment_priority"],
+    queryFn: () => fetchAll<PaymentPriorityRow>("v_payment_priority", { column: "priority_score", ascending: false }),
+    staleTime: 5 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data && !query.state.data.available ? 60_000 : false,
+  });
+
+// ---------------------------------------------------- record a CEO decision (write-back, 2026-09-11)
+
+export interface RecordPaymentDecisionArgs {
+  action: "approve" | "schedule" | "partial" | "hold" | "reject";
+  actor: string;               // signed-in user's email — never a hardcoded placeholder
+  decisionRef: string;
+  payee: string;
+  billKey: string;
+  billNumber: string | null;
+  fromAmount: number;
+  toAmount: number;
+  scheduledFor?: string;
+  reason?: string;
+}
+
+/** Durable insert into payment_decision_log (migrations 083/084 opened the write path). Append-only:
+ * no update/delete is ever issued from here. run_id/item_id stay NULL (see file header) — the full
+ * context travels in `diff`. */
+export const useRecordPaymentDecision = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: RecordPaymentDecisionArgs) => {
+      if (!supabase) throw new Error("Supabase is not configured");
+      const { data, error } = await supabase
+        .from("payment_decision_log")
+        .insert({
+          action: args.action,
+          actor: args.actor,
+          decision_ref: args.decisionRef,
+          reason: args.reason ?? null,
+          diff: {
+            payee: args.payee,
+            bill_key: args.billKey,
+            bill_number: args.billNumber,
+            from: { amount: args.fromAmount },
+            to: {
+              amount: args.toAmount,
+              scheduled_for: args.scheduledFor ?? null,
+            },
+          },
+        })
+        .select()
+        .single();
+      if (error) throw toFriendlyError(error);
+      return data as PaymentDecisionLogRow;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["payment_decision_log"] });
+    },
+  });
+};
 
 // -------------------------------------------------- tier presentation helper
 

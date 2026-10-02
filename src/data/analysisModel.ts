@@ -141,7 +141,7 @@ export const aggregateLeafSections = (
     const code = r.moa_code ?? "UNMAPPED";
     const info = r.moa_code !== null
       ? moaInfo(r.moa_code)
-      : { clusterCode: "UNMAPPED", clusterName: "Unmapped JE lines", leafName: "Pending mapping (D378)" };
+      : { clusterCode: "UNMAPPED", clusterName: "Unallocated", leafName: "Pending mapping (D378)" };
     const clusterName = r.cluster ?? info.clusterName;
     const leafName = r.leaf ?? info.leafName;
     let cl = sec.clusters.get(info.clusterCode);
@@ -414,9 +414,10 @@ export const buildAnalysisLines = (input: AnalysisInput): AnalysisLine[] => {
     });
   }
 
-  // Unmapped JE lines (pending D378) — inside recurring EBITDA (bridge
-  // convention). Shown only when something is there, so the line disappears
-  // by itself once the accountant maps the residual accounts.
+  // Unallocated lines (pending D378) — inside recurring EBITDA (bridge
+  // convention). Covers journal entries and, since migration 079, invoice /
+  // bill / simple-bill / credit-note items too. Shown only when something is
+  // there, so the line disappears by itself once the residual accounts are mapped.
   const unmappedVisible =
     act.unmapped !== 0 ||
     comps.some((c) => {
@@ -425,7 +426,7 @@ export const buildAnalysisLines = (input: AnalysisInput): AnalysisLine[] => {
     });
   if (unmappedVisible) {
     lines.push({
-      key: "unmapped", label: "Unmapped JE lines (pending mapping)", indent: true,
+      key: "unmapped", label: "Unallocated (pending mapping)", indent: true,
       actual: act.unmapped, comps: compsFor("unmapped", false),
       clusters: clustersFor(SECTION_UNMAPPED),
       budgetNote: "No budget exists for unmapped journal lines — they empty out once decision D378 maps the residual accounts.",

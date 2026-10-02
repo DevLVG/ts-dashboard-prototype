@@ -1,887 +1,1602 @@
-// PERFORMANCE ANALYSIS — spec §1.2, the package-story screen.
+// ECONOMICS — Marcello's live-review rebuild, 2026-08-03.
 //
-// Reproduces, live from the warehouse, the validated performance-analysis
-// storyline delivered 18-Jul. Default basis: Validated. Default window: TTM
-// at the latest complete month; the "As delivered (Jun-25→May-26)" preset is
-// one click away. Information hierarchy (spec frontend #5):
-//   headline KPIs (P1 recurring YoY · P2 total YoY · P3 recurring EBITDA)
-//   → the anti-confusion devices (P6 basis & window bridge · P5 CN anomaly)
-//   → composition (P4 per-BU growth · P7 fiscal quarters)
-//   → budget story (P8) → multi-year clean series (P9).
-// Every figure arrives via queries — the traceability gate (§5.D) forbids any
-// golden number as a literal in this bundle.
-import { useMemo, useState } from "react";
+// This screen replaces the old Performance Analysis bundle (recurring
+// tiles, basis & window bridge, credit-note anomaly, budget-story panel,
+// multi-year series, fiscal quarters — "va via, non ci serve niente") AND
+// absorbs P&L Overview + the Drill screen (fix-1 is removing both from
+// nav; this page's explodable table covers Drill's job).
+//
+// Final page layout, top to bottom (nothing else):
+//   global controls (period selector · Comparison · Scope — all owned by
+//   the shared chrome layer, consumed here, never rebuilt)
+//   -> KPI circles + comparison histogram (squad fix-4-kpi's mount point —
+//      wired in once their components land; see the marked spot below)
+//   -> ONE interactive, expandable P&L table (built here)
+//
+// The table:
+//   - Macro rows, statutory order: Gross revenue -> COGS -> Gross margin ->
+//     OpEx (its 3 sections) -> Total OpEx -> EBITDA -> Project costs ->
+//     EBITDA (reported) -> D&A -> EBIT -> Non-operating -> Net income.
+//   - Every SECTION-backed macro row expands (click) into its MoA FAMILY
+//     (L2 BU: Livery, Horse School, Membership, Events, B2B, Competitions,
+//     Retail, Corporate — `data/moaTree.ts`), each family into its MoA
+//     clusters (L3), each cluster into its individual MoA leaves (L4,
+//     moa_code). Subtotal rows (Gross margin, Total OpEx, EBITDA, EBITDA
+//     reported, EBIT, Net income) are derived, not expandable.
+//
+//     FIX-18 (2026-08-03, Marcello P0 — "non c'è Livery, è tutto a caso"):
+//     the table used to skip straight from section to L3 cluster via
+//     `data/moaMaster.ts`'s `moaInfo()`, a dictionary with no family field at
+//     all — every cluster from every BU rendered as one flat, unsorted
+//     sibling list. It also keyed clusters by `clusterCode` alone, which
+//     collides across families that happen to share an L3 code (e.g.
+//     DA-LIA exists under B2B, CORP AND LIV) — a second, silent
+//     mis-grouping bug. `buildTree` below now walks the canonical MoA
+//     hierarchy from `data/moaTree.ts` (a mechanical dump of `moa_gestionale`,
+//     is_active leaves only) as a FIXED skeleton — Section -> Family (bu) ->
+//     Cluster (l3) -> Leaf (l4, keyed by (bu, clusterCode) then moaCode) —
+//     built the same way regardless of what data exists, so actual/prior
+//     trees always share an identical shape (no runtime union needed, no
+//     disappearing branches, ties to the cent at every level by
+//     construction) and every leaf always renders, per Marcello's mandate
+//     ("voglio vedere ogni riga e sottoriga di foglia") — no >0.5 filter.
+//   - Comparison column follows the GLOBAL Comparison toggle (PY | Budget),
+//     one at a time. Granularity rule (Marcello's explicit caveat):
+//       vs Previous Year  -> full leaf granularity everywhere.
+//       vs Budget         -> capped at budget_2026's own granularity (macro
+//                            sections only — the budget vocabulary doesn't
+//                            share a code scheme with the actual MoA tree,
+//                            so mapping budget lines onto actual leaves
+//                            would be invented, not real). Expansion is
+//                            disabled in Budget mode; a note says why.
+//   - MTD pro-ration: Month-to-date compares a partial month's actual
+//     against a FULL prior-year month / FULL budget month, which
+//     overstates both — same elapsed-day pro-ration rule fix-4's KPI
+//     header uses (`computeMtdProration` + `prorateAgg`/`prorateBudget`),
+//     applied uniformly down to every family/cluster/leaf so a child row's
+//     comparison always sums back to its parent's.
+//   - Window = the global period selector (month/quarter/MTD/YTD/TTM).
+//
+// FIX-24 (2026-08-04, Marcello P0 live review — tree hygiene + MoA leaf
+// verification):
+//   - Single-child collapse (global rule): a family/cluster level only earns
+//     its own clickable row when it splits into 2+ children. A lone child —
+//     same name (Private Events family -> its only cluster, also "Private
+//     Events") or different (Corporate -> its ten G&A clusters; Trio Project
+//     Costs' two leaves) — is equally uninformative as an extra click, so its
+//     row is skipped and its own children are promoted straight into its
+//     slot, chained through as many singleton hops as exist. Concrete effect:
+//     Private Events collapses straight to its 3 leaves; G&A/Marketing &
+//     Sales/People collapse away their sole "Corporate" family (those 3
+//     sections are 100% CORP by MoA design — the family split is structurally
+//     never anything else); Project costs collapses BOTH "Corporate" and
+//     "Trio Project Costs" in one hop, landing on its 2 leaves; every D&A
+//     family whose only cluster has only one leaf (B2B, Retail) collapses
+//     straight to that leaf; every cluster of exactly one leaf anywhere
+//     collapses to the leaf's own name (Bank Costs -> Bank Charges,
+//     Furniture & Fixtures, EOS Provision -> End of Service, Non-Recurring
+//     Professional Fees -> Project Professional Fees, etc). See
+//     `clusterSlots`/`familySlots`/`sectionFamilySlots` below. Leaves
+//     (terminal moa_code rows) never carry an onToggle, promoted or not — no
+//     row can ever expand into a copy of itself.
+//   - Gross margin now explodes into a per-revenue-family margin line
+//     (family revenue + family COGS, COGS already negative — same sign
+//     convention as the macro row) alongside the existing Cost of goods sold
+//     family breakdown, tying to the macro Gross margin total by
+//     construction (same underlying family totals, just regrouped).
+//   - Below EBIT, the single opaque "Non-operating items" row is replaced by
+//     the master's own NON-OP breakdown as explicit, always-visible
+//     statutory lines — Financial charges (NO-FIN01, Bank Interest), Gains &
+//     disposals (NO-GAI01), Zakat (NO-ZKT01) — then Net income. No account is
+//     invented: the master has no financial-INCOME leaf today, only the
+//     financial-charge (interest) leaf, so only that side renders — verified
+//     against moa_gestionale 2026-08-04 (see fix-24 deliverable report).
+//   - The shared "Figures net of customer credit notes" line was retired at
+//     the chrome level by fix-25 (StrictBasisNote -> no-op); this page also
+//     drops its own `CompletenessBanner` render — Marcello, live review:
+//     "togli tutto" — keeping only the small `OpenMonthsBadge`.
+import { Fragment, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { Info, TrendingUp, TrendingDown, FileSearch } from "lucide-react";
+import { ChevronRight, ChevronDown, Info } from "lucide-react";
+import { useAlignment, COMPARISON_LABELS } from "@/contexts/AlignmentContext";
+import { WindowPicker, ComparisonToggle, ScopeToggle, OpenMonthsBadge } from "@/components/chrome/AlignmentChrome";
+import { KpiCircles } from "@/components/overview/KpiCircles";
+import { PnlEstimateCard } from "@/components/performance/PnlEstimateCard";
+import { useEstimateBasisRows, mergeEstimateRows } from "@/data/pnlEstimates";
+import { ComparisonHistogram } from "@/components/overview/ComparisonHistogram";
+import { BuRevenueGrossMarginChart, type BuChartDatum } from "@/components/performance/BuRevenueGrossMarginChart";
 import {
-  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
-  ResponsiveContainer, ReferenceLine, Legend, Cell, LabelList,
-} from "recharts";
-import { useAlignment } from "@/contexts/AlignmentContext";
-import { BasisBadge, BasisToggle, WindowPicker, CompletenessBanner, FrozenRefChip } from "@/components/chrome/AlignmentChrome";
-import {
-  useBasisRows, useRecurrence, useModelAdjustments, useCreditNoteAudit,
-  useCollectionsMonthly, collectionsInWin,
-  aggregatePL, aggregateRecurring, aggregateBudgetWindow, recurrenceIsLive,
-  creditNotesInWin, adjustmentLadder, resolveRecurrence, fiscalQuarters,
-  factMonths, winLabel, pyWin, AS_DELIVERED_WIN, BASIS_SHORT,
-  type Basis, type BasisRow, type Win, type RecurrenceState,
+  useBasisRows, useRecurrence, resolveRecurrence, aggregateBudgetWindow, aggregatePL,
+  computeMtdProration, prorateAgg, prorateBudget, factMonths, levGapSummary,
+  type BasisRow, type Win, type RecurrenceState, type BudgetAgg,
 } from "@/data/alignment";
-import { useBudgetMonthly, useBudgetAllVersions, LIVE_BU_LABELS, monthKey, monthKeyLabel, shiftMonthKey } from "@/data/liveData";
-import { fmtSAR, fmtDeltaSAR, fmtDeltaPct, fmtPct, fmtCompact, pctChange, fmtOrDash } from "@/lib/format";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useBudgetMonthly, monthKeyLabel } from "@/data/liveData";
+import { MOA_PL_LEAVES, buFamilyName } from "@/data/moaTree";
+import { useLeafLines, useLeafLineCount, LEAF_LINE_SOURCE_LABEL } from "@/data/leafLines";
+import { fmtDeltaSAR, fmtDeltaPct, fmtOrDash, comparePct } from "@/lib/format";
 
-// ------------------- FROZEN PACKAGE CITATIONS (punch item 6, spec §0.3/§5-A)
-// These strings/values are QUOTATIONS of the delivered 18-Jul package (12-Jun
-// extraction / 16-Jul model freeze). They legitimately exist nowhere in the
-// live warehouse — they render ONLY inside <FrozenRefChip>, clearly labeled
-// "as delivered", visually distinct from live figures. The §5-D traceability
-// gate excepts exactly these labeled citations (they are citations of the
-// delivered package, not figures of the panel).
-const DELIVERED_P1_PY_TEXT = "PY 3,027,897 · +29.3%";
-const DELIVERED_P3_CLEAN_SAR = 80942; // "Recurring EBITDA (clean)" as delivered
+// ---------------------------------------------------------------- helpers
 
-// ------------------------------------------------------------- primitives
+/** Budget non-recurring project lines (GA-NRP* / MS-FFC) — restated locally
+ * (not exported from the data layer) so the "Only Recurring" scope's Budget
+ * comparison stays consistent with the KPI header above this table, which
+ * restates the same rule for the same reason. */
+const isBudgetNonRecLine = (moa: string): boolean => moa.startsWith("GA-NRP") || moa === "MS-FFC";
 
-const YoYChip = ({ pct, positiveIsGood = true }: { pct: number | null; positiveIsGood?: boolean }) => {
-  if (pct === null) return <span className="text-sm text-muted-foreground">n/a</span>;
-  const good = positiveIsGood ? pct >= 0 : pct < 0;
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-sm font-bold tabular-nums ${good ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive"}`}>
-      {pct >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-      {fmtDeltaPct(pct)}
-    </span>
-  );
+const monthKey = (date: string): string => date.slice(0, 7);
+const inWin = (k: string, w: Win): boolean => k >= w.startKey && k <= w.endKey;
+
+/** Distinct months, within a window, with at least one warehouse fact row
+ * (any section) — zero means the window is entirely unfed (e.g. a future
+ * calendar quarter picked from the always-visible Q1-Q4 list, before it's
+ * fed). "Absent ≠ zero" (the same rule Cash Flow's `useCashFlowPageData`
+ * already applies): every macro/subtotal row for such a window must render
+ * "—", never a fabricated 0 with a meaningless +/-100% delta. Added
+ * 2026-08-03 (Marcello, live review) — kept local here rather than added to
+ * `aggregatePL`/`data/alignment.ts`, which fix-10-selector owns this round. */
+const monthsCoveredInWin = (rows: BasisRow[] | undefined, w: Win): number => {
+  if (!rows) return 0;
+  const covered = new Set<string>();
+  for (const r of rows) {
+    const k = monthKey(r.period_month);
+    if (inWin(k, w)) covered.add(k);
+  }
+  return covered.size;
 };
 
-const TileHeader = ({ title, basis, hint }: { title: string; basis?: Basis; hint?: string }) => (
-  <div className="flex items-center gap-2 flex-wrap">
-    <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
-    {basis && <BasisBadge basis={basis} />}
-    {hint && (
-      <Tooltip>
-        <TooltipTrigger asChild><Info className="h-3.5 w-3.5 text-muted-foreground/70 cursor-help" /></TooltipTrigger>
-        <TooltipContent side="top" className="max-w-sm text-xs">{hint}</TooltipContent>
-      </Tooltip>
-    )}
-  </div>
-);
+const PL_SECTIONS = ["Revenue", "COGS", "OPEX-GA", "OPEX-MS", "OPEX-People", "Project-Costs", "D&A", "NON-OP"] as const;
+type PLSection = (typeof PL_SECTIONS)[number];
 
-const PendingRecurrence = () => (
-  <p className="text-sm text-muted-foreground py-4">
-    Recurring view pending recurrence dimension — activates automatically once
-    dim_recurrence is live in the warehouse.
-  </p>
-);
+/** Revenue-bearing business units, in the same canonical order buildTree's
+ * own family list uses (first-seen order walking MOA_PL_LEAVES) — DERIVED
+ * from the same source of truth rather than hand-listed, so the "By Business
+ * Unit" chart (BuRevenueGrossMarginChart, 2026-08-08 CEO mandate) can never
+ * drift out of sync with the MoA tree or silently drop a BU. */
+const REVENUE_BUS: { bu: string; buName: string }[] = (() => {
+  const seen = new Set<string>();
+  const out: { bu: string; buName: string }[] = [];
+  for (const def of MOA_PL_LEAVES) {
+    if (def.plSection !== "Revenue" || seen.has(def.bu)) continue;
+    seen.add(def.bu);
+    out.push({ bu: def.bu, buName: buFamilyName(def.bu) });
+  }
+  return out;
+})();
 
-const DataStateFootnote = () => (
-  <p className="text-[11px] leading-snug text-muted-foreground/80 mt-2">
-    PY computed live from the warehouse — includes the post-delivery remediation of
-    Dec-24/Jan-25/Feb-25 postings; the delivered package quoted the 12-Jun frozen extraction.
-  </p>
-);
+// `isEstimate` (2026-10-01, Marcello — P&L MTD/YTD estimate layer): true
+// when ANY row contributing to this node's total came from the estimate
+// layer (source === "estimate" — see data/pnlEstimates.ts), propagated
+// bottom-up exactly like `total` itself, so a cluster/family/section/
+// macro-subtotal is flagged the moment ANY descendant leaf is
+// estimate-influenced, never silently absorbed into a clean-looking
+// actual number.
+interface LeafNode { moaCode: string; leafName: string; total: number; isEstimate: boolean }
+interface ClusterNode { clusterCode: string; clusterName: string; total: number; leaves: LeafNode[]; isEstimate: boolean }
+// `unmatchedEstimateTotal` (2026-10-01, run-rate follow-up, migrations
+// 099-101): a run-rate cost-family estimate carries a real `bu` (it DOES
+// know which business line, e.g. Feed/Bedding/Horse Care -> LIV) but no
+// specific `moa_code` (the estimate is a cluster-level average, not one
+// leaf) — same "nowhere to land in the leaf tree" situation as the
+// section-level bucket below, but attributable to a family, so it lands
+// there instead and the business-unit breakdown (Gross margin by family)
+// stays correct.
+interface FamilyNode { bu: string; buName: string; total: number; clusters: ClusterNode[]; isEstimate: boolean; unmatchedEstimateTotal: number }
+// `hasData`: true only when >=1 warehouse row actually landed in this
+// section for the window (2026-08-04, owner-audit #3/#4 — "absent ≠ zero").
+// A section with zero matching rows must render "—", never a fabricated 0
+// with a meaningless delta — same rule Cash Flow already applies.
+// `unmatchedEstimateTotal`/`unmatchedIsEstimate`: an estimate row CAN
+// arrive with no moa_code (clever_unbilled_outflows — "cost paid, invoice
+// missing", mapped only to a section guess, never a specific leaf, see
+// migration 097). Such a row has nowhere to land in the leaf/cluster/
+// family tree below, so it's summed directly into the SECTION total here
+// instead — still inside `section.total` (every total already includes
+// it), just not drillable to a specific leaf, which is honest: there IS
+// no specific leaf, only a section-level guess.
+interface SectionTree { total: number; hasData: boolean; isEstimate: boolean; families: FamilyNode[]; unmatchedEstimateTotal: number }
 
-// ------------------------------------------------------------- waterfall
+/** Builds the section -> family (BU) -> cluster -> leaf tree for one
+ * window/scope. The skeleton (every family/cluster/leaf `data/moaTree.ts`
+ * defines for this section) is built FIRST, unconditionally — so a window
+ * with zero matching rows still returns the full canonical shape, just with
+ * every total at 0. Every macro row's value is later DERIVED as the sum
+ * over this same tree — the displayed total and its expansion can never
+ * silently disagree, at any level, in any window. */
+/** `recurrenceSplit` (2026-08-08, CEO mandate — "prima tutta la parte di
+ * corrente, splittata... poi la non corrente, splittata"): an OPTIONAL
+ * further partition of the SAME row set buildTree already walks, read
+ * straight off `resolveRecurrence` — the identical function/policy the
+ * "Only Recurring" scope filter above already uses (unresolved rows default
+ * to recurring, "per loader integrity" — see `aggregateRecurring`'s
+ * identical convention in data/alignment.ts). Nothing here reclassifies a
+ * single row; it only decides which of the two mutually-exclusive,
+ * collectively-exhaustive buckets ("recurring" or "non-recurring") a row
+ * lands in for the OpEx split render below. Because the two buckets are a
+ * strict partition of the same `scope`-filtered row set `buildTree(rows, w,
+ * scope, rec)` (no split) would itself sum, a recurring-split tree's section
+ * total plus the matching non-recurring-split tree's section total always
+ * equals the unsplit section total exactly — verified in the OpEx block's
+ * own render below and in QA. */
+const buildTree = (
+  rows: BasisRow[] | undefined,
+  w: Win,
+  scope: "ALL" | "RECURRING",
+  rec: RecurrenceState | undefined,
+  recurrenceSplit?: "recurring" | "non-recurring",
+): Map<PLSection, SectionTree> => {
+  const tree = new Map<PLSection, SectionTree>();
+  const leafByCode = new Map<string, LeafNode>();
+  const familyByKey = new Map<string, FamilyNode>();
+  const clusterByKey = new Map<string, ClusterNode>();
+  for (const s of PL_SECTIONS) tree.set(s, { total: 0, hasData: false, isEstimate: false, families: [], unmatchedEstimateTotal: 0 });
+  for (const def of MOA_PL_LEAVES) {
+    const section = tree.get(def.plSection as PLSection);
+    if (!section) continue; // defensive: moaTree.ts only ever emits the 8 PL sections above
+    const famKey = `${def.plSection}::${def.bu}`;
+    let fam = familyByKey.get(famKey);
+    if (!fam) {
+      fam = { bu: def.bu, buName: buFamilyName(def.bu), total: 0, clusters: [], isEstimate: false, unmatchedEstimateTotal: 0 };
+      familyByKey.set(famKey, fam);
+      section.families.push(fam);
+    }
+    const cluKey = `${famKey}::${def.clusterCode}`;
+    let clu = clusterByKey.get(cluKey);
+    if (!clu) {
+      clu = { clusterCode: def.clusterCode, clusterName: def.clusterName, total: 0, leaves: [], isEstimate: false };
+      clusterByKey.set(cluKey, clu);
+      fam.clusters.push(clu);
+    }
+    const leaf: LeafNode = { moaCode: def.moaCode, leafName: def.leafName, total: 0, isEstimate: false };
+    clu.leaves.push(leaf);
+    leafByCode.set(def.moaCode, leaf);
+  }
+  if (rows) {
+    for (const r of rows) {
+      if (!PL_SECTIONS.includes(r.section as PLSection)) continue;
+      const k = monthKey(r.period_month);
+      if (!inWin(k, w)) continue;
+      if (scope === "RECURRING" && resolveRecurrence(r, rec) === "non-recurring") continue;
+      if (recurrenceSplit) {
+        const isNonRec = resolveRecurrence(r, rec) === "non-recurring";
+        if (recurrenceSplit === "recurring" && isNonRec) continue;
+        if (recurrenceSplit === "non-recurring" && !isNonRec) continue;
+      }
+      const isEstimateRow = r.source === "estimate";
+      const leaf = r.moa_code ? leafByCode.get(r.moa_code) : undefined;
+      // Verified 2026-08-03: every moa_code on a row tagged to one of the 8
+      // PL_SECTIONS is an active moa_gestionale leaf and therefore present
+      // above — this lookup never misses in practice. If a future MoA edit
+      // ever produced an orphan code, it would fall through here exactly as
+      // it silently did in the pre-fix build (no regression), not corrupt a
+      // total — leaf/cluster/family/section sums stay internally consistent
+      // either way because every total is DERIVED from the leaves below it.
+      if (leaf) {
+        leaf.total += r.amount_sar;
+        if (isEstimateRow) leaf.isEstimate = true;
+        tree.get(r.section as PLSection)!.hasData = true;
+      } else if (isEstimateRow) {
+        // No specific moa_code: a run-rate estimate (migrations 099-101)
+        // DOES know its bu (e.g. LIV for Feed/Bedding/Horse Care) — lands
+        // on that family so the BU breakdown stays correct. An unbilled-
+        // outflow estimate (migrations 097/098) has no bu guess either —
+        // falls through to the section-level bucket, still inside
+        // section.total (every total already includes it), just not
+        // drillable to a specific family/leaf, which is honest: there IS
+        // no specific one, only a section-level guess.
+        const section2 = tree.get(r.section as PLSection)!;
+        const fam2 = r.bu ? familyByKey.get(`${r.section}::${r.bu}`) : undefined;
+        if (fam2) {
+          fam2.unmatchedEstimateTotal += r.amount_sar;
+        } else {
+          section2.unmatchedEstimateTotal += r.amount_sar;
+        }
+        section2.hasData = true;
+      }
+    }
+  }
+  for (const section of tree.values()) {
+    for (const fam of section.families) {
+      for (const clu of fam.clusters) {
+        clu.total = clu.leaves.reduce((s, l) => s + l.total, 0);
+        clu.isEstimate = clu.leaves.some((l) => l.isEstimate);
+      }
+      fam.total = fam.clusters.reduce((s, c) => s + c.total, 0) + fam.unmatchedEstimateTotal;
+      fam.isEstimate = fam.clusters.some((c) => c.isEstimate) || fam.unmatchedEstimateTotal !== 0;
+    }
+    section.total = section.families.reduce((s, f) => s + f.total, 0) + section.unmatchedEstimateTotal;
+    section.isEstimate = section.families.some((f) => f.isEstimate) || section.unmatchedEstimateTotal !== 0;
+  }
+  return tree;
+};
 
-interface WaterfallStep {
+/** Scales every number in a tree by a fixed fraction (MTD pro-ration) —
+ * applied uniformly top to bottom so parent = sum(children) always holds. */
+const scaleTree = (tree: Map<PLSection, SectionTree>, fraction: number): Map<PLSection, SectionTree> => {
+  const out = new Map<PLSection, SectionTree>();
+  for (const [section, node] of tree) {
+    const families = node.families.map((fam) => ({
+      ...fam,
+      total: fam.total * fraction,
+      unmatchedEstimateTotal: fam.unmatchedEstimateTotal * fraction,
+      clusters: fam.clusters.map((c) => ({
+        ...c,
+        total: c.total * fraction,
+        leaves: c.leaves.map((l) => ({ ...l, total: l.total * fraction })),
+      })),
+    }));
+    out.set(section, {
+      total: node.total * fraction, hasData: node.hasData, isEstimate: node.isEstimate, families,
+      unmatchedEstimateTotal: node.unmatchedEstimateTotal * fraction,
+    });
+  }
+  return out;
+};
+
+const sectionTotal = (tree: Map<PLSection, SectionTree>, s: PLSection): number => tree.get(s)?.total ?? 0;
+const sectionHasData = (tree: Map<PLSection, SectionTree>, s: PLSection): boolean => tree.get(s)?.hasData ?? false;
+/** True if ANY part of this section's total (any leaf, or an unmatched
+ * section-level guess) came from the estimate layer. 2026-10-01. */
+const sectionIsEstimate = (tree: Map<PLSection, SectionTree>, s: PLSection): boolean => tree.get(s)?.isEstimate ?? false;
+
+/** Finds one specific leaf (by moa_code) anywhere in a section — used for
+ * the below-EBIT statutory lines (fix-24), which each pin to exactly one
+ * NON-OP account rather than an aggregate. */
+const findLeafInTree = (tree: Map<PLSection, SectionTree>, section: PLSection, moaCode: string): LeafNode | undefined => {
+  for (const fam of tree.get(section)?.families ?? []) {
+    for (const clu of fam.clusters) {
+      const leaf = clu.leaves.find((l) => l.moaCode === moaCode);
+      if (leaf) return leaf;
+    }
+  }
+  return undefined;
+};
+const findLeafInFamilies = (families: FamilyNode[], moaCode: string): LeafNode | undefined => {
+  for (const f of families) for (const c of f.clusters) {
+    const leaf = c.leaves.find((l) => l.moaCode === moaCode);
+    if (leaf) return leaf;
+  }
+  return undefined;
+};
+const findClusterInFamilies = (families: FamilyNode[], bu: string, clusterCode: string): ClusterNode | undefined =>
+  families.find((f) => f.bu === bu)?.clusters.find((c) => c.clusterCode === clusterCode);
+const findFamilyByBu = (families: FamilyNode[], bu: string): FamilyNode | undefined => families.find((f) => f.bu === bu);
+
+// --------------------------------------------- single-child collapse (fix-24)
+//
+// "A level renders only if it splits into 2+ children" (Marcello, live
+// review). A container (family or cluster) with exactly one child is
+// equally uninformative as an extra click whether the child's name matches
+// its own or not, so its row is skipped entirely and the child's own
+// children are promoted to render directly in its slot — chained through as
+// many singleton hops as exist (Project costs: 1 family -> 1 cluster both
+// collapse in one hop, landing on its 2 leaves).
+
+type NodeSlot =
+  | { kind: "family"; family: FamilyNode }
+  | { kind: "cluster"; cluster: ClusterNode }
+  | { kind: "leaf"; leaf: LeafNode };
+
+/** A cluster of exactly one leaf conveys nothing the leaf itself doesn't —
+ * skip the cluster row, promote the leaf into the cluster's slot. */
+const clusterSlots = (clusters: ClusterNode[]): NodeSlot[] =>
+  clusters.map((c) => (c.leaves.length === 1 ? { kind: "leaf", leaf: c.leaves[0] } : { kind: "cluster", cluster: c }));
+
+/** A family of exactly one cluster: skip the cluster row too, promoting
+ * straight to that cluster's own leaves (itself further collapsed if there's
+ * only one — the B2B/Retail D&A "family with one leaf" case). */
+const familySlots = (family: FamilyNode): NodeSlot[] =>
+  family.clusters.length === 1
+    ? family.clusters[0].leaves.map((l) => ({ kind: "leaf" as const, leaf: l }))
+    : clusterSlots(family.clusters);
+
+/** A section of exactly one family (every OPEX-GA/OPEX-MS/OPEX-People/
+ * Project-Costs/NON-OP leaf is bu="CORP" by MoA design, structurally, not
+ * just today) skips the redundant "Corporate" family row too. */
+const sectionFamilySlots = (families: FamilyNode[]): NodeSlot[] =>
+  families.length === 1 ? familySlots(families[0]) : families.map((f) => ({ kind: "family" as const, family: f }));
+
+/** The 6 derived subtotals, computed FROM the tree's section totals — never
+ * from a separate aggregation path, so the table can't disagree with itself.
+ * Each also carries a `hasX` coverage flag (2026-08-04, owner-audit #3/#4):
+ * a subtotal is only a real, comparable number when EVERY section it
+ * depends on has at least one posted row — a window with revenue live but
+ * costs unbooked must never let those unbooked 0s sum into a positive
+ * EBITDA. */
+interface Subtotals {
+  grossMargin: number; opexTotal: number; ebitda5: number; ebitdaReported: number; ebit: number; netResult: number;
+  hasGrossMargin: boolean; hasOpexTotal: boolean; hasEbitda5: boolean; hasEbitdaReported: boolean; hasEbit: boolean; hasNetResult: boolean;
+  // isEstimate* (2026-10-01): OR (not AND, unlike has*) — a composite figure
+  // is flagged the moment ANY contributing section carries an estimate, by
+  // design the more conservative/disclosing direction for a figure that
+  // feeds a CEO/CFO decision.
+  isEstimateGrossMargin: boolean; isEstimateOpexTotal: boolean; isEstimateEbitda5: boolean; isEstimateEbitdaReported: boolean; isEstimateEbit: boolean; isEstimateNetResult: boolean;
+  // recurringEbit (2026-10-01, partner decision — Recurring-scope P&L):
+  // Recurring EBIT = Recurring EBITDA (ebitda5, already pre-Project-Costs)
+  // + D&A — deliberately SKIPS Project-Costs (Leveredge's own fee is
+  // non-recurring by definition) rather than hiding the regular `ebit`
+  // row, which is still post-Project-Costs. Only meaningful/shown in
+  // Recurring scope.
+  recurringEbit: number; hasRecurringEbit: boolean; isEstimateRecurringEbit: boolean;
+}
+const deriveSubtotals = (tree: Map<PLSection, SectionTree>): Subtotals => {
+  const revenue = sectionTotal(tree, "Revenue");
+  const cogs = sectionTotal(tree, "COGS");
+  const grossMargin = revenue + cogs;
+  const opexTotal = sectionTotal(tree, "OPEX-GA") + sectionTotal(tree, "OPEX-MS") + sectionTotal(tree, "OPEX-People");
+  const ebitda5 = grossMargin + opexTotal;
+  const projectCosts = sectionTotal(tree, "Project-Costs");
+  const ebitdaReported = ebitda5 + projectCosts;
+  const da = sectionTotal(tree, "D&A");
+  const ebit = ebitdaReported + da;
+  const nonOp = sectionTotal(tree, "NON-OP");
+  const netResult = ebit + nonOp;
+
+  const hasGrossMargin = sectionHasData(tree, "Revenue") && sectionHasData(tree, "COGS");
+  const hasOpexTotal = sectionHasData(tree, "OPEX-GA") && sectionHasData(tree, "OPEX-MS") && sectionHasData(tree, "OPEX-People");
+  const hasEbitda5 = hasGrossMargin && hasOpexTotal;
+  const hasEbitdaReported = hasEbitda5 && sectionHasData(tree, "Project-Costs");
+  const hasEbit = hasEbitdaReported && sectionHasData(tree, "D&A");
+  // 2026-10-01 (coordinator, same-day follow-up): Net income = EBIT +
+  // actual non-operating items — when NON-OP has no rows at all, treat it
+  // as a real 0 (there were no financial charges/gains/zakat to book)
+  // rather than blocking the whole figure behind "—". Deliberately NOT
+  // gated on sectionHasData(NON-OP) anymore (every other hasX above still
+  // is — this is the one explicit exception, not a general relaxation).
+  // The value itself (`netResult = ebit + nonOp` below) already defaults
+  // NON-OP to 0 via sectionTotal's `?? 0`; only the GATE changes here.
+  // isEstimateNetResult (below) still ORs in sectionIsEstimate(NON-OP),
+  // so Net income correctly carries the "est." badge whenever EBIT does
+  // (NON-OP itself is never estimated — see the design note's §15.3 for
+  // why: Gains & disposals can be a real gain, not just a cost, so a
+  // cost-only run-rate shortfall formula would be unsafe there).
+  const hasNetResult = hasEbit;
+
+  const isEstimateGrossMargin = sectionIsEstimate(tree, "Revenue") || sectionIsEstimate(tree, "COGS");
+  const isEstimateOpexTotal = sectionIsEstimate(tree, "OPEX-GA") || sectionIsEstimate(tree, "OPEX-MS") || sectionIsEstimate(tree, "OPEX-People");
+  const isEstimateEbitda5 = isEstimateGrossMargin || isEstimateOpexTotal;
+  const isEstimateEbitdaReported = isEstimateEbitda5 || sectionIsEstimate(tree, "Project-Costs");
+  const isEstimateEbit = isEstimateEbitdaReported || sectionIsEstimate(tree, "D&A");
+  const isEstimateNetResult = isEstimateEbit || sectionIsEstimate(tree, "NON-OP");
+
+  const recurringEbit = ebitda5 + da;
+  const hasRecurringEbit = hasEbitda5 && sectionHasData(tree, "D&A");
+  const isEstimateRecurringEbit = isEstimateEbitda5 || sectionIsEstimate(tree, "D&A");
+
+  return {
+    grossMargin, opexTotal, ebitda5, ebitdaReported, ebit, netResult, hasGrossMargin, hasOpexTotal, hasEbitda5, hasEbitdaReported, hasEbit, hasNetResult,
+    isEstimateGrossMargin, isEstimateOpexTotal, isEstimateEbitda5, isEstimateEbitdaReported, isEstimateEbit, isEstimateNetResult,
+    recurringEbit, hasRecurringEbit, isEstimateRecurringEbit,
+  };
+};
+
+/** Budget value for a macro row key — null where budget_2026 structurally
+ * doesn't reach (Project costs / D&A / EBIT / Non-op / Net income: the
+ * budget has no lines there at all, never a fabricated figure). */
+const budgetValueFor = (key: string, b: BudgetAgg | null): number | null => {
+  if (!b) return null;
+  switch (key) {
+    case "Revenue": return b.revenue;
+    case "COGS": return b.cogs;
+    case "GrossMargin": return b.revenue + b.cogs;
+    case "OPEX-GA": return b.opexGa;
+    case "OPEX-MS": return b.opexMs;
+    case "OPEX-People": return b.opexPeople;
+    case "OpexTotal": return b.opexGa + b.opexMs + b.opexPeople;
+    case "EBITDA5": return b.ebitdaAll;
+    default: return null; // Project costs, EBITDA reported, D&A, EBIT, Non-op, Net income
+  }
+};
+
+interface MacroRowDef {
+  key: string;
   label: string;
-  /** Compact x-axis label for narrow viewports (≤768px) — punch item 7. */
-  short?: string;
-  value: number;
-  kind: "anchor" | "delta";
+  section?: PLSection;
+  subtotal?: boolean;
+  emphasis?: boolean;
 }
 
-const Waterfall = ({ steps, height = 260 }: { steps: WaterfallStep[]; height?: number }) => {
-  const isMobile = useIsMobile();
-  // Build float bars: anchors run 0→value; deltas run prev→prev+value.
-  const data = useMemo(() => {
-    let running = 0;
-    return steps.map((s) => {
-      const label = isMobile && s.short ? s.short : s.label;
-      if (s.kind === "anchor") {
-        running = s.value;
-        return { label, base: Math.min(0, s.value), size: Math.abs(s.value), kind: "anchor" as const, raw: s.value };
-      }
-      const from = running;
-      running += s.value;
-      return { label, base: Math.min(from, running), size: Math.abs(s.value), kind: s.value >= 0 ? ("up" as const) : ("down" as const), raw: s.value };
-    });
-  }, [steps, isMobile]);
-  const Tip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ payload: (typeof data)[number] }>; label?: string }) => {
-    if (!active || !payload || payload.length === 0) return null;
-    const d = payload[0].payload;
+const MACRO_ROWS: MacroRowDef[] = [
+  { key: "Revenue", label: "Gross revenue", section: "Revenue" },
+  { key: "COGS", label: "Cost of goods sold", section: "COGS" },
+  { key: "GrossMargin", label: "Gross margin", subtotal: true },
+  { key: "OPEX-GA", label: "General & administrative", section: "OPEX-GA" },
+  { key: "OPEX-MS", label: "Marketing & sales", section: "OPEX-MS" },
+  { key: "OPEX-People", label: "People", section: "OPEX-People" },
+  { key: "OpexTotal", label: "Total operating expenses", subtotal: true },
+  { key: "EBITDA5", label: "EBITDA", subtotal: true, emphasis: true },
+  { key: "Project-Costs", label: "Project costs", section: "Project-Costs" },
+  { key: "EBITDAReported", label: "EBITDA (reported)", subtotal: true },
+  { key: "D&A", label: "Depreciation & amortization", section: "D&A" },
+  { key: "EBIT", label: "EBIT", subtotal: true },
+  // Below-EBIT statutory lines (fix-24, 2026-08-04): the master's own NON-OP
+  // breakdown, each pinned to one moa_gestionale leaf, always shown even at
+  // zero — no "Non-operating items" catch-all row anymore. The master has no
+  // financial-INCOME leaf today (only the financial-charge/interest one), so
+  // only that side is shown — never invented. See MACRO_LEAF_CODE below.
+  { key: "NonOpFin", label: "Financial charges" },
+  { key: "NonOpGains", label: "Gains & disposals" },
+  { key: "Zakat", label: "Zakat" },
+  { key: "NetResult", label: "Net income", subtotal: true, emphasis: true },
+];
+
+/** moa_code each below-EBIT statutory row pins to — shown as the row's small
+ * secondary tag, same convention as every other leaf on this table. */
+const MACRO_LEAF_CODE: Record<string, string> = {
+  NonOpFin: "NO-FIN01",
+  NonOpGains: "NO-GAI01",
+  Zakat: "NO-ZKT01",
+};
+
+const macroValue = (key: string, tree: Map<PLSection, SectionTree>, sub: Subtotals): number => {
+  switch (key) {
+    case "GrossMargin": return sub.grossMargin;
+    case "OpexTotal": return sub.opexTotal;
+    case "EBITDA5": return sub.ebitda5;
+    case "EBITDAReported": return sub.ebitdaReported;
+    case "EBIT": return sub.ebit;
+    case "NetResult": return sub.netResult;
+    case "NonOpFin": return findLeafInTree(tree, "NON-OP", MACRO_LEAF_CODE.NonOpFin)?.total ?? 0;
+    case "NonOpGains": return findLeafInTree(tree, "NON-OP", MACRO_LEAF_CODE.NonOpGains)?.total ?? 0;
+    case "Zakat": return findLeafInTree(tree, "NON-OP", MACRO_LEAF_CODE.Zakat)?.total ?? 0;
+    default: return sectionTotal(tree, key as PLSection);
+  }
+};
+
+/** Whether a macro row's value is backed by at least one posted warehouse
+ * row (2026-08-04, owner-audit #3/#4) — false means "not yet booked", so the
+ * row must render "—", not the fabricated 0 `macroValue` would otherwise
+ * return for an un-posted section. */
+const macroHasData = (key: string, tree: Map<PLSection, SectionTree>, sub: Subtotals): boolean => {
+  switch (key) {
+    case "GrossMargin": return sub.hasGrossMargin;
+    case "OpexTotal": return sub.hasOpexTotal;
+    case "EBITDA5": return sub.hasEbitda5;
+    case "EBITDAReported": return sub.hasEbitdaReported;
+    case "EBIT": return sub.hasEbit;
+    case "NetResult": return sub.hasNetResult;
+    case "NonOpFin": case "NonOpGains": case "Zakat": return sectionHasData(tree, "NON-OP");
+    default: return sectionHasData(tree, key as PLSection);
+  }
+};
+
+/** Mirrors `macroHasData` exactly, for the "est." marker (2026-10-01). */
+const macroIsEstimate = (key: string, tree: Map<PLSection, SectionTree>, sub: Subtotals): boolean => {
+  switch (key) {
+    case "GrossMargin": return sub.isEstimateGrossMargin;
+    case "OpexTotal": return sub.isEstimateOpexTotal;
+    case "EBITDA5": return sub.isEstimateEbitda5;
+    case "EBITDAReported": return sub.isEstimateEbitdaReported;
+    case "EBIT": return sub.isEstimateEbit;
+    case "NetResult": return sub.isEstimateNetResult;
+    case "NonOpFin": return findLeafInTree(tree, "NON-OP", MACRO_LEAF_CODE.NonOpFin)?.isEstimate ?? false;
+    case "NonOpGains": return findLeafInTree(tree, "NON-OP", MACRO_LEAF_CODE.NonOpGains)?.isEstimate ?? false;
+    case "Zakat": return findLeafInTree(tree, "NON-OP", MACRO_LEAF_CODE.Zakat)?.isEstimate ?? false;
+    default: return sectionIsEstimate(tree, key as PLSection);
+  }
+};
+
+// --------------------------------------------------- leaf-line drill-down
+//
+// fix-24 follow-up (2026-08-04, Marcello — "i prodotti devono essere
+// uguali agli SKU, voglio arrivare all'ultima foglia e vedere cosa c'e'
+// dentro"). Renders the real booked lines behind one exact moa_code for the
+// current window, right under the leaf row that triggered it — bounded
+// (LEAF_LINE_PAGE at a time, "Show more" grows it, never a runaway
+// explosion) and count-labelled so the user always knows how much of the
+// leaf they're looking at. Source: v_pnl_leaf_lines (migration 076), which
+// sums to the leaf's own total to the cent by construction (see the
+// migration's header for the full verification).
+const LEAF_LINE_PAGE = 20;
+const LEAF_LINE_PAGE_GROW = 50;
+
+/** One period's real booked lines for a leaf, bounded/paginated exactly as
+ * before this fix. `amountCol` places the figure under whichever of the two
+ * numeric columns (2 = "This window", 3 = the active comparison) this
+ * block's own `win` corresponds to — the other numeric column, and the two
+ * delta columns, stay "—" (no fabricated per-line delta; deltas only ever
+ * exist at the leaf/subtotal grain above). */
+const LeafLineBlock = ({
+  moaCode, win, indent, amountCol,
+}: { moaCode: string; win: Win; indent: number; amountCol: 2 | 3 }) => {
+  const [limit, setLimit] = useState(LEAF_LINE_PAGE);
+  const { data: lines, isLoading, error } = useLeafLines(moaCode, win, limit);
+  const { data: totalCount } = useLeafLineCount(moaCode, win);
+  const padLeft = `${indent * 18 + 20}px`;
+
+  if (isLoading) {
     return (
-      <div className="chart-tooltip">
-        <p className="chart-tooltip-title">{label}</p>
-        <p className="chart-tooltip-content chart-tooltip-actual">
-          {d.kind === "anchor" ? fmtSAR(d.raw) : fmtDeltaSAR(d.raw)}
-        </p>
-      </div>
+      <tr className="border-b border-border/10">
+        <td colSpan={5} className="py-2 text-xs text-muted-foreground" style={{ paddingLeft: padLeft }}>
+          Loading lines…
+        </td>
+      </tr>
     );
-  };
+  }
+  if (error) {
+    return (
+      <tr className="border-b border-border/10">
+        <td colSpan={5} className="py-2 text-xs text-destructive/90" style={{ paddingLeft: padLeft }}>
+          Could not load lines — {error instanceof Error ? error.message : String(error)}
+        </td>
+      </tr>
+    );
+  }
+  if (!lines || lines.length === 0) {
+    // Honest empty state — same idiom as every other empty comparison figure
+    // on this page ("—" instead of a fabricated 0) — covers both "nothing
+    // booked" and a comparison window (PY/PP) that predates the warehouse's
+    // data history.
+    return (
+      <tr className="border-b border-border/10">
+        <td colSpan={5} className="py-1.5 text-xs text-muted-foreground italic" style={{ paddingLeft: padLeft }}>
+          No booked lines in this window.
+        </td>
+      </tr>
+    );
+  }
+  const shown = lines.length;
+  const total = totalCount ?? shown;
+  const hasMore = shown < total;
   return (
-    <ResponsiveContainer width="100%" height={isMobile ? height + 26 : height}>
-      <ComposedChart data={data} margin={{ top: 18, right: 8, bottom: 0, left: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-        <XAxis
-          dataKey="label"
-          stroke="hsl(var(--muted-foreground))"
-          tick={{ fill: "hsl(var(--muted-foreground))", fontSize: isMobile ? 9.5 : 10.5 }}
-          tickLine={false}
-          interval={0}
-          angle={isMobile ? -32 : 0}
-          textAnchor={isMobile ? "end" : "middle"}
-          height={isMobile ? 54 : 30}
-        />
-        <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={isMobile ? 42 : 54} />
-        <RTooltip content={<Tip />} />
-        <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeOpacity={0.5} />
-        <Bar dataKey="base" stackId="wf" fill="transparent" isAnimationActive={false} />
-        <Bar dataKey="size" stackId="wf" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={56}>
-          {data.map((d, i) => (
-            <Cell
-              key={i}
-              fill={d.kind === "anchor" ? "hsl(var(--gold) / 0.9)" : d.kind === "up" ? "hsl(195 75% 55% / 0.8)" : "hsl(0 70% 60% / 0.75)"}
-            />
-          ))}
-          <LabelList
-            dataKey="raw"
-            position="top"
-            formatter={(v: number) => fmtCompact(v)}
-            style={{ fill: "hsl(var(--foreground))", fontSize: 10.5, fontWeight: 600 }}
-          />
-        </Bar>
-      </ComposedChart>
-    </ResponsiveContainer>
+    <>
+      {lines.map((l) => (
+        <tr key={l.line_id} className="border-b border-border/5 bg-muted/[0.15]">
+          <td className="py-1 pr-3" style={{ paddingLeft: padLeft }}>
+            <span className="inline-flex items-center gap-1.5 min-w-0">
+              <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+              <span className="text-xs text-foreground/80 truncate max-w-[260px]" title={l.description ?? undefined}>
+                {l.product_code && <span className="font-mono text-[10px] text-muted-foreground/70 mr-1">{l.product_code}</span>}
+                {l.description || "—"}
+              </span>
+              <span className="text-[10px] text-muted-foreground/50 shrink-0 whitespace-nowrap">
+                {LEAF_LINE_SOURCE_LABEL[l.source]}{l.doc_ref ? ` · ${l.doc_ref}` : ""} · {l.line_date}
+              </span>
+            </span>
+          </td>
+          <td className="py-1 px-3 text-right tabular-nums text-xs text-muted-foreground">
+            {amountCol === 2 ? fmtOrDash(l.amount_sar, 2) : "—"}
+          </td>
+          <td className="py-1 px-3 text-right tabular-nums text-xs text-muted-foreground">
+            {amountCol === 3 ? fmtOrDash(l.amount_sar, 2) : "—"}
+          </td>
+          <td className="py-1 px-3 text-right text-xs text-muted-foreground/50">—</td>
+          <td className="py-1 pl-3 text-right text-xs text-muted-foreground/50">—</td>
+        </tr>
+      ))}
+      <tr className="border-b border-border/10">
+        <td colSpan={5} className="py-1.5 text-[11px] text-muted-foreground" style={{ paddingLeft: padLeft }}>
+          {hasMore ? (
+            <span className="inline-flex items-center gap-2">
+              Showing {shown} of {total} lines
+              <button
+                type="button"
+                onClick={() => setLimit((n) => n + LEAF_LINE_PAGE_GROW)}
+                className="text-gold hover:underline font-semibold cursor-pointer"
+              >
+                Show {Math.min(LEAF_LINE_PAGE_GROW, total - shown)} more
+              </button>
+            </span>
+          ) : (
+            <span>All {total} line{total === 1 ? "" : "s"} shown</span>
+          )}
+        </td>
+      </tr>
+    </>
   );
 };
 
-// --------------------------------------------------------------- screen
+/** fix (2026-08-08, CEO live review — "pellets and corn" example): opening a
+ * leaf to its real booked lines used to show the CURRENT period's lines only
+ * — the comparison period ("This window" 's counterpart column) stayed stuck
+ * at its own leaf-level total, with no way to see what it was actually made
+ * of. Renders BOTH periods' real lines, each under its own small heading and
+ * its own "Show more" pager, the comparison block placed under whichever
+ * numeric column the active comparison already occupies at the leaf row
+ * above (2 or 3) — so opening a row now always shows real detail on both
+ * sides, never just one. Skipped entirely in Budget mode (`showComparison`
+ * false) — budget_2026 has no line-level source, and rows can't even expand
+ * in Budget view (`canExpand` at the call site), so this never actually
+ * renders with showComparison=false today; kept as an explicit prop rather
+ * than inferred so a future call site can't silently mis-wire it. */
+const LeafLineRows = ({
+  moaCode, win, compWin, comparisonLabel, showComparison, indent,
+}: { moaCode: string; win: Win; compWin: Win; comparisonLabel: string; showComparison: boolean; indent: number }) => {
+  const padLeft = `${indent * 18 + 20}px`;
+  const subHeading = "pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60";
+  return (
+    <>
+      <tr className="border-b border-border/5">
+        <td colSpan={5} className={subHeading} style={{ paddingLeft: padLeft }}>This window — booked lines</td>
+      </tr>
+      <LeafLineBlock moaCode={moaCode} win={win} indent={indent} amountCol={2} />
+      {showComparison && (
+        <>
+          <tr className="border-b border-border/5">
+            <td colSpan={5} className={subHeading} style={{ paddingLeft: padLeft }}>{comparisonLabel} — booked lines</td>
+          </tr>
+          <LeafLineBlock moaCode={moaCode} win={compWin} indent={indent} amountCol={3} />
+        </>
+      )}
+    </>
+  );
+};
+
+// ------------------------------------------------------------- component
 
 export const PerformanceAnalysis = () => {
-  const { basis, win, py, winLabelText, pyLabelText, windowName, lastComplete, memoOn, setMemoOn } = useAlignment();
-  const { data: basisData, isLoading } = useBasisRows();
-  const { data: rec } = useRecurrence();
-  const { data: budgetRows } = useBudgetMonthly();
-  const { data: adjState } = useModelAdjustments();
-  const { data: collState } = useCollectionsMonthly();
-  const [cnDrillOpen, setCnDrillOpen] = useState(false);
-  const cnAudit = useCreditNoteAudit(cnDrillOpen);
+  const { win, py, preset, todayKey, windowName, comparisonMode, scope, includesOpenMonths } = useAlignment();
+  const { data: basisData, isLoading, error: basisError } = useBasisRows();
+  const { data: rec, error: recError } = useRecurrence();
+  const { data: budgetRowsAll, isLoading: budgetLoading } = useBudgetMonthly();
+  // Estimate layer (Marcello, 2026-10-01): actual warehouse rows + the
+  // shaped carry-forward/unbilled-outflow estimate rows, so every section
+  // row / subtotal / EBITDA / net result below already includes the
+  // estimated lines — buildTree/deriveSubtotals just sum `amount_sar`,
+  // unaware of provenance, except for the `isEstimate` marker they also now
+  // track (see buildTree below) so the table can show "est." inline.
+  const { data: estimateRows } = useEstimateBasisRows();
+  const rows = useMemo(() => mergeEstimateRows(basisData?.rows, estimateRows), [basisData, estimateRows]);
 
-  const rows = basisData?.rows;
-  const recLive = recurrenceIsLive(rows, rec);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (key: string) => setExpanded((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
 
-  // ---------------------------------------------------------- aggregates
-  const recCur = useMemo(() => aggregateRecurring(rows, basis, win, rec), [rows, basis, win, rec]);
-  const recPy = useMemo(() => aggregateRecurring(rows, basis, py, rec), [rows, basis, py, rec]);
-  // BOTH bases, current AND PY — the Strict-basis explainer chip (item 1) is
-  // DATA-CONDITIONED: it states the actual live relationship between the two
-  // bases' YoY, so it needs the full 2×2 (basis × period) grid.
-  const otherBasis: Basis = basis === "VALIDATED" ? "STRICT" : "VALIDATED";
-  const recCurOther = useMemo(() => aggregateRecurring(rows, otherBasis, win, rec), [rows, otherBasis, win, rec]);
-  const recPyOther = useMemo(() => aggregateRecurring(rows, otherBasis, py, rec), [rows, otherBasis, py, rec]);
-  const totCur = useMemo(() => aggregatePL(rows, basis, win), [rows, basis, win]);
-  const totPy = useMemo(() => aggregatePL(rows, basis, py), [rows, basis, py]);
-  const cnCur = useMemo(() => creditNotesInWin(rows, win), [rows, win]);
-  const cnPy = useMemo(() => creditNotesInWin(rows, py), [rows, py]);
-  // Collections (migration 032) — denominator of the CN/collections ratio (P5).
-  const collCur = useMemo(() => collectionsInWin(collState?.rows, win), [collState, win]);
-  const collPy = useMemo(() => collectionsInWin(collState?.rows, py), [collState, py]);
-  // Recurring-tagged memo adjustments only: the ladder from AS-BOOKED to the
-  // model's CLEAN recurring EBITDA (non-recurring memo rows sit elsewhere).
-  const ladder = useMemo(() => adjustmentLadder(adjState, win, "recurring"), [adjState, win]);
+  const mtdPro = useMemo(() => (preset === "MTD" ? computeMtdProration(todayKey) : null), [preset, todayKey]);
 
-  const recYoY = recCur && recPy ? pctChange(recCur.recRevenue, recPy.recRevenue) : null;
-  const recYoYOther = recCurOther && recPyOther ? pctChange(recCurOther.recRevenue, recPyOther.recRevenue) : null;
-  const totYoY = pctChange(totCur.revenue, totPy.revenue);
+  const actualTree = useMemo(() => buildTree(rows, win, scope, rec), [rows, win, scope, rec]);
+  const priorTreeRaw = useMemo(() => buildTree(rows, py, scope, rec), [rows, py, scope, rec]);
+  const priorTree = useMemo(() => (mtdPro ? scaleTree(priorTreeRaw, mtdPro.fraction) : priorTreeRaw), [priorTreeRaw, mtdPro]);
 
-  // ------------------------------------------------------------- bridge
-  const bridge = useMemo(() => {
-    if (!rows) return null;
-    const presetValidated = aggregatePL(rows, "VALIDATED", AS_DELIVERED_WIN);
-    const winValidated = aggregatePL(rows, "VALIDATED", win);
-    const winStrict = aggregatePL(rows, "STRICT", win);
-    return { presetValidated, winValidated, winStrict };
+  const budgetRowsForScope = useMemo(
+    () => (scope === "RECURRING" ? budgetRowsAll?.filter((r) => !isBudgetNonRecLine(r.moa_code)) : budgetRowsAll),
+    [budgetRowsAll, scope],
+  );
+  const budgetAggRaw = useMemo(() => aggregateBudgetWindow(budgetRowsForScope, win), [budgetRowsForScope, win]);
+  const budgetAgg = useMemo(() => (mtdPro ? prorateBudget(budgetAggRaw, mtdPro.fraction) : budgetAggRaw), [budgetAggRaw, mtdPro]);
+
+  const actualSub = useMemo(() => deriveSubtotals(actualTree), [actualTree]);
+  const priorSub = useMemo(() => deriveSubtotals(priorTree), [priorTree]);
+
+  const isBudgetMode = comparisonMode === "BUDGET";
+  const comparisonLabel = COMPARISON_LABELS[comparisonMode];
+  const budgetNaNote = isBudgetMode && !budgetAgg ? `No approved budget exists for ${windowName}.` : null;
+
+  const hasAnyData = rows && rows.length > 0;
+
+  // Empty-window honesty gates (2026-08-03 add-on) — a fully unfed window
+  // (typically a future calendar quarter) makes EVERY macro/subtotal row's
+  // actual (and, symmetrically, a fully unfed PY window's comparison) render
+  // "—" instead of the fabricated 0 `buildTree`/`deriveSubtotals` naturally
+  // produce for a window with zero matching rows.
+  const noActualData = useMemo(() => monthsCoveredInWin(rows, win) === 0, [rows, win]);
+  const noPriorData = useMemo(() => monthsCoveredInWin(rows, py) === 0, [rows, py]);
+  const noDataNote = noActualData
+    ? `No data posted yet for ${windowName} — every line below shows "—" until this period is fed.`
+    : null;
+
+  // ---------------------------------------------------- By Business Unit chart
+  //
+  // 2026-08-08, CEO mandate (Marcello) — a graphical Revenue/Gross Margin
+  // view per business unit, stopping at Gross Margin (OPEX below it is 100%
+  // bu="CORP" by MoA design — see BuRevenueGrossMarginChart.tsx's header for
+  // the full reasoning and why an EBITDA-per-BU row must NOT be fabricated
+  // here later without a real indirect-cost allocation first).
+  //
+  // scopedRows mirrors buildTree's own inline scope filter exactly (same
+  // predicate, same `resolveRecurrence` call) so aggregatePL's per-BU sums
+  // are computed over the IDENTICAL row set actualTree/priorTree already
+  // are — this is what makes the chart reconcile to the cent with the table
+  // below, not a separate re-derivation that could quietly drift from it.
+  const scopedRows = useMemo(() => {
+    if (!rows) return rows;
+    if (scope !== "RECURRING") return rows;
+    return rows.filter((r) => resolveRecurrence(r, rec) !== "non-recurring");
+  }, [rows, scope, rec]);
+
+  const buChartData = useMemo((): BuChartDatum[] => {
+    // Gate on the table's OWN whole-company flags, not a per-BU recompute:
+    // Competitions/Private Events have zero moa_gestionale COGS accounts (a
+    // real MoA gap, not a bug — see the Gross Margin family explosion
+    // comment above), so their Gross Margin legitimately equals 100% of
+    // their Revenue every time the company-wide gate is open. Gating each BU
+    // on its own hasCogs would wrongly blank those two out and disagree with
+    // the table's own family rows for the identical window.
+    const revenueHasData = sectionHasData(actualTree, "Revenue");
+    const revenueHasDataP = sectionHasData(priorTree, "Revenue");
+    return REVENUE_BUS.map(({ bu, buName }) => {
+      const actualAgg = aggregatePL(scopedRows, "STRICT", win, bu);
+      const priorAggRaw = aggregatePL(scopedRows, "STRICT", py, bu);
+      const priorAgg = mtdPro ? prorateAgg(priorAggRaw, mtdPro.fraction) : priorAggRaw;
+      const budgetAggBuRaw = isBudgetMode ? aggregateBudgetWindow(budgetRowsForScope, win, bu) : null;
+      const budgetAggBu = mtdPro && budgetAggBuRaw ? prorateBudget(budgetAggBuRaw, mtdPro.fraction) : budgetAggBuRaw;
+
+      const revenueActual = noActualData || !revenueHasData ? null : actualAgg.revenue;
+      const revenueComparison = isBudgetMode
+        ? (budgetAggBu?.revenue ?? null)
+        : (noPriorData || !revenueHasDataP ? null : priorAgg.revenue);
+
+      const gmActual = noActualData || !actualSub.hasGrossMargin ? null : actualAgg.grossMargin;
+      // Budget doesn't allocate COGS by BU (verified against v_budget_monthly,
+      // 2026-08-08 — see BuRevenueGrossMarginChart's gmBudgetNote) — never
+      // show a Budget Gross Margin per BU, it would silently read as ~100%
+      // margin for every real BU.
+      const gmComparison = isBudgetMode
+        ? null
+        : (noPriorData || !priorSub.hasGrossMargin ? null : priorAgg.grossMargin);
+
+      return { bu, buName, revenueActual, revenueComparison, gmActual, gmComparison };
+    });
+  }, [scopedRows, win, py, mtdPro, isBudgetMode, budgetRowsForScope, noActualData, noPriorData, actualTree, priorTree, actualSub, priorSub]);
+
+  // Project-Costs (Leveredge/F&F) months missing within the CURRENT window
+  // — same per-month scan `deriveCompleteness` runs globally in
+  // data/alignment.ts, just scoped to `win` so the note below only talks
+  // about months actually in view. Revenue>0 gates it to real, fed months
+  // (mirrors the tpcByMonth/revByMonth logic used for the retired
+  // completeness banner, kept local here for the same reason
+  // monthsCoveredInWin is local — see its comment above).
+  const missingLevMonths = useMemo(() => {
+    if (!rows) return [];
+    const revByMonth = new Map<string, number>();
+    const tpcByMonth = new Map<string, number>();
+    for (const r of rows) {
+      const k = monthKey(r.period_month);
+      if (!inWin(k, win)) continue;
+      if (r.section === "Revenue" && r.source !== "credit_note") revByMonth.set(k, (revByMonth.get(k) ?? 0) + r.amount_sar);
+      if (r.section === "Project-Costs") tpcByMonth.set(k, (tpcByMonth.get(k) ?? 0) + Math.abs(r.amount_sar));
+    }
+    return [...revByMonth.keys()].filter((k) => (revByMonth.get(k) ?? 0) > 0 && (tpcByMonth.get(k) ?? 0) === 0);
   }, [rows, win]);
 
-  // ------------------------------------------------------ per-BU (P4)
-  const buTable = useMemo(() => {
-    if (!rows || !recLive) return null;
-    const acc = new Map<string, { cur: number; py: number }>();
-    for (const r of rows) {
-      if (r.section !== "Revenue") continue;
-      if (basis === "VALIDATED" && r.source === "credit_note") continue;
-      const rc = resolveRecurrence(r, rec);
-      if (rc === "non-recurring") continue; // recurring perimeter (validated DRIFT tags)
-      const k = monthKey(r.period_month);
-      const b = r.bu ?? "—";
-      const slot = acc.get(b) ?? { cur: 0, py: 0 };
-      if (k >= win.startKey && k <= win.endKey) slot.cur += r.amount_sar;
-      if (k >= py.startKey && k <= py.endKey) slot.py += r.amount_sar;
-      acc.set(b, slot);
+  // Partial-window honesty note (2026-08-04, owner-audit #3/#4): the window
+  // itself has SOME data (revenue live), but at least one cost section
+  // hasn't been posted yet, so EBITDA/EBITDA (reported)/EBIT/Net income are
+  // not yet computable — mirrors Cash Flow's equivalent banner so the same
+  // "figures aren't final for an open period" signal appears in both places.
+  // fix-31 (2026-08-04, Marcello — CEO facts on the Leveredge/F&F gap):
+  // when Project-Costs is specifically the (only) blocker — the common
+  // case today — name it and say why per month, instead of the generic
+  // "some cost lines" wording, which read as an unexplained data error.
+  // Gated to scope === "ALL": every Project-Costs leaf is non-recurring by
+  // definition, so "Only Recurring" scope always reads Project-Costs as
+  // empty regardless of booking status — that's the filter working as
+  // designed, not a gap, and must not be mislabeled as one. (The generic
+  // fallback below still fires as before in that scope — pre-existing
+  // behaviour, unchanged by this fix, not specific to Leveredge/F&F.)
+  // Also fires when hasEbitdaReported is already TRUE but the window still
+  // has missing months: Project-Costs having ANY data anywhere in a
+  // multi-month window (e.g. Jan-Apr booked) makes the coarse whole-window
+  // gate pass and print a real number for EBITDA (reported) — a number
+  // that silently under-counts the still-missing months. Surfacing that
+  // here (as a caveat on a real number, wording adjusted accordingly) is a
+  // strict honesty improvement — it changes no computed figure.
+  const partialDataNote = useMemo(() => {
+    if (noActualData || isBudgetMode) return null;
+    if (scope === "ALL" && actualSub.hasEbitda5 && missingLevMonths.length > 0) {
+      const suffix = actualSub.hasEbitdaReported
+        ? "figures below include only the months posted so far — EBITDA (reported) / EBIT / Net income are understated until the rest is booked."
+        : 'EBITDA (reported) / EBIT / Net income show "—" until booked.';
+      return `Project costs (Leveredge/F&F) not fully posted for ${windowName} — ${levGapSummary(missingLevMonths)}. ${suffix}`;
     }
-    return [...acc.entries()]
-      .map(([bu, v]) => ({ bu, label: LIVE_BU_LABELS[bu] ?? bu, ...v, yoy: pctChange(v.cur, v.py) }))
-      .filter((r) => Math.abs(r.cur) > 0.5 || Math.abs(r.py) > 0.5)
-      .sort((a, b) => b.cur - a.cur);
-  }, [rows, rec, recLive, basis, win, py]);
+    if (actualSub.hasEbitdaReported) {
+      // 2026-10-01 (run-rate follow-up): every family that's still missing
+      // its actual IS now covered by an estimate (that's exactly what
+      // flips hasEbitdaReported true below without touching the gate
+      // itself — see deriveSubtotals, unchanged) — so a real, estimate-
+      // inclusive number IS showing. Say so instead of staying silent,
+      // whenever this window actually contains an estimated line.
+      return actualSub.isEstimateEbitdaReported
+        ? "Includes estimates for costs not yet booked — figures update automatically as invoices and payroll are posted."
+        : null;
+    }
+    return `Some cost lines are not fully posted yet for ${windowName} — EBITDA / EBITDA (reported) / EBIT / Net income show "—" until costs are booked.`;
+  }, [noActualData, isBudgetMode, actualSub, missingLevMonths, windowName, scope]);
 
-  // --------------------------------------------------- fiscal quarters (P7)
-  const quarters = useMemo(() => {
-    if (!rows || !recLive) return null;
-    // FY containing the window end (fiscal year starts June). If fewer than
-    // 3 months of that FY have elapsed, show the PREVIOUS fiscal year — a
-    // quarter chart with one elapsed month answers nothing.
-    const [y, m] = win.endKey.split("-").map(Number);
-    let fyStart = m >= 6 ? `${y}-06` : `${y - 1}-06`;
-    const elapsed = (Number(win.endKey.slice(0, 4)) * 12 + Number(win.endKey.slice(5, 7))) -
-      (Number(fyStart.slice(0, 4)) * 12 + Number(fyStart.slice(5, 7))) + 1;
-    if (elapsed < 3) fyStart = shiftMonthKey(fyStart, -12);
-    return fiscalQuarters(fyStart).map((q) => {
-      const cur = aggregateRecurring(rows, basis, q.win, rec);
-      const prior = aggregateRecurring(rows, basis, pyWin(q.win), rec);
-      return {
-        label: `${q.label} (${winLabel(q.win)})`,
-        short: q.label,
-        cur: cur?.recRevenue ?? 0,
-        py: prior?.recRevenue ?? 0,
-        future: q.win.startKey > lastComplete,
-      };
+  // ------------------------------------------------------------ row build
+  //
+  // 4 levels, in exact canonical MoA order (data/moaTree.ts's MOA_PL_LEAVES
+  // order — the same order the zero-diff verification script checks):
+  //   0 = macro section / subtotal
+  //   1 = family (L2 BU — Livery, Horse School, Membership, Events, B2B,
+  //       Competitions, Retail, Corporate)
+  //   2 = cluster (L3)
+  //   3 = leaf (L4, moa_code) — `codeTag` carries the code as a subtle
+  //       secondary tag, never the primary label (Marcello's explicit rule:
+  //       human-readable name first, code only as a small secondary tag).
+  //
+  // actualTree and priorTree are built from the IDENTICAL canonical leaf
+  // list (see buildTree), so they share the exact same families/clusters in
+  // the exact same order — every row below is walked once, by index, off
+  // the actual tree, with the matching prior node picked up alongside it.
+  // No runtime union, no per-branch filtering: every family/cluster/leaf the
+  // MoA defines for a section renders, every time, per Marcello's mandate
+  // ("voglio vedere ogni riga e sottoriga di foglia") — a window with zero
+  // rows still shows the full tree at 0 (or "—" under the honesty gate).
+  // `drillMoaCode`: set only on genuine leaf-equivalent rows (tree leaves
+  // and the below-EBIT statutory lines) — fix-24 follow-up (2026-08-04,
+  // Marcello — "voglio arrivare all'ultima foglia e vedere cosa c'e'
+  // dentro"). When set and `expanded`, LeafLineRows renders the real
+  // booked lines behind this exact moa_code for the current window right
+  // after this row. Distinct from tree expansion (`fam:`/`clu:`/`sec:` keys)
+  // — leaves now DO carry a chevron, but it reveals real transaction detail,
+  // never a copy of the leaf itself (rule 2 is about redundant tree nodes,
+  // not this).
+  // `indent` widened from the original `0 | 1 | 2 | 3` to `number`: the OpEx
+  // recurring/non-recurring split (2026-08-08) nests the existing
+  // section->family->cluster->leaf rendering one level deeper (under its own
+  // "Operating costs — Recurring/Non-recurring" header), so the theoretical
+  // (today unreached — see `sectionFamilySlots`'s comment) family-then-
+  // cluster-then-leaf case for a single OpEx section can reach depth 4.
+  interface Row { indent: number; keyPath: string; label: string; codeTag?: string; actual: number | null; comparison: number | null; expandable: boolean; expanded: boolean; onToggle?: () => void; subtotal?: boolean; emphasis?: boolean; drillMoaCode?: string; isEstimate?: boolean }
+
+  // ------------------------------------------------- OpEx recurring split
+  //
+  // 2026-08-08, CEO mandate (Marcello, literal request): "prima tutta la
+  // parte di corrente, splittata... poi la non corrente, splittata...
+  // ovviamente senza duplicazioni" — within the operating-costs portion of
+  // this table, show the RECURRING block (exploded into its components)
+  // FIRST, then the NON-RECURRING block (exploded into its components), each
+  // with its own subtotal, tying to the existing "Total operating expenses"
+  // subtotal with no line counted twice.
+  //
+  // Reads recurrence from the DATA (`resolveRecurrence`, the same function/
+  // policy the "Only Recurring" scope toggle already uses) — this component
+  // does not classify a single row itself. A separate track owns the
+  // recurring/non-recurring CLASSIFICATION in the warehouse; this is
+  // presentation only.
+  //
+  // Budget comparison mode is explicitly OUT of scope for the split: budget
+  // has no recurring/non-recurring breakdown at OpEx-section granularity
+  // (only a coarse 2-pattern non-recurring-PROJECT-line rule elsewhere in
+  // this file, `isBudgetNonRecLine`, which doesn't reach GA/MS/People
+  // sub-splits) — inventing one here would be exactly the kind of frontend-
+  // side rule the mandate says not to invent. Budget mode keeps the
+  // pre-existing single-row-per-section rendering unchanged (same "Detail
+  // limited to budget granularity" note already shown above the table).
+  const recurringOpexTree = useMemo(() => buildTree(rows, win, scope, rec, "recurring"), [rows, win, scope, rec]);
+  const nonRecurringOpexTree = useMemo(() => buildTree(rows, win, scope, rec, "non-recurring"), [rows, win, scope, rec]);
+  const recurringOpexTreePriorRaw = useMemo(() => buildTree(rows, py, scope, rec, "recurring"), [rows, py, scope, rec]);
+  const nonRecurringOpexTreePriorRaw = useMemo(() => buildTree(rows, py, scope, rec, "non-recurring"), [rows, py, scope, rec]);
+  const recurringOpexTreePrior = useMemo(
+    () => (mtdPro ? scaleTree(recurringOpexTreePriorRaw, mtdPro.fraction) : recurringOpexTreePriorRaw),
+    [recurringOpexTreePriorRaw, mtdPro],
+  );
+  const nonRecurringOpexTreePrior = useMemo(
+    () => (mtdPro ? scaleTree(nonRecurringOpexTreePriorRaw, mtdPro.fraction) : nonRecurringOpexTreePriorRaw),
+    [nonRecurringOpexTreePriorRaw, mtdPro],
+  );
+
+  const OPEX_SECTIONS: PLSection[] = ["OPEX-GA", "OPEX-MS", "OPEX-People"];
+  const opexSectionLabel = (s: PLSection): string => MACRO_ROWS.find((m) => m.key === s)?.label ?? s;
+
+  /** Renders one OpEx functional section (GA/MS/People) — and, if expanded,
+   * its family/cluster/leaf children — reading AMOUNTS from the supplied
+   * curTree/priorTree (a recurrence-split tree) but reading its "absent ≠
+   * zero" coverage gate from the page's own UNSPLIT actualTree/priorTree.
+   * Deliberate: a section with zero rows in ONE recurrence bucket (e.g. no
+   * non-recurring G&A this month) is a legitimate real zero, not missing
+   * data, as long as the section itself has been fed for the window — gating
+   * on the split tree's own (necessarily sparser) coverage would wrongly
+   * dash out a real, computable 0 any time a functional section happened to
+   * be 100% one-sided. Same section-level granularity the pre-existing
+   * Revenue/COGS/D&A rows already use (see `curSectionHasData` a few
+   * hundred lines below, identical `sectionHasData(actualTree, section)`
+   * call) — extended here, not reinvented. Called twice (once per
+   * recurrence bucket) by the OpEx block below. Every key is prefixed with
+   * `keyPrefix` so the two renders of the SAME section (e.g. OPEX-GA
+   * appears once under Recurring, once under Non-recurring) never collide
+   * in the `expanded` Set or as a React row key — the two rows show
+   * genuinely different amounts for the same moa_code, never a duplicate. */
+  const pushOpexSectionRows = (
+    out: Row[],
+    keyPrefix: string,
+    section: PLSection,
+    label: string,
+    curSplitTree: Map<PLSection, SectionTree>,
+    priorSplitTree: Map<PLSection, SectionTree>,
+  ) => {
+    // Coverage gate reads the page's own UNSPLIT actualTree/priorTree (not
+    // curSplitTree/priorSplitTree) — see the function comment above.
+    const curSectionHasData = sectionHasData(actualTree, section);
+    const priorSectionHasData = sectionHasData(priorTree, section);
+    const gated = (curTotal: number, priorTotal: number, isEstimate = false) => ({
+      actual: noActualData || !curSectionHasData ? null : curTotal,
+      comparison: noPriorData || !priorSectionHasData ? null : priorTotal,
+      isEstimate,
     });
-  }, [rows, rec, recLive, basis, win, lastComplete]);
-
-  const ytd = useMemo(() => {
-    if (!rows || !recLive) return null;
-    const yr = lastComplete.slice(0, 4);
-    const w: Win = { startKey: `${yr}-01`, endKey: lastComplete };
-    const cur = aggregateRecurring(rows, basis, w, rec);
-    const prior = aggregateRecurring(rows, basis, pyWin(w), rec);
-    return cur && prior ? { w, cur: cur.recRevenue, py: prior.recRevenue, yoy: pctChange(cur.recRevenue, prior.recRevenue) } : null;
-  }, [rows, rec, recLive, basis, lastComplete]);
-
-  // ------------------------------------------------------- budget (P8)
-  const budgetStory = useMemo(() => {
-    if (!budgetRows) return null;
-    const hist = aggregateBudgetWindow(budgetRows, AS_DELIVERED_WIN);
-    if (!rows || !hist) return null;
-    const actualHistValidated = aggregatePL(rows, "VALIDATED", AS_DELIVERED_WIN);
-    const recHist = aggregateRecurring(rows, "VALIDATED", AS_DELIVERED_WIN, rec);
-    // Budget recurring = revenue excl. the DRIFT line (COMP-IA*).
-    let drift = 0;
-    for (const r of budgetRows) {
-      const k = monthKey(r.period_month);
-      if (k < AS_DELIVERED_WIN.startKey || k > AS_DELIVERED_WIN.endKey) continue;
-      if (r.section === "Revenue" && r.moa_code.startsWith("COMP-IA")) drift += r.budget_amount_sar;
-    }
-    // Forward: first forward month, H2-26 (Jul→Dec-26), FY27.
-    const forwardMonths = [...budgetMonthsSetLocal(budgetRows)].filter((m) => m > lastComplete).sort();
-    const firstFwd = forwardMonths[0];
-    const fwdFirst = firstFwd ? aggregateBudgetWindow(budgetRows, { startKey: firstFwd, endKey: firstFwd }) : null;
-    const fwdYear = firstFwd ? firstFwd.slice(0, 4) : null;
-    const h2 = fwdYear ? aggregateBudgetWindow(budgetRows, { startKey: firstFwd!, endKey: `${fwdYear}-12` }) : null;
-    const nextYear = fwdYear ? String(Number(fwdYear) + 1) : null;
-    const fy27 = nextYear ? aggregateBudgetWindow(budgetRows, { startKey: `${nextYear}-01`, endKey: `${nextYear}-12` }) : null;
-    return {
-      hist, drift, histRecBudget: hist.revenue - drift,
-      actualHistValidated, recHist,
-      firstFwd, fwdFirst, h2, fy27, fwdYear, nextYear,
-    };
-  }, [budgetRows, rows, rec, lastComplete]);
-
-  // --------------------------------------- budget vintages strip (P8/DB-6)
-  const { data: allBudgetRows } = useBudgetAllVersions();
-  const vintageStrip = useMemo(() => {
-    if (!allBudgetRows || allBudgetRows.length === 0) return [];
-    const byVersion = new Map<string, { revenue: number; minKey: string }>();
-    for (const r of allBudgetRows) {
-      if (r.section !== "Revenue") continue;
-      const slot = byVersion.get(r.version_id) ?? { revenue: 0, minKey: "9999-99" };
-      slot.revenue += r.budget_amount_sar;
-      const k = monthKey(r.period_month);
-      if (k < slot.minKey) slot.minKey = k;
-      byVersion.set(r.version_id, slot);
-    }
-    const label = (id: string): string => {
-      if (/-V1-/.test(id)) return "V1 original";
-      if (/-V2-/.test(id)) return "V2 revised Dec-May";
-      if (/APPROVED/.test(id)) return "Approved forward";
-      return "Deck blend";
-    };
-    return [...byVersion.entries()]
-      .map(([id, v]) => ({ id, label: label(id), revenue: v.revenue, minKey: v.minKey, isDefault: !/-V\d+-/.test(id) }))
-      .sort((a, b) => (/-V1-/.test(a.id) ? 0 : /-V2-/.test(a.id) ? 1 : /APPROVED/.test(a.id) ? 3 : 2) - (/-V1-/.test(b.id) ? 0 : /-V2-/.test(b.id) ? 1 : /APPROVED/.test(b.id) ? 3 : 2));
-  }, [allBudgetRows]);
-
-  // ----------------------------------------------------- multi-year (P9)
-  const multiYear = useMemo(() => {
-    if (!rows) return [];
-    const years = [...new Set(factMonths(rows).map((m) => m.slice(0, 4)))].sort();
-    return years.map((y) => {
-      const w: Win = { startKey: `${y}-01`, endKey: `${y}-12` };
-      const agg = aggregatePL(rows, basis, w);
-      const recAgg = recLive ? aggregateRecurring(rows, basis, w, rec) : null;
-      const partial = `${y}-12` > lastComplete;
-      return {
-        year: partial ? `${y}*` : y,
-        revenue: recAgg ? recAgg.recRevenue : agg.revenue,
-        ebitda: agg.ebitda5,
-        partial,
-      };
+    const curFamilies = curSplitTree.get(section)!.families;
+    const priorFamilies = priorSplitTree.get(section)!.families;
+    const curSlots = sectionFamilySlots(curFamilies);
+    const sectionKey = `${keyPrefix}:sec:${section}`;
+    const canExpand = curSlots.length > 0;
+    out.push({
+      indent: 1, keyPath: sectionKey, label,
+      ...gated(sectionTotal(curSplitTree, section), sectionTotal(priorSplitTree, section), sectionIsEstimate(curSplitTree, section)),
+      expandable: canExpand, expanded: canExpand && expanded.has(sectionKey),
+      onToggle: canExpand ? () => toggle(sectionKey) : undefined,
     });
-  }, [rows, basis, rec, recLive, lastComplete]);
+    if (!canExpand || !expanded.has(sectionKey)) return;
+    const soleBu = curFamilies.length === 1 ? curFamilies[0].bu : null;
+    for (const slot of curSlots) {
+      if (slot.kind === "leaf") {
+        const leafP = findLeafInFamilies(priorFamilies, slot.leaf.moaCode);
+        const lineKey = `${keyPrefix}:line:${slot.leaf.moaCode}`;
+        out.push({
+          indent: 2, keyPath: `${keyPrefix}:${slot.leaf.moaCode}`, label: slot.leaf.leafName, codeTag: slot.leaf.moaCode,
+          ...gated(slot.leaf.total, leafP?.total ?? 0, slot.leaf.isEstimate),
+          expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+          drillMoaCode: slot.leaf.moaCode,
+        });
+        continue;
+      }
+      if (slot.kind === "cluster") {
+        const bu = soleBu!; // a cluster/leaf slot only appears here when the section has exactly one family
+        const cluExpandKey = `${keyPrefix}:clu:${section}::${bu}::${slot.cluster.clusterCode}`;
+        const priorClu = findClusterInFamilies(priorFamilies, bu, slot.cluster.clusterCode);
+        out.push({
+          indent: 2, keyPath: cluExpandKey, label: slot.cluster.clusterName,
+          ...gated(slot.cluster.total, priorClu?.total ?? 0, slot.cluster.isEstimate),
+          expandable: true, expanded: expanded.has(cluExpandKey), onToggle: () => toggle(cluExpandKey),
+        });
+        if (!expanded.has(cluExpandKey)) continue;
+        for (const leaf of slot.cluster.leaves) {
+          const leafP = priorClu?.leaves.find((l) => l.moaCode === leaf.moaCode);
+          const lineKey = `${keyPrefix}:line:${leaf.moaCode}`;
+          out.push({
+            indent: 3, keyPath: `${keyPrefix}:${leaf.moaCode}`, label: leaf.leafName, codeTag: leaf.moaCode,
+            ...gated(leaf.total, leafP?.total ?? 0, leaf.isEstimate),
+            expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+            drillMoaCode: leaf.moaCode,
+          });
+        }
+        continue;
+      }
+      // slot.kind === "family" — defensive completeness only: today every
+      // OPEX-GA/OPEX-MS/OPEX-People leaf is bu=CORP by MoA design (see
+      // sectionFamilySlots's own comment above), so this branch never
+      // actually fires; implemented in full anyway so a future MoA change
+      // can't silently drop leaves under this block (mandate: every leaf
+      // always renders).
+      const fam = slot.family;
+      const famExpandKey = `${keyPrefix}:fam:${section}::${fam.bu}`;
+      const famP = findFamilyByBu(priorFamilies, fam.bu);
+      const famSlotsArr = familySlots(fam);
+      const canExpandFam = famSlotsArr.length > 0;
+      out.push({
+        indent: 2, keyPath: famExpandKey, label: fam.buName,
+        ...gated(fam.total, famP?.total ?? 0, fam.isEstimate),
+        expandable: canExpandFam, expanded: expanded.has(famExpandKey),
+        onToggle: canExpandFam ? () => toggle(famExpandKey) : undefined,
+      });
+      if (!canExpandFam || !expanded.has(famExpandKey)) continue;
+      for (const fs of famSlotsArr) {
+        if (fs.kind === "leaf") {
+          const leafP = famP ? findLeafInFamilies([famP], fs.leaf.moaCode) : undefined;
+          const lineKey = `${keyPrefix}:line:${fs.leaf.moaCode}`;
+          out.push({
+            indent: 3, keyPath: `${keyPrefix}:${fs.leaf.moaCode}`, label: fs.leaf.leafName, codeTag: fs.leaf.moaCode,
+            ...gated(fs.leaf.total, leafP?.total ?? 0, fs.leaf.isEstimate),
+            expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+            drillMoaCode: fs.leaf.moaCode,
+          });
+          continue;
+        }
+        const cluExpandKey = `${keyPrefix}:clu:${section}::${fam.bu}::${fs.cluster.clusterCode}`;
+        const priorClu = famP?.clusters.find((c) => c.clusterCode === fs.cluster.clusterCode);
+        out.push({
+          indent: 3, keyPath: cluExpandKey, label: fs.cluster.clusterName,
+          ...gated(fs.cluster.total, priorClu?.total ?? 0, fs.cluster.isEstimate),
+          expandable: true, expanded: expanded.has(cluExpandKey), onToggle: () => toggle(cluExpandKey),
+        });
+        if (!expanded.has(cluExpandKey)) continue;
+        for (const leaf of fs.cluster.leaves) {
+          const leafP = priorClu?.leaves.find((l) => l.moaCode === leaf.moaCode);
+          const lineKey = `${keyPrefix}:line:${leaf.moaCode}`;
+          out.push({
+            indent: 4, keyPath: `${keyPrefix}:${leaf.moaCode}`, label: leaf.leafName, codeTag: leaf.moaCode,
+            ...gated(leaf.total, leafP?.total ?? 0, leaf.isEstimate),
+            expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+            drillMoaCode: leaf.moaCode,
+          });
+        }
+      }
+    }
+  };
 
-  const hasDriftInPy = (recPy?.nonRecRevenue ?? 0) !== 0;
+  const tableRows = useMemo((): Row[] => {
+    const out: Row[] = [];
+    for (const m of MACRO_ROWS) {
+      // OpEx recurring/non-recurring split (2026-08-08, CEO mandate) — see
+      // the block comment above `pushOpexSectionRows`. Intercepts the 3
+      // functional OpEx macro rows (OPEX-GA/OPEX-MS/OPEX-People) and, in
+      // place of their normal single-row rendering, injects two subtotal
+      // groups — "Operating costs — Recurring" then "Operating costs —
+      // Non-recurring", each exploded into the SAME 3 functional sections —
+      // built from `recurringOpexTree`/`nonRecurringOpexTree`, a strict
+      // partition of the identical row set the unmodified "Total operating
+      // expenses" subtotal below still sums from `actualTree`/`actualSub`
+      // (untouched) — so the two new subtotals always add up to that
+      // existing total, no line counted in both. Skipped in Budget mode
+      // (budget has no recurring split at this granularity — see the
+      // "Detail limited to budget granularity" note already shown above the
+      // table): OPEX-GA/MS/People fall through to their pre-existing
+      // single-row rendering unchanged there.
+      if (m.key === "OPEX-GA" && !isBudgetMode) {
+        // Coverage gate for BOTH group subtotals reuses `actualSub.hasOpexTotal`
+        // / `priorSub.hasOpexTotal` — the SAME flag the pre-existing "Total
+        // operating expenses" row below already gates on (all 3 functional
+        // sections fed, regardless of recurring/non-recurring tag). NOT a
+        // split-tree-specific coverage check: a recurrence bucket that's
+        // genuinely empty for one or two functional sections (e.g. zero
+        // non-recurring G&A this month) is a real zero, not missing data —
+        // gating on the split tree's own sparser coverage would wrongly dash
+        // out a real, computable total any time a bucket happened to be
+        // one-sided (caught in QA: PY Marketing & Sales non-recurring
+        // (604,075) was present but the group total still showed "—"
+        // because G&A/People had zero PY non-recurring rows — fixed by
+        // reusing this shared gate instead).
+        const recTotal = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(recurringOpexTree, sec), 0);
+        const recTotalP = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(recurringOpexTreePrior, sec), 0);
+        const recIsEstimate = OPEX_SECTIONS.some((sec) => sectionIsEstimate(recurringOpexTree, sec));
+        out.push({
+          indent: 0, keyPath: "OpexRecurring", label: "Operating costs — Recurring",
+          actual: noActualData || !actualSub.hasOpexTotal ? null : recTotal,
+          comparison: noPriorData || !priorSub.hasOpexTotal ? null : recTotalP,
+          expandable: false, expanded: false, subtotal: true, isEstimate: recIsEstimate,
+        });
+        for (const sec of OPEX_SECTIONS) {
+          pushOpexSectionRows(out, "rec", sec, opexSectionLabel(sec), recurringOpexTree, recurringOpexTreePrior);
+        }
+
+        // 2026-10-01 (partner decision — Recurring-scope P&L): in Recurring
+        // scope the non-recurring OpEx split is not shown at all — a
+        // "Recurring P&L" means recurring lines only, not recurring AND
+        // non-recurring broken out side by side. Only the ALL scope keeps
+        // showing both groups (unchanged pre-existing behaviour).
+        if (scope === "ALL") {
+          const nonRecTotal = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(nonRecurringOpexTree, sec), 0);
+          const nonRecTotalP = OPEX_SECTIONS.reduce((s, sec) => s + sectionTotal(nonRecurringOpexTreePrior, sec), 0);
+          const nonRecIsEstimate = OPEX_SECTIONS.some((sec) => sectionIsEstimate(nonRecurringOpexTree, sec));
+          out.push({
+            indent: 0, keyPath: "OpexNonRecurring", label: "Operating costs — Non-recurring",
+            actual: noActualData || !actualSub.hasOpexTotal ? null : nonRecTotal,
+            comparison: noPriorData || !priorSub.hasOpexTotal ? null : nonRecTotalP,
+            expandable: false, expanded: false, subtotal: true, isEstimate: nonRecIsEstimate,
+          });
+          for (const sec of OPEX_SECTIONS) {
+            pushOpexSectionRows(out, "nonrec", sec, opexSectionLabel(sec), nonRecurringOpexTree, nonRecurringOpexTreePrior);
+          }
+        }
+        continue;
+      }
+      if ((m.key === "OPEX-MS" || m.key === "OPEX-People") && !isBudgetMode) {
+        continue; // already rendered above as part of the OPEX-GA recurring/non-recurring block
+      }
+
+      // 2026-10-01 (partner decision): Recurring scope shows Revenue, COGS,
+      // Gross margin, Operating costs — Recurring, Recurring EBITDA, D&A,
+      // Recurring EBIT as the bottom line — nothing below that. Project
+      // costs (Leveredge's own fee, non-recurring by definition),
+      // "EBITDA (reported)", the below-EBIT NON-OP statutory lines and Net
+      // income are all specific to the full statutory P&L and are skipped
+      // entirely in this scope, not just hidden behind a toggle — the ALL
+      // scope renders every one of them exactly as before, unchanged.
+      if (scope === "RECURRING" && ["Project-Costs", "EBITDAReported", "NonOpFin", "NonOpGains", "Zakat", "NetResult"].includes(m.key)) {
+        continue;
+      }
+      const recurringLabel = scope === "RECURRING"
+        ? (m.key === "EBITDA5" ? "Recurring EBITDA" : m.key === "EBIT" ? "Recurring EBIT" : m.label)
+        : m.label;
+      const rawActual = (scope === "RECURRING" && m.key === "EBIT") ? actualSub.recurringEbit : macroValue(m.key, actualTree, actualSub);
+      const rawComparison = isBudgetMode
+        ? budgetValueFor(m.key, budgetAgg)
+        : (scope === "RECURRING" && m.key === "EBIT") ? priorSub.recurringEbit : macroValue(m.key, priorTree, priorSub);
+      // "Absent ≠ zero" (2026-08-04, owner-audit #3/#4): a row backed by zero
+      // posted warehouse rows renders "—", not a fabricated 0 — whether the
+      // WHOLE window is unfed (noActualData/noPriorData) or just this row's
+      // underlying section/subtotal hasn't been booked yet (macroHasData).
+      const recurringEbitActive = scope === "RECURRING" && m.key === "EBIT";
+      const actual = noActualData || !(recurringEbitActive ? actualSub.hasRecurringEbit : macroHasData(m.key, actualTree, actualSub)) ? null : rawActual;
+      const comparison = isBudgetMode
+        ? rawComparison
+        : (noPriorData || !(recurringEbitActive ? priorSub.hasRecurringEbit : macroHasData(m.key, priorTree, priorSub)) ? null : rawComparison);
+      const macroIsEstimateActive = recurringEbitActive ? actualSub.isEstimateRecurringEbit : macroIsEstimate(m.key, actualTree, actualSub);
+
+      // Gross margin family explosion (fix-24, rule 5): family revenue -
+      // family direct costs, one row per revenue family, ties to the macro
+      // Gross margin total by construction (same underlying family totals,
+      // just regrouped) — disabled in Budget mode, same as every other
+      // MoA-granularity drill on this table.
+      if (m.key === "GrossMargin") {
+        const gmExpandKey = "gm:family";
+        const revFamilies = actualTree.get("Revenue")!.families; // canonical order — same as the Revenue row's own expansion
+        const canExpandGM = !isBudgetMode && revFamilies.length > 0;
+        out.push({
+          indent: 0, keyPath: "GrossMargin", label: m.label, actual, comparison,
+          expandable: canExpandGM,
+          expanded: canExpandGM && expanded.has(gmExpandKey),
+          onToggle: canExpandGM ? () => toggle(gmExpandKey) : undefined,
+          subtotal: m.subtotal, emphasis: m.emphasis, isEstimate: actualSub.isEstimateGrossMargin,
+        });
+        if (canExpandGM && expanded.has(gmExpandKey)) {
+          const cogsFamilies = actualTree.get("COGS")!.families;
+          const revFamiliesP = priorTree.get("Revenue")!.families;
+          const cogsFamiliesP = priorTree.get("COGS")!.families;
+          for (const revFam of revFamilies) {
+            // Not every revenue family has a COGS counterpart — Competitions
+            // and Private Events have zero moa_gestionale COGS accounts
+            // today (verified 2026-08-04: no B2B/EVT/COMP placeholder
+            // exists), which is a real MoA-completeness gap, not a bug —
+            // their family margin is correctly 100% of revenue, never a
+            // fabricated cost.
+            const cogsFam = findFamilyByBu(cogsFamilies, revFam.bu);
+            const revFamP = findFamilyByBu(revFamiliesP, revFam.bu);
+            const cogsFamP = findFamilyByBu(cogsFamiliesP, revFam.bu);
+            const famGmActual = revFam.total + (cogsFam?.total ?? 0);
+            const famGmPrior = (revFamP?.total ?? 0) + (cogsFamP?.total ?? 0);
+            out.push({
+              indent: 1, keyPath: `gm:${revFam.bu}`, label: revFam.buName,
+              actual: noActualData || !actualSub.hasGrossMargin ? null : famGmActual,
+              comparison: noPriorData || !priorSub.hasGrossMargin ? null : famGmPrior,
+              expandable: false, expanded: false,
+              isEstimate: revFam.isEstimate || (cogsFam?.isEstimate ?? false),
+            });
+          }
+        }
+        continue;
+      }
+
+      const sectionKey = m.section ? `sec:${m.section}` : null;
+      // The canonical tree always has >=1 family for every one of the 8 PL
+      // sections (moaTree.ts defines leaves for all of them) — so this is
+      // no longer gated on the CURRENT window having rows. Fixes the
+      // "August has zero cost rows -> chevron disappears" defect: PY (or
+      // budget-adjacent) data still drives full expansion of an empty
+      // current window, exactly as Marcello's mandate requires.
+      const curSlots = m.section ? sectionFamilySlots(actualTree.get(m.section)!.families) : [];
+      // Below-EBIT statutory lines (Financial charges/Gains & disposals/
+      // Zakat) have no `.section` — each pins to exactly one moa_code
+      // instead, so their chevron drives the leaf-line drill directly
+      // rather than a tree expansion.
+      const drillCode = MACRO_LEAF_CODE[m.key];
+      const lineKey = drillCode ? `line:${drillCode}` : null;
+      const canExpand = !isBudgetMode && ((!!m.section && curSlots.length > 0) || !!drillCode);
+      out.push({
+        indent: 0,
+        keyPath: m.key,
+        label: recurringLabel,
+        codeTag: drillCode,
+        actual,
+        comparison,
+        expandable: canExpand,
+        expanded: (!!sectionKey && expanded.has(sectionKey)) || (!!lineKey && expanded.has(lineKey)),
+        onToggle: !canExpand ? undefined : sectionKey ? () => toggle(sectionKey) : () => toggle(lineKey!),
+        subtotal: m.subtotal,
+        emphasis: m.emphasis,
+        drillMoaCode: !m.section ? drillCode : undefined,
+        isEstimate: macroIsEstimateActive,
+      });
+      if (!m.section || !sectionKey || !expanded.has(sectionKey) || isBudgetMode) continue;
+      const section = m.section;
+      const curFamilies = actualTree.get(section)!.families;
+      const priorFamilies = priorTree.get(section)!.families;
+      // Section-level "absent ≠ zero" gate for every family/cluster/leaf
+      // beneath this macro row — mirrors the macro row's own `macroHasData`
+      // check just above, so a section with zero posted rows shows "—" at
+      // every depth, not just at the top (2026-08-04, owner-audit #3/#4).
+      const curSectionHasData = sectionHasData(actualTree, section);
+      const priorSectionHasData = sectionHasData(priorTree, section);
+      const gated = (curTotal: number, priorTotal: number, isEstimate = false) => ({
+        actual: noActualData || !curSectionHasData ? null : curTotal,
+        comparison: noPriorData || !priorSectionHasData ? null : priorTotal,
+        isEstimate,
+      });
+
+      // Single-child collapse (fix-24): `curSlots` is the section's family
+      // level already collapsed per `sectionFamilySlots` — for the 5
+      // structurally-CORP-only sections (OPEX-GA/MS/People, Project-Costs,
+      // and, were it still section-driven, NON-OP) this is directly the
+      // cluster/leaf level, promoted one tier up; for Revenue/COGS/D&A
+      // (2+ families) it's the normal family row list.
+      const soleBu = curFamilies.length === 1 ? curFamilies[0].bu : null;
+      for (const slot of curSlots) {
+        if (slot.kind === "leaf") {
+          const leafP = findLeafInFamilies(priorFamilies, slot.leaf.moaCode);
+          const lineKey = `line:${slot.leaf.moaCode}`;
+          out.push({
+            indent: 1, keyPath: slot.leaf.moaCode, label: slot.leaf.leafName, codeTag: slot.leaf.moaCode,
+            ...gated(slot.leaf.total, leafP?.total ?? 0, slot.leaf.isEstimate),
+            expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+            drillMoaCode: slot.leaf.moaCode,
+          });
+          continue;
+        }
+        if (slot.kind === "cluster") {
+          const bu = soleBu!; // a cluster/leaf slot only appears here when the section has exactly one family
+          const cluExpandKey = `clu:${section}::${bu}::${slot.cluster.clusterCode}`;
+          const priorClu = findClusterInFamilies(priorFamilies, bu, slot.cluster.clusterCode);
+          out.push({
+            indent: 1, keyPath: cluExpandKey, label: slot.cluster.clusterName,
+            ...gated(slot.cluster.total, priorClu?.total ?? 0, slot.cluster.isEstimate),
+            expandable: true, expanded: expanded.has(cluExpandKey), onToggle: () => toggle(cluExpandKey),
+          });
+          if (!expanded.has(cluExpandKey)) continue;
+          for (const leaf of slot.cluster.leaves) {
+            const leafP = priorClu?.leaves.find((l) => l.moaCode === leaf.moaCode);
+            const lineKey = `line:${leaf.moaCode}`;
+            out.push({
+              indent: 2, keyPath: leaf.moaCode, label: leaf.leafName, codeTag: leaf.moaCode,
+              ...gated(leaf.total, leafP?.total ?? 0, leaf.isEstimate),
+              expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+              drillMoaCode: leaf.moaCode,
+            });
+          }
+          continue;
+        }
+        // slot.kind === "family" — the normal 2+-family case (Revenue, COGS, D&A).
+        const fam = slot.family;
+        const famExpandKey = `fam:${section}::${fam.bu}`;
+        const famP = findFamilyByBu(priorFamilies, fam.bu);
+        const famSlotsArr = familySlots(fam);
+        const canExpandFam = famSlotsArr.length > 0;
+        out.push({
+          indent: 1, keyPath: famExpandKey, label: fam.buName,
+          ...gated(fam.total, famP?.total ?? 0, fam.isEstimate),
+          expandable: canExpandFam, expanded: expanded.has(famExpandKey),
+          onToggle: canExpandFam ? () => toggle(famExpandKey) : undefined,
+        });
+        if (!canExpandFam || !expanded.has(famExpandKey)) continue;
+        for (const fs of famSlotsArr) {
+          if (fs.kind === "leaf") {
+            const leafP = famP ? findLeafInFamilies([famP], fs.leaf.moaCode) : undefined;
+            const lineKey = `line:${fs.leaf.moaCode}`;
+            out.push({
+              indent: 2, keyPath: fs.leaf.moaCode, label: fs.leaf.leafName, codeTag: fs.leaf.moaCode,
+              ...gated(fs.leaf.total, leafP?.total ?? 0, fs.leaf.isEstimate),
+              expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+              drillMoaCode: fs.leaf.moaCode,
+            });
+            continue;
+          }
+          // fs.kind === "cluster"
+          const cluExpandKey = `clu:${section}::${fam.bu}::${fs.cluster.clusterCode}`;
+          const priorClu = famP?.clusters.find((c) => c.clusterCode === fs.cluster.clusterCode);
+          out.push({
+            indent: 2, keyPath: cluExpandKey, label: fs.cluster.clusterName,
+            ...gated(fs.cluster.total, priorClu?.total ?? 0, fs.cluster.isEstimate),
+            expandable: true, expanded: expanded.has(cluExpandKey), onToggle: () => toggle(cluExpandKey),
+          });
+          if (!expanded.has(cluExpandKey)) continue;
+          for (const leaf of fs.cluster.leaves) {
+            const leafP = priorClu?.leaves.find((l) => l.moaCode === leaf.moaCode);
+            const lineKey = `line:${leaf.moaCode}`;
+            out.push({
+              indent: 3, keyPath: leaf.moaCode, label: leaf.leafName, codeTag: leaf.moaCode,
+              ...gated(leaf.total, leafP?.total ?? 0, leaf.isEstimate),
+              expandable: true, expanded: expanded.has(lineKey), onToggle: () => toggle(lineKey),
+              drillMoaCode: leaf.moaCode,
+            });
+          }
+        }
+      }
+    }
+    return out;
+  }, [actualTree, priorTree, actualSub, priorSub, expanded, isBudgetMode, budgetAgg, noActualData, noPriorData, recurringOpexTree, nonRecurringOpexTree, recurringOpexTreePrior, nonRecurringOpexTreePrior, scope]);
 
   return (
     <div className="space-y-5">
-      {/* Controls */}
+      <div>
+        <h1 className="font-heading text-2xl tracking-wide text-foreground">Economics</h1>
+        <p className="text-xs text-muted-foreground mt-0.5">Live P&amp;L — every figure computed from the warehouse for the selected window.</p>
+      </div>
+
+      {/* ---------- global controls ---------- */}
+      {/* fix-24 (2026-08-04, Marcello — "togli tutto"): the "Figures net of
+          customer credit notes" footnote and the Data completeness banner
+          are both removed from this page; only the small open-months badge
+          stays. The footnote is a shared-chrome no-op as of fix-25 either
+          way — the wrapper div and CompletenessBanner call are dropped here
+          rather than left rendering nothing. */}
       <div className="flex flex-wrap items-center gap-3">
         <WindowPicker months={factMonths(rows)} />
-        <BasisToggle />
-        <span className="text-xs text-muted-foreground">
-          Window: <strong className="text-foreground">{windowName}</strong> · PY = {pyLabelText} (same window −12 months)
-        </span>
+        <ComparisonToggle />
+        <ScopeToggle />
+        <OpenMonthsBadge />
       </div>
 
-      <CompletenessBanner rows={rows} />
       {isLoading && <p className="text-sm text-muted-foreground">Loading live warehouse rows…</p>}
-
-      {/* ---------- headline row: P1 · P2 · P3 ---------- */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* P1 — Recurring revenue YoY (THE headline) */}
-        <Card className="p-5 space-y-2.5 border-2 border-gold/40">
-          <TileHeader
-            title={`Recurring revenue — ${winLabelText}`}
-            basis={basis}
-            hint="Validated DRIFT perimeter from the recurrence dimension (dim_recurrence). PY = same window −12 months, same basis, same perimeter."
-          />
-          {!recLive || !recCur ? <PendingRecurrence /> : (
-            <>
-              <div className="flex items-end gap-3 flex-wrap">
-                <p className="text-4xl font-heading tracking-tight tabular-nums">{fmtSAR(recCur.recRevenue)}</p>
-                <YoYChip pct={recYoY} />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                PY ({pyLabelText}): <span className="tabular-nums">{fmtOrDash(recPy?.recRevenue)}</span>
-              </p>
-              {basis === "STRICT" && recYoY !== null && recYoYOther !== null && (() => {
-                // DATA-CONDITIONED explainer (punch item 1): states the ACTUAL
-                // live relationship between the two bases' YoY — direction and
-                // magnitude computed from the fetched rows, never asserted.
-                const sameDirection = (recYoY >= 0) === (recYoYOther >= 0);
-                const relation = Math.abs(recYoY - recYoYOther) < 0.05
-                  ? "in line with"
-                  : recYoY < recYoYOther ? "lower than" : "higher than";
-                const cnRatio = cnPy > 0.5 ? cnCur / cnPy : null;
-                const cnPhrase = cnRatio === null
-                  ? (cnCur > 0.5 ? "appeared this window (none in PY)" : "are immaterial in both periods")
-                  : cnRatio >= 2 ? "more than doubled YoY"
-                  : cnRatio > 1.005 ? `rose ${fmtDeltaPct(pctChange(cnCur, cnPy) ?? 0)} YoY`
-                  : cnRatio >= 0.995 ? "were flat YoY"
-                  : `declined ${fmtDeltaPct(pctChange(cnCur, cnPy) ?? 0)} YoY`;
-                return (
-                  <div className="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-300">
-                    {sameDirection ? (
-                      <>Strict basis: <strong className="tabular-nums">{fmtDeltaPct(recYoY)}</strong> — same direction
-                      as the Validated basis, {relation} its <span className="tabular-nums">{fmtDeltaPct(recYoYOther)}</span>{" "}
-                      because customer credit notes {cnPhrase} ({fmtSAR(cnCur)} vs {fmtSAR(cnPy)} net of VAT) —
-                      see the credit-note tile.</>
-                    ) : (
-                      <>Direction differs from the Validated basis (<span className="tabular-nums">{fmtDeltaPct(recYoY)}</span> Strict
-                      vs <span className="tabular-nums">{fmtDeltaPct(recYoYOther)}</span> Validated) because customer credit
-                      notes {cnPhrase} ({fmtSAR(cnCur)} vs {fmtSAR(cnPy)} net of VAT) — see the credit-note tile.</>
-                    )}
-                  </div>
-                );
-              })()}
-              {basis === "VALIDATED" && recYoY !== null && (
-                <p className="text-xs text-muted-foreground">
-                  {recYoY > 0
-                    ? "The package headline: recurring club growth on the validated basis — the growth story the founder delivered."
-                    : "Recurring revenue is not above PY on this window — the delivered growth headline applies to the As-delivered TTM window."}
-                </p>
-              )}
-              <div className="pt-0.5">
-                <FrozenRefChip label="As delivered · 12-Jun extraction">
-                  {DELIVERED_P1_PY_TEXT} <span className="text-muted-foreground/70">({winLabel(AS_DELIVERED_WIN)} window)</span>
-                </FrozenRefChip>
-              </div>
-              <DataStateFootnote />
-            </>
-          )}
-        </Card>
-
-        {/* P2 — Total revenue YoY */}
-        <Card className="p-5 space-y-2.5">
-          <TileHeader title={`Total revenue — ${winLabelText}`} basis={basis} />
-          <div className="flex items-end gap-3 flex-wrap">
-            <p className="text-4xl font-heading tracking-tight tabular-nums">{fmtSAR(totCur.revenue)}</p>
-            <YoYChip pct={totYoY} />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            PY ({pyLabelText}): <span className="tabular-nums">{fmtSAR(totPy.revenue)}</span>
-          </p>
-          {/* DATA-CONDITIONED narrative (punch item 4): the DRIFT roll-off
-              reading renders only when the window actually shows it — total
-              below PY while the recurring perimeter grows. */}
-          {totYoY !== null && (
-            <p className="text-xs text-muted-foreground">
-              {totYoY < 0 && recYoY !== null && recYoY > 0
-                ? "Total revenue below PY (non-recurring DRIFT roll-off), as in the delivered analysis — the recurring club is the growth story."
-                : totYoY < 0
-                  ? "Total revenue below PY on this window."
-                  : "Total revenue above PY on this window."}
-            </p>
-          )}
-        </Card>
-
-        {/* P3 — Recurring EBITDA */}
-        <Card className="p-5 space-y-2.5">
-          <TileHeader
-            title={`Recurring EBITDA — ${winLabelText}`}
-            basis={basis}
-            hint="As-booked recurring EBITDA (recurring revenue + recurring direct costs + recurring OpEx). The model-adjusted 'clean' ladder renders only when the model-adjustment memo layer is loaded (founder decision gate)."
-          />
-          {!recLive || !recCur ? <PendingRecurrence /> : (
-            <>
-              <div className="flex items-end gap-3 flex-wrap">
-                <p className={`text-4xl font-heading tracking-tight tabular-nums ${recCur.recEbitda >= 0 ? "text-success" : "text-destructive"}`}>
-                  {fmtSAR(recCur.recEbitda)}
-                </p>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                PY ({pyLabelText}): <span className="tabular-nums">{fmtOrDash(recPy?.recEbitda)}</span>
-                {recPy && recCur.recEbitda >= 0 && recPy.recEbitda < 0 && (
-                  <span className="ml-1.5 text-success font-semibold">
-                    sign flipped to positive · {fmtDeltaSAR(recCur.recEbitda - recPy.recEbitda)} swing
-                  </span>
-                )}
-              </p>
-              {/* Founder gate (punch item 3): the memo ladder is OPT-IN —
-                  default OFF on load, persisted; never rendered unrequested
-                  in client viewing. */}
-              {ladder.length > 0 ? (
-                <div className="text-xs text-muted-foreground space-y-1 border-t border-border/40 pt-2">
-                  <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={memoOn}
-                      onChange={(e) => setMemoOn(e.target.checked)}
-                      className="accent-[hsl(var(--gold))]"
-                    />
-                    <span className="font-semibold text-foreground/80">
-                      Model-adjustment ladder <span className="text-amber-400">[model adj — not in books]</span>
-                    </span>
-                  </label>
-                  {!memoOn && (
-                    <p className="text-[10px] text-muted-foreground/70">
-                      Off by default for client viewing (founder gate) — tick to reconcile to the
-                      package's clean recurring EBITDA.
-                    </p>
-                  )}
-                  {memoOn && (() => {
-                    let running = recCur.recEbitda;
-                    const stepsOut = [
-                      <p key="start" className="tabular-nums">As booked: {fmtSAR(recCur.recEbitda)}</p>,
-                    ];
-                    for (const s of ladder) {
-                      running += s.amount;
-                      stepsOut.push(
-                        <p key={s.code} className="tabular-nums">{s.label}: {fmtDeltaSAR(s.amount)}</p>,
-                      );
-                    }
-                    const isPresetWin = win.startKey === AS_DELIVERED_WIN.startKey && win.endKey === AS_DELIVERED_WIN.endKey;
-                    stepsOut.push(<p key="end" className="tabular-nums font-semibold text-foreground">Clean (model-adjusted): {fmtSAR(running)}</p>);
-                    stepsOut.push(
-                      <div key="ref" className="pt-1">
-                        <FrozenRefChip label="As delivered · 16-Jul freeze">
-                          Recurring EBITDA (clean) +{fmtSAR(DELIVERED_P3_CLEAN_SAR)}
-                          {isPresetWin && (
-                            <> · live re-computation {fmtSAR(running)} — post-freeze bookings {fmtDeltaSAR(running - DELIVERED_P3_CLEAN_SAR)}</>
-                          )}
-                        </FrozenRefChip>
-                      </div>,
-                    );
-                    stepsOut.push(
-                      <p key="fn" className="text-[10px] text-muted-foreground/70 pt-1">
-                        Computed live — the warehouse has moved since the package's 12-Jun/16-Jul freeze
-                        (remediated postings); the delivered clean figure is not restated here.
-                      </p>,
-                    );
-                    return stepsOut;
-                  })()}
-                </div>
-              ) : (
-                <p className="text-[11px] text-muted-foreground/70">
-                  Model-adjustment memo layer not loaded — ladder to the package's clean figure renders
-                  once the founder-gated adjustment layer lands (default off for client viewing).
-                </p>
-              )}
-            </>
-          )}
-        </Card>
-      </div>
-
-      {/* ---------- anti-confusion row: P6 bridge + P5 CN ---------- */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        {/* P6 — basis & window bridge */}
-        <Card className="p-5 xl:col-span-2 space-y-2">
-          <TileHeader
-            title="Basis & window bridge — revenue"
-            hint="From the delivered package figure (Validated basis, As-delivered window) to the certified Strict figure for the selected window. Terms computed live from the fact rows — nothing typed in."
-          />
-          {bridge && (
-            <>
-              <Waterfall
-                steps={[
-                  { label: `Package (Validated, ${winLabel(AS_DELIVERED_WIN)})`, short: "Package", value: bridge.presetValidated.revenue, kind: "anchor" },
-                  { label: "Window roll", short: "Window", value: bridge.winValidated.revenue - bridge.presetValidated.revenue, kind: "delta" },
-                  { label: `Validated (${winLabelText})`, short: "Validated", value: bridge.winValidated.revenue, kind: "anchor" },
-                  { label: "Credit notes", short: "CN", value: bridge.winStrict.revenue - bridge.winValidated.revenue, kind: "delta" },
-                  { label: `Strict (${winLabelText})`, short: "Strict", value: bridge.winStrict.revenue, kind: "anchor" },
-                ]}
-              />
-              <p className="text-xs text-muted-foreground tabular-nums">
-                Revenue: {fmtSAR(bridge.presetValidated.revenue)} (package, Validated, {winLabel(AS_DELIVERED_WIN)})
-                {" → "}window {fmtDeltaSAR(bridge.winValidated.revenue - bridge.presetValidated.revenue)}
-                {" → "}{fmtSAR(bridge.winValidated.revenue)} (Validated, {winLabelText})
-                {" → "}credit notes {fmtDeltaSAR(bridge.winStrict.revenue - bridge.winValidated.revenue)}
-                {" → "}<strong className="text-foreground">{fmtSAR(bridge.winStrict.revenue)} (Strict)</strong>
-              </p>
-              <p className="text-xs text-muted-foreground tabular-nums">
-                EBITDA (5-section) bridge: {fmtSAR(bridge.presetValidated.ebitda5)} (Validated, {winLabel(AS_DELIVERED_WIN)})
-                {" → "}window {fmtDeltaSAR(bridge.winValidated.ebitda5 - bridge.presetValidated.ebitda5)}
-                {" → "}{fmtSAR(bridge.winValidated.ebitda5)} (Validated, {winLabelText})
-                {" → "}credit notes {fmtDeltaSAR(bridge.winStrict.ebitda5 - bridge.winValidated.ebitda5)}
-                {" → "}<strong className="text-foreground">{fmtSAR(bridge.winStrict.ebitda5)} (Strict)</strong>
-              </p>
-            </>
-          )}
-        </Card>
-
-        {/* P5 — credit-note anomaly (always visible, both bases) */}
-        <Card className="p-5 space-y-2.5 border border-amber-500/30">
-          <TileHeader
-            title={`Credit-note anomaly — ${winLabelText}`}
-            hint="Customer credit notes net of VAT; ratio denominator = collections allocated to invoices (v_collections_monthly, register P5 definition). Real business signal already flagged to the client — this is what explains the basis toggle. Drill: v_credit_note_audit (authenticated)."
-          />
-          <div className="flex items-end gap-3 flex-wrap">
-            <p className="text-3xl font-heading tracking-tight tabular-nums text-amber-400">{fmtSAR(cnCur)}</p>
-            <YoYChip pct={pctChange(cnCur, cnPy)} positiveIsGood={false} />
-          </div>
-          <p className="text-xs text-muted-foreground tabular-nums">
-            PY ({pyLabelText}): {fmtSAR(cnPy)}
-            {pctChange(cnCur, cnPy) !== null && <> · net {fmtDeltaPct(pctChange(cnCur, cnPy)!)} YoY</>}
-          </p>
-          {/* Spec P5: CN ÷ collections, BOTH periods, computed live (item 5). */}
-          {collCur !== null && collCur > 0 && collPy !== null && collPy > 0 ? (
-            <p className="text-xs text-muted-foreground tabular-nums">
-              CN ÷ collections: <strong className="text-amber-400">{fmtPct((cnCur / collCur) * 100)}</strong> ({winLabelText})
-              {" "}vs <strong className="text-foreground">{fmtPct((cnPy / collPy) * 100)}</strong> (PY {pyLabelText})
-              {" "}· collections {fmtSAR(collCur)} vs {fmtSAR(collPy)}
-            </p>
-          ) : (
-            <p className="text-[11px] text-muted-foreground/70">
-              CN/collections ratio pending — v_collections_monthly not reachable for this window.
-            </p>
-          )}
-          <p className="text-xs text-muted-foreground">
-            Validated basis shows revenue BEFORE these credit notes (as the package did); Strict basis
-            nets them off. The anomaly is open with the client.
-          </p>
-          <button
-            type="button"
-            onClick={() => setCnDrillOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 transition-colors"
-          >
-            <FileSearch className="h-3.5 w-3.5" /> Open credit-note audit drill
-          </button>
-        </Card>
-      </div>
-
-      {/* ---------- composition: P4 per-BU + P7 quarters ---------- */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {/* P4 — per-BU growth */}
-        <Card className="p-5 space-y-3">
-          <TileHeader
-            title={`Recurring revenue by business unit — ${winLabelText} vs PY`}
-            basis={basis}
-            hint="Recurring perimeter per the model's own recurrence tags (dim_recurrence) — Competitions follows the tagged recurring total, resolving the deck's dual convention to one number."
-          />
-          {!buTable ? <PendingRecurrence /> : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[420px]">
-                <thead>
-                  <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="text-left py-2 pr-3 font-semibold">Business unit</th>
-                    <th className="text-right py-2 px-3 font-semibold">{winLabelText}</th>
-                    <th className="text-right py-2 px-3 font-semibold">PY ({pyLabelText})</th>
-                    <th className="text-right py-2 pl-3 font-semibold">Δ %</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {buTable.map((r) => (
-                    <tr key={r.bu} className="border-b border-border/10">
-                      <td className="py-1.5 pr-3">{r.label}</td>
-                      <td className="py-1.5 px-3 text-right tabular-nums">{fmtSAR(r.cur)}</td>
-                      <td className="py-1.5 px-3 text-right tabular-nums text-muted-foreground">{fmtSAR(r.py)}</td>
-                      <td className={`py-1.5 pl-3 text-right tabular-nums font-semibold ${r.yoy === null ? "text-muted-foreground" : r.yoy >= 0 ? "text-success" : "text-destructive"}`}>
-                        {r.yoy === null ? "n/a" : fmtDeltaPct(r.yoy)}
-                      </td>
-                    </tr>
-                  ))}
-                  <tr className="border-t-2 border-t-border font-semibold">
-                    <td className="py-2 pr-3">Total recurring</td>
-                    <td className="py-2 px-3 text-right tabular-nums">{fmtOrDash(recCur?.recRevenue)}</td>
-                    <td className="py-2 px-3 text-right tabular-nums text-muted-foreground">{fmtOrDash(recPy?.recRevenue)}</td>
-                    <td className={`py-2 pl-3 text-right tabular-nums ${recYoY !== null && recYoY >= 0 ? "text-success" : "text-destructive"}`}>
-                      {recYoY === null ? "n/a" : fmtDeltaPct(recYoY)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              {hasDriftInPy && (
-                <p className="text-[11px] text-muted-foreground/80 mt-2">
-                  PY window contains DRIFT/non-recurring revenue — excluded here by the recurrence tags.
-                </p>
-              )}
-              <DataStateFootnote />
-            </div>
-          )}
-        </Card>
-
-        {/* P7 — fiscal quarters + YTD momentum */}
-        <Card className="p-5 space-y-3">
-          <TileHeader
-            title="Recurring revenue — fiscal quarters vs PY"
-            basis={basis}
-            hint="Fiscal year starts June: Q1=Jun-Aug · Q2=Sep-Nov · Q3=Dec-Feb · Q4=Mar-May (package convention)."
-          />
-          {!quarters ? <PendingRecurrence /> : (
-            <>
-              <ResponsiveContainer width="100%" height={210}>
-                <ComposedChart data={quarters} margin={{ top: 14, right: 8, bottom: 0, left: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-                  <XAxis dataKey="short" stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} />
-                  <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={50} />
-                  <RTooltip
-                    content={({ active, payload, label }) => {
-                      if (!active || !payload || payload.length === 0) return null;
-                      const cur = payload.find((p) => p.dataKey === "cur")?.value as number | undefined;
-                      const prior = payload.find((p) => p.dataKey === "py")?.value as number | undefined;
-                      return (
-                        <div className="chart-tooltip">
-                          <p className="chart-tooltip-title">{label}</p>
-                          <p className="chart-tooltip-content chart-tooltip-actual">Actual: {cur !== undefined ? fmtSAR(cur) : "—"}</p>
-                          <p className="chart-tooltip-content chart-tooltip-budget">PY: {prior !== undefined ? fmtSAR(prior) : "—"}</p>
-                        </div>
-                      );
-                    }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="cur" name="Actual" fill="hsl(var(--gold) / 0.85)" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={34} />
-                  <Bar dataKey="py" name="PY (same quarter −12m)" fill="hsl(36 18% 70% / 0.45)" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={34} />
-                </ComposedChart>
-              </ResponsiveContainer>
-              {quarters.some((q) => q.future) && (
-                <p className="text-[11px] text-muted-foreground/80">Quarters extending beyond the last closed month are partial.</p>
-              )}
-              {ytd && (
-                <p className="text-xs text-muted-foreground tabular-nums">
-                  Calendar YTD ({winLabel(ytd.w)}): <strong className="text-foreground">{fmtSAR(ytd.cur)}</strong> vs {fmtSAR(ytd.py)} PY
-                  {ytd.yoy !== null && <span className={`ml-1.5 font-semibold ${ytd.yoy >= 0 ? "text-success" : "text-destructive"}`}>{fmtDeltaPct(ytd.yoy)}</span>}
-                </p>
-              )}
-            </>
-          )}
-        </Card>
-      </div>
-
-      {/* ---------- P8 budget story ---------- */}
-      <Card className="p-5 space-y-3">
-        <TileHeader
-          title="Budget story — history and forward plan"
-          hint="Historical vintage BUD-HIST-2025-26 (ties the delivered deck to the cent) and the approved forward budget BUD-2026-07-16-APPROVED, both from budget_2026."
-        />
-        {budgetStory ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-1">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Backward — {winLabel(AS_DELIVERED_WIN)} <BasisBadge basis="VALIDATED" className="ml-1" /></p>
-              <p className="text-sm tabular-nums">Recurring: {fmtOrDash(budgetStory.recHist?.recRevenue)} vs bud {fmtSAR(budgetStory.histRecBudget)}
-                {budgetStory.recHist && <span className={`ml-1 font-semibold ${budgetStory.recHist.recRevenue >= budgetStory.histRecBudget ? "text-success" : "text-destructive"}`}>{fmtDeltaPct(pctChange(budgetStory.recHist.recRevenue, budgetStory.histRecBudget) ?? 0)}</span>}
-              </p>
-              <p className="text-sm tabular-nums">Total: {fmtSAR(budgetStory.actualHistValidated.revenue)} vs bud {fmtSAR(budgetStory.hist.revenue)}
-                <span className={`ml-1 font-semibold ${budgetStory.actualHistValidated.revenue >= budgetStory.hist.revenue ? "text-success" : "text-destructive"}`}>{fmtDeltaPct(pctChange(budgetStory.actualHistValidated.revenue, budgetStory.hist.revenue) ?? 0)}</span>
-              </p>
-              <p className="text-sm tabular-nums">EBITDA: {fmtSAR(budgetStory.actualHistValidated.ebitdaReported)} vs bud {fmtSAR(budgetStory.hist.ebitdaAll)}</p>
-              {/* DATA-CONDITIONED (item 4): the DRIFT-slip attribution renders
-                  only when the DRIFT gap actually carries the total miss. */}
-              {(() => {
-                const totalGap = budgetStory.actualHistValidated.revenue - budgetStory.hist.revenue;
-                const driftGap = (budgetStory.recHist?.nonRecRevenue ?? 0) - budgetStory.drift;
-                const recGapPct = budgetStory.recHist ? pctChange(budgetStory.recHist.recRevenue, budgetStory.histRecBudget) : null;
-                if (totalGap < 0 && driftGap < 0 && Math.abs(driftGap) >= 0.5 * Math.abs(totalGap)) {
-                  return (
-                    <p className="text-[11px] text-muted-foreground/80 tabular-nums">
-                      DRIFT slip drives the total-revenue miss ({fmtSAR(driftGap)} of the {fmtSAR(totalGap)} gap);
-                      recurring core {recGapPct !== null ? (Math.abs(recGapPct) <= 10 ? `near plan (${fmtDeltaPct(recGapPct)})` : `${fmtDeltaPct(recGapPct)} vs plan`) : "—"}.
-                    </p>
-                  );
-                }
-                return recGapPct !== null ? (
-                  <p className="text-[11px] text-muted-foreground/80 tabular-nums">Recurring core {fmtDeltaPct(recGapPct)} vs plan.</p>
-                ) : null;
-              })()}
-            </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-1">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Next budget month {budgetStory.firstFwd ? `(${monthKeyLabel(budgetStory.firstFwd)})` : ""}
-              </p>
-              <p className="text-sm tabular-nums">Revenue: {fmtOrDash(budgetStory.fwdFirst?.revenue)}</p>
-              <p className="text-sm tabular-nums">EBITDA: {fmtOrDash(budgetStory.fwdFirst?.ebitdaAll)}</p>
-              <p className="text-[11px] text-muted-foreground/80">Approved 2026-07-16 · BUD-2026-07-16-APPROVED</p>
-            </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-1">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                H2-{budgetStory.fwdYear?.slice(2)} plan {budgetStory.firstFwd ? `(${monthKeyLabel(budgetStory.firstFwd)}→Dec)` : ""}
-              </p>
-              <p className="text-sm tabular-nums">Revenue: {fmtOrDash(budgetStory.h2?.revenue)}</p>
-              <p className="text-sm tabular-nums">EBITDA: {fmtOrDash(budgetStory.h2?.ebitdaAll)}</p>
-            </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-1">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">FY{budgetStory.nextYear?.slice(2)} plan</p>
-              <p className="text-sm tabular-nums">Revenue: {fmtOrDash(budgetStory.fy27?.revenue)}</p>
-              <p className="text-sm tabular-nums">EBITDA: {fmtOrDash(budgetStory.fy27?.ebitdaAll)}</p>
-              {/* Conditioned (item 4): only claim the turn when planned EBITDA IS positive. */}
-              {budgetStory.fy27 && budgetStory.fy27.ebitdaAll > 0 && (
-                <p className="text-[11px] text-muted-foreground/80">Self-financing plan — planned EBITDA turns structurally positive.</p>
-              )}
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">Loading budget series…</p>
-        )}
-        {vintageStrip.length > 1 && (
-          <div className="flex flex-wrap items-center gap-2 border-t border-border/40 pt-3">
-            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Budget history:</span>
-            {vintageStrip.map((v, i) => (
-              <span key={v.id} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className={`rounded border px-2 py-0.5 tabular-nums ${v.isDefault ? "border-gold/40 bg-gold/10 text-gold" : "border-border bg-muted/30"}`}>
-                  {v.label}: {fmtSAR(v.revenue)}
-                </span>
-                {i < vintageStrip.length - 1 && <span className="text-muted-foreground/50">→</span>}
-              </span>
-            ))}
-          </div>
-        )}
-        <p className="text-[11px] text-muted-foreground/80">
-          {/* Coverage gap DERIVED from the loaded budget months (item 4) —
-              no hardcoded month list. */}
-          {(() => {
-            if (!budgetRows || budgetRows.length === 0) return null;
-            const covered = [...budgetMonthsSetLocal(budgetRows)].sort();
-            const missing: string[] = [];
-            let k = covered[0];
-            while (k <= covered[covered.length - 1]) {
-              if (!covered.includes(k)) missing.push(k);
-              k = shiftMonthKey(k, 1);
-            }
-            if (missing.length === 0) return null;
-            return (
-              <>No budget exists for {missing.map(monthKeyLabel).join(", ")} — by design: the historical
-              vintage ends {monthKeyLabel(shiftMonthKey(missing[0], -1))}, the approved forward budget
-              starts {monthKeyLabel(shiftMonthKey(missing[missing.length - 1], 1))}.{" "}</>
-            );
-          })()}
-          Budget is net of VAT with no credit-note concept. Pre-blend vintages (V1 original, V2 revised)
-          are storytelling only — never the default comparison.
+      {basisError && !isLoading && (
+        <p className="text-sm text-destructive/90">
+          Could not load warehouse rows — {basisError instanceof Error ? basisError.message : String(basisError)}
         </p>
-      </Card>
+      )}
+      {recError && <p className="text-xs text-destructive/70">Recurrence data unavailable — {recError instanceof Error ? recError.message : String(recError)} (Only Recurring scope may be incomplete.)</p>}
 
-      {/* ---------- P9 multi-year ---------- */}
-      <Card className="p-5 space-y-3">
-        <TileHeader
-          title={`Multi-year clean series — ${recLive ? "recurring revenue" : "revenue"} & 5-section EBITDA by calendar year`}
-          basis={basis}
-          hint="Yearly series computed live from the fact rows on the active basis. * = partial year (through the last closed month)."
+      {/* ---------- Always-current P&L estimate layer (Marcello, 2026-10-01) ---------- */}
+      {/* Standalone, pinned to "right now" (current month / calendar YTD) —
+          deliberately NOT tied to the global window selector above, which
+          can scroll to any past window where this estimate layer does not
+          apply. Reads v_pnl_mtd / v_pnl_ytd (migrations 094-097), never
+          v_pnl_basis — zero risk to the explodable table below. */}
+      <PnlEstimateCard />
+
+      {/* ---------- KPI circles + comparison histogram ---------- */}
+      {/* fix-4-kpi, commit 91ce209 — both components are standalone (read
+          useKpiHeaderData() internally, no props), so they tie to whatever
+          window/comparison/scope the table below is showing with zero extra
+          wiring from this page. */}
+      <KpiCircles />
+      <ComparisonHistogram />
+
+      {/* ---------- By Business Unit (Revenue / Gross Margin only) ---------- */}
+      {/* 2026-08-08 CEO mandate — see the buChartData memo above and
+          BuRevenueGrossMarginChart.tsx for why this stops at Gross Margin
+          and how it's kept reconciled to the table below. */}
+      {!isLoading && hasAnyData && (
+        <BuRevenueGrossMarginChart
+          data={buChartData}
+          comparisonLabel={comparisonLabel}
+          isBudgetMode={isBudgetMode}
+          mtdProrated={mtdPro !== null}
+          windowName={windowName}
+          noActualData={noActualData}
         />
-        <ResponsiveContainer width="100%" height={240}>
-          <ComposedChart data={multiYear} margin={{ top: 14, right: 8, bottom: 0, left: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-            <XAxis dataKey="year" stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} tickLine={false} />
-            <YAxis tickFormatter={fmtCompact} stroke="hsl(var(--muted-foreground))" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} tickLine={false} axisLine={false} width={54} />
-            <RTooltip
-              content={({ active, payload, label }) => {
-                if (!active || !payload || payload.length === 0) return null;
-                const rev = payload.find((p) => p.dataKey === "revenue")?.value as number | undefined;
-                const eb = payload.find((p) => p.dataKey === "ebitda")?.value as number | undefined;
-                return (
-                  <div className="chart-tooltip">
-                    <p className="chart-tooltip-title">{label}</p>
-                    <p className="chart-tooltip-content chart-tooltip-actual">{recLive ? "Recurring revenue" : "Revenue"}: {rev !== undefined ? fmtSAR(rev) : "—"}</p>
-                    <p className="chart-tooltip-content chart-tooltip-budget">EBITDA (5-section): {eb !== undefined ? fmtSAR(eb) : "—"}</p>
-                  </div>
-                );
-              }}
-            />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeOpacity={0.5} />
-            <Bar dataKey="revenue" name={recLive ? "Recurring revenue" : "Revenue"} fill="hsl(var(--gold) / 0.85)" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={48} />
-            <Line dataKey="ebitda" name="EBITDA (5-section)" stroke="hsl(195 75% 55%)" strokeWidth={2.5} dot={{ r: 3.5, fill: "hsl(195 75% 55%)", strokeWidth: 0 }} isAnimationActive={false} />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </Card>
+      )}
 
-      {/* ---------- CN audit drill ---------- */}
-      <Sheet open={cnDrillOpen} onOpenChange={setCnDrillOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle className="font-heading tracking-wide">CREDIT-NOTE AUDIT</SheetTitle>
-            <SheetDescription>
-              v_credit_note_audit — duplication/anomaly findings on customer credit notes (net of VAT).
-            </SheetDescription>
-          </SheetHeader>
-          <div className="mt-4">
-            {cnAudit.isLoading && <p className="text-sm text-muted-foreground">Loading audit rows…</p>}
-            {cnAudit.data && cnAudit.data.length > 0 && (
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
-                    <th className="text-left py-2 pr-2 font-semibold">Date</th>
-                    <th className="text-left py-2 pr-2 font-semibold">Ref</th>
-                    <th className="text-left py-2 pr-2 font-semibold">Finding</th>
-                    <th className="text-right py-2 pl-2 font-semibold">Net of VAT</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cnAudit.data.map((r, i) => (
-                    <tr key={`${r.qoyod_credit_note_id}-${i}`} className="border-b border-border/10">
-                      <td className="py-1.5 pr-2 whitespace-nowrap text-muted-foreground">{r.issue_date}</td>
-                      <td className="py-1.5 pr-2">{r.reference ?? r.qoyod_credit_note_id}</td>
-                      <td className="py-1.5 pr-2">
-                        <span className="inline-flex rounded bg-amber-500/10 border border-amber-500/30 px-1.5 py-px text-[10px] text-amber-300">{r.finding}</span>
+      {/* ---------- the P&L table ---------- */}
+      <Card className="p-5 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            {scope === "RECURRING" ? "Recurring P&L" : "P&L"} — {windowName}
+          </h2>
+          {mtdPro && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground cursor-help">
+                  <Info className="h-3 w-3" /> {comparisonLabel} pro-rated to {mtdPro.elapsedDays}/{mtdPro.daysInMonth} days
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="max-w-xs text-xs">
+                Month to date compares a partial month — the {comparisonLabel.toLowerCase()} figure is scaled to the
+                same elapsed share of the month so the comparison is fair. Actual is never pro-rated.
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+
+        {noDataNote && (
+          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">{noDataNote}</p>
+        )}
+        {partialDataNote && !noDataNote && (
+          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">{partialDataNote}</p>
+        )}
+        {budgetNaNote && (
+          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">{budgetNaNote}</p>
+        )}
+        {isBudgetMode && !budgetNaNote && (
+          <p className="text-[11px] text-muted-foreground/80">
+            Detail limited to budget granularity — budget_2026 has no line-level equivalent to the managerial chart of
+            accounts, so rows don't expand in Budget view. Switch to Previous Year or Previous Period for full leaf detail.
+          </p>
+        )}
+
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground py-4">Loading the P&amp;L…</p>
+        ) : !hasAnyData ? (
+          <p className="text-sm text-muted-foreground py-4">No data for this window.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[560px]">
+              <thead>
+                <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
+                  <th className="text-left py-2 pr-3 font-semibold">Line item</th>
+                  <th className="text-right py-2 px-3 font-semibold">This window</th>
+                  <th className="text-right py-2 px-3 font-semibold">{comparisonLabel}</th>
+                  <th className="text-right py-2 px-3 font-semibold">Δ value</th>
+                  <th className="text-right py-2 pl-3 font-semibold">Δ %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tableRows.map((r) => {
+                  const deltaAbs = r.actual === null || r.comparison === null ? null : r.actual - r.comparison;
+                  // comparePct (not pctChange): 2026-08-04, owner-audit #7 —
+                  // a comparison base that's negative/near-zero (loss-to-
+                  // profit swing, or a tiny prior-year figure) must render
+                  // "n/m" (shown as "—" via deltaPct===null below), never a
+                  // clean-looking but meaningless +1026.2%-style artifact.
+                  const deltaPct = r.actual === null || r.comparison === null ? null : comparePct(r.actual, r.comparison);
+                  const good = deltaAbs === null ? null : deltaAbs >= 0;
+                  return (
+                    <Fragment key={r.keyPath}>
+                    <tr
+                      className={`border-b border-border/10 ${r.subtotal ? "border-t-2 border-t-border" : ""} ${r.emphasis ? "font-semibold" : ""}`}
+                    >
+                      {/* owner-audit #11 (2026-08-04): the chevron button's tap
+                          target was 16x16 CSS px with the row label OUTSIDE the
+                          clickable area — below even the WCAG 2.5.8 AA minimum
+                          (24x24px). The whole cell now shares r.onToggle (a
+                          normal "tap the row to expand" mobile gesture works),
+                          the button keeps its own handler too (stopPropagation
+                          guards against the Set-based toggle firing twice and
+                          cancelling itself out) so keyboard/explicit-click
+                          behaviour on the chevron itself is unchanged. */}
+                      <td
+                        className={`py-1.5 pr-3 ${r.onToggle ? "cursor-pointer select-none" : ""}`}
+                        onClick={r.onToggle}
+                      >
+                        <span style={{ paddingLeft: `${r.indent * 18}px` }} className="inline-flex items-center gap-1.5">
+                          {r.onToggle ? (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); r.onToggle?.(); }}
+                              className="inline-flex items-center justify-center h-4 w-4 rounded hover:bg-muted/60 text-muted-foreground shrink-0"
+                            >
+                              {r.expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                            </button>
+                          ) : r.indent > 0 ? <span className="inline-block h-4 w-4 shrink-0" /> : null}
+                          <span className={r.subtotal ? "text-foreground" : ""}>{r.label}</span>
+                          {r.codeTag && (
+                            <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0">{r.codeTag}</span>
+                          )}
+                        </span>
                       </td>
-                      <td className="py-1.5 pl-2 text-right tabular-nums">{fmtSAR(r.net_of_vat)}</td>
+                      <td className="py-1.5 px-3 text-right tabular-nums">
+                        {r.isEstimate && r.actual !== null ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="italic text-amber-400">{fmtOrDash(r.actual)}</span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Badge
+                                  variant="outline"
+                                  className="cursor-help text-[9px] font-bold uppercase tracking-wider border-amber-500/40 bg-amber-500/10 text-amber-400"
+                                >
+                                  est.
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-xs text-xs">
+                                Includes an estimate — salaries/GOSI/end-of-service or depreciation carried
+                                forward from the last real posting (pro-rated if this month is still open), or
+                                a supplier cost paid with no bill booked yet. Disappears automatically once the
+                                real posting lands — never written to Qoyod.
+                              </TooltipContent>
+                            </Tooltip>
+                          </span>
+                        ) : (
+                          fmtOrDash(r.actual)
+                        )}
+                      </td>
+                      <td className="py-1.5 px-3 text-right tabular-nums text-muted-foreground">{fmtOrDash(r.comparison)}</td>
+                      <td className={`py-1.5 px-3 text-right tabular-nums ${good === null ? "text-muted-foreground" : good ? "text-success" : "text-destructive"}`}>
+                        {deltaAbs === null ? "—" : fmtDeltaSAR(deltaAbs)}
+                      </td>
+                      <td className={`py-1.5 pl-3 text-right tabular-nums font-semibold ${good === null ? "text-muted-foreground" : good ? "text-success" : "text-destructive"}`}>
+                        {deltaPct === null ? "—" : fmtDeltaPct(deltaPct)}
+                      </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {cnAudit.data && cnAudit.data.length === 0 && !cnAudit.isLoading && (
-              <p className="text-sm text-muted-foreground">No audit rows.</p>
-            )}
+                    {r.drillMoaCode && r.expanded && (
+                      <LeafLineRows
+                        moaCode={r.drillMoaCode}
+                        win={win}
+                        compWin={py}
+                        comparisonLabel={comparisonLabel}
+                        showComparison={!isBudgetMode}
+                        indent={r.indent + 1}
+                      />
+                    )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        </SheetContent>
-      </Sheet>
+        )}
+        {budgetLoading && isBudgetMode && <p className="text-xs text-muted-foreground">Loading budget…</p>}
+      </Card>
     </div>
   );
-};
-
-// local helper (kept here to avoid re-export churn)
-const budgetMonthsSetLocal = (budgetRows: { period_month: string; section: string }[]): Set<string> => {
-  const s = new Set<string>();
-  for (const r of budgetRows) if (r.section !== "CASHFLOW") s.add(r.period_month.slice(0, 7));
-  return s;
 };

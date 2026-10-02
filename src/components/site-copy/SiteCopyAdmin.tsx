@@ -1,0 +1,299 @@
+// Site Copy CMS — editable EN/AR website copy, automatic sync to the
+// Shopify draft theme. CEO decision 2026-07-25: all Trio Sporting Website V1
+// copy lives here so future edits need no developer, and it's ready for the
+// Arabic version (EN/AR side by side). Built for non-technical club staff:
+// pick a page, open a section, edit the text, save happens automatically.
+//
+// CEO live-review 2026-08-03 (Marcello approved): the "Sync to site" button
+// is replaced by a per-page auto-sync status readout (same pattern as the
+// Catalogue's per-product Shopify chip) — see scheduleCopyAutoSync in
+// siteCopyLive.ts. SyncCopyDialog stays as a de-emphasized "Advanced sync…"
+// escape hatch for dry-run diff review / arbitrary page scoping.
+import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Search, Languages, ShieldAlert, Loader2, CheckCircle2, XCircle, ShieldQuestion } from "lucide-react";
+import { DataSourceBadge } from "@/components/dashboard/DataSourceBadge";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  useSiteCopy, type SiteCopyRow, type CopySyncStatus,
+  useCopySyncStatusMap, retryCopySync, isCopySyncApiConfigured,
+} from "@/data/siteCopyLive";
+import { isSupabaseConfigured } from "@/lib/supabaseClient";
+import { pageLabel } from "./siteCopyLabels";
+import { SiteCopyFieldRow } from "./SiteCopyFieldRow";
+import { SiteCopyAuditLog } from "./SiteCopyAuditLog";
+import { SyncCopyDialog } from "./SyncCopyDialog";
+
+const fmtTime = (iso?: string) => (iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
+
+const PAGE_ORDER_HINT = ["index", "header-group", "footer-group", "footer.liquid"]; // pinned to the top of the picker
+
+// fix-29-cms-perf (2026-08-04): 1,522 strings total across the site. Two
+// unbounded-mount paths made the panel feel like it "takes forever":
+//   1. Selecting a page used to open EVERY section by default (up to 228
+//      rows x 2 textareas + 3 state hooks + 3 effects each, for the biggest
+//      page, all mounted on page-select) — now only the first section opens
+//      by default; the rest mount on demand when a staff member expands
+//      them (Radix Accordion.Content doesn't render closed items' children
+//      at all, so this is real virtualization, not just a visual collapse).
+//   2. Free-text search ran across all 1,522 rows with no cap — a short/
+//      common query could match hundreds of rows and mount all of them,
+//      fully expanded, at once. Capped to the first N matches with a
+//      "narrow your search" hint instead.
+const MAX_SEARCH_RESULTS = 60;
+
+/** Replaces the old "Sync to site" button — a no-op-styled status readout
+ * for the currently selected page, per Marcello's approval. Retry is the
+ * one manual control (plus "Advanced sync…" for dry-run review). */
+const CopySyncStatusReadout = ({ page, status, onRetry }: { page: string; status: CopySyncStatus | undefined; onRetry: () => void }) => {
+  if (!isCopySyncApiConfigured) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground cursor-help">
+            <ShieldQuestion className="h-3.5 w-3.5" /> Sync unavailable
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-xs text-xs">
+          This environment can't reach the copy sync API — edits save but won't reach the draft theme from here.
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+  if (!status) {
+    return <span className="text-xs text-muted-foreground">Synced ✓ (auto)</span>;
+  }
+  if (status.state === "syncing") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Syncing {pageLabel(page)}…
+      </span>
+    );
+  }
+  if (status.state === "error") {
+    return (
+      <button type="button" onClick={onRetry} title={status.error}
+        className="inline-flex items-center gap-1.5 text-xs text-destructive underline decoration-dotted hover:text-destructive/80">
+        <XCircle className="h-3.5 w-3.5" /> Sync error — retry
+      </button>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-emerald-500">
+      <CheckCircle2 className="h-3.5 w-3.5" /> Synced ✓ (auto) {fmtTime(status.at)}
+    </span>
+  );
+};
+
+export const SiteCopyAdmin = () => {
+  const { session } = useAuth();
+  const actor = session?.user?.email ?? "unknown";
+  const { data: rows, isLoading, isError, error } = useSiteCopy();
+  const { data: copySyncMap } = useCopySyncStatusMap();
+  const qc = useQueryClient();
+
+  const [search, setSearch] = useState("");
+  const [needsArOnly, setNeedsArOnly] = useState(false);
+  const [selectedPage, setSelectedPage] = useState<string>("index");
+  const [syncOpen, setSyncOpen] = useState(false);
+
+  const pages = useMemo(() => {
+    const set = new Set((rows ?? []).map((r) => r.page_handle));
+    const list = Array.from(set);
+    list.sort((a, b) => {
+      const ia = PAGE_ORDER_HINT.indexOf(a);
+      const ib = PAGE_ORDER_HINT.indexOf(b);
+      if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+      return pageLabel(a).localeCompare(pageLabel(b));
+    });
+    return list;
+  }, [rows]);
+
+  const pageCounts = useMemo(() => {
+    const counts: Record<string, { total: number; needsAr: number }> = {};
+    for (const r of rows ?? []) {
+      const c = (counts[r.page_handle] ??= { total: 0, needsAr: 0 });
+      c.total += 1;
+      if (!r.ar) c.needsAr += 1;
+    }
+    return counts;
+  }, [rows]);
+
+  const totalNeedsAr = useMemo(() => (rows ?? []).filter((r) => !r.ar).length, [rows]);
+
+  const isSearching = search.trim().length > 0;
+
+  const matchedRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let base = rows ?? [];
+    if (isSearching) {
+      base = base.filter((r) =>
+        r.key.toLowerCase().includes(q) ||
+        (r.en ?? "").toLowerCase().includes(q) ||
+        (r.ar ?? "").toLowerCase().includes(q)
+      );
+    } else {
+      base = base.filter((r) => r.page_handle === selectedPage);
+    }
+    if (needsArOnly) base = base.filter((r) => !r.ar);
+    return base;
+  }, [rows, search, isSearching, selectedPage, needsArOnly]);
+
+  // Search results are capped so a short/generic query can't mount hundreds
+  // of fully-expanded rows at once. Page view isn't capped here — it's kept
+  // bounded instead by only auto-expanding the first section (see Accordion
+  // defaultValue below).
+  const visibleRows = useMemo(
+    () => (isSearching ? matchedRows.slice(0, MAX_SEARCH_RESULTS) : matchedRows),
+    [matchedRows, isSearching],
+  );
+  const searchTruncated = isSearching && matchedRows.length > visibleRows.length;
+
+  // group -> page -> section -> rows[]
+  const grouped = useMemo(() => {
+    const byPage = new Map<string, Map<string, SiteCopyRow[]>>();
+    for (const r of visibleRows) {
+      const pageMap = byPage.get(r.page_handle) ?? new Map<string, SiteCopyRow[]>();
+      const sectionRows = pageMap.get(r.section_id) ?? [];
+      sectionRows.push(r);
+      pageMap.set(r.section_id, sectionRows);
+      byPage.set(r.page_handle, pageMap);
+    }
+    return byPage;
+  }, [visibleRows]);
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-md border border-sky-500/30 bg-sky-500/5 px-4 py-3 text-sm flex items-start gap-2">
+        <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0 text-sky-400" />
+        <span>
+          This panel is the <strong>single source of truth</strong> for the website's text. Edits save here as you
+          type, then sync to the draft theme automatically within a few seconds — never live.
+        </span>
+      </div>
+
+      <Card className="p-6 shadow-sm">
+        <div className="flex items-center gap-3 mb-1 flex-wrap justify-between">
+          <div className="flex items-center gap-3">
+            <h3 className="text-xl font-heading tracking-wide">SITE COPY</h3>
+            <DataSourceBadge source="live" sourceLabel="Live data from Supabase (site_copy)" />
+            <span className="text-xs text-muted-foreground">Live site copy data</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <CopySyncStatusReadout
+              page={selectedPage}
+              status={copySyncMap?.[selectedPage]}
+              onRetry={() => retryCopySync(qc, selectedPage)}
+            />
+            <button
+              type="button"
+              onClick={() => setSyncOpen(true)}
+              className="text-xs text-muted-foreground underline decoration-dotted hover:text-foreground"
+            >
+              Advanced sync…
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap mt-4 mb-4">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search all copy — text or key…" className="pl-8 h-9" />
+          </div>
+          {!isSearching && (
+            <Select value={selectedPage} onValueChange={setSelectedPage}>
+              <SelectTrigger className="w-[240px] h-9"><SelectValue /></SelectTrigger>
+              <SelectContent className="max-h-[400px]">
+                {pages.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {pageLabel(p)} ({pageCounts[p]?.total ?? 0})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <label className="flex items-center gap-1.5 text-sm px-2 h-9">
+            <Checkbox checked={needsArOnly} onCheckedChange={(c) => setNeedsArOnly(c === true)} />
+            <Languages className="h-3.5 w-3.5 text-muted-foreground" />
+            Needs Arabic only
+          </label>
+          <Badge variant="outline" className="text-xs">
+            {rows?.length ?? 0} strings total · {totalNeedsAr} need Arabic
+          </Badge>
+        </div>
+
+        {searchTruncated && (
+          <p className="text-xs text-amber-500 mb-2">
+            Showing the first {MAX_SEARCH_RESULTS} of {matchedRows.length} matches — narrow your search to see the rest.
+          </p>
+        )}
+
+        {!isSupabaseConfigured ? (
+          <p className="text-sm text-destructive">Supabase is not configured — site copy cannot load.</p>
+        ) : isError ? (
+          <p className="text-sm text-destructive">{(error as Error)?.message ?? "Could not load site copy."}</p>
+        ) : isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : visibleRows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No copy matches this filter.</p>
+        ) : (
+          <div className="space-y-6">
+            {Array.from(grouped.entries()).map(([page, sections]) => (
+              <div key={page} className="space-y-2">
+                {isSearching && (
+                  <h4 className="text-sm font-semibold text-muted-foreground">{pageLabel(page)}</h4>
+                )}
+                {/* Page view: only the first section starts expanded — the rest
+                    mount on demand when clicked (Accordion.Content doesn't render
+                    closed items' children). Search view stays fully expanded since
+                    results are already capped above. */}
+                <Accordion
+                  type="multiple"
+                  defaultValue={isSearching ? Array.from(sections.keys()) : Array.from(sections.keys()).slice(0, 1)}
+                  className="space-y-2"
+                >
+                  {Array.from(sections.entries()).map(([sectionId, sectionRows]) => (
+                    <AccordionItem key={sectionId} value={sectionId} className="border rounded-md px-3">
+                      <AccordionTrigger className="text-sm hover:no-underline">
+                        <span className="flex items-center gap-2">
+                          <span className="capitalize">{sectionId.replace(/_/g, " ")}</span>
+                          {sectionRows[0]?.section_type && (
+                            <span className="text-[11px] text-muted-foreground font-mono">
+                              ({sectionRows[0].section_type})
+                            </span>
+                          )}
+                          <Badge variant="outline" className="text-[10px]">{sectionRows.length}</Badge>
+                        </span>
+                      </AccordionTrigger>
+                      <AccordionContent className="space-y-2 pb-3">
+                        {sectionRows.map((row) => (
+                          <SiteCopyFieldRow key={row.key} row={row} actor={actor} />
+                        ))}
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground mt-3">
+          {visibleRows.length} of {isSearching ? matchedRows.length : rows?.length ?? 0} strings shown
+          {!isSearching && ` (${rows?.length ?? 0} total)`}
+        </p>
+      </Card>
+
+      <SiteCopyAuditLog />
+
+      <SyncCopyDialog open={syncOpen} onOpenChange={setSyncOpen} />
+    </div>
+  );
+};

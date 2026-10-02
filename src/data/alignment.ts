@@ -24,7 +24,7 @@
 //   start June (Q1=Jun-Aug ... Q4=Mar-May).
 import { useQuery } from "@tanstack/react-query";
 import { supabase, isSupabaseConfigured, toFriendlyError } from "@/lib/supabaseClient";
-import { monthKey, shiftMonthKey, monthKeyLabel } from "@/data/liveData";
+import { monthKey, shiftMonthKey, monthKeyLabel, rangeLengthMonths } from "@/data/liveData";
 
 // ---------------------------------------------------------------- types
 
@@ -70,17 +70,73 @@ const isMissingRelation = (err: { code?: string; message?: string }): boolean =>
   );
 };
 
-const fetchAllPages = async <T,>(build: (from: number, to: number) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }>): Promise<T[] | "missing"> => {
-  const all: T[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await build(from, from + PAGE - 1);
-    if (error) {
-      if (isMissingRelation(error)) return "missing";
-      throw toFriendlyError(error);
+/** PERF (2026-08-08, CEO live review — "otto-nove secondi, ha pensato che
+ * fossero bloccate"): this used to fetch page 0, AWAIT it, then fetch page
+ * 1, await it, etc — every page waited for the previous one to fully round-
+ * trip before even being REQUESTED, even though the pages have no
+ * dependency on each other (they're just offset windows of the same query).
+ * Measured live (Playwright network trace, local dev, 2026-08-08):
+ * `v_pnl_basis` alone needed 5 sequential pages on the Cash Flow page — each
+ * individual page was a perfectly normal 600-950ms PostgREST round trip, but
+ * chained serially they summed to ~3.4s of the page's ~4s total load, i.e.
+ * the pagination STRATEGY, not any one slow query, was the dominant cost.
+ * Fix: ask PostgREST for the exact total row count on page 0 (`count:
+ * "exact"` costs nothing extra — Postgres computes it as part of the same
+ * query and returns it in the response's Content-Range header, which the
+ * Supabase JS client already surfaces as `count`), then fire every
+ * remaining page CONCURRENTLY via Promise.all instead of one at a time.
+ * Total wall time drops from sum(pages) towards max(pages) — for the 5-page
+ * v_pnl_basis case, from ~3.4s serial to close to the slowest single page's
+ * own ~900ms. Purely a concurrency change: same rows, same order once
+ * reassembled, same error handling — verified to return identical row
+ * counts/totals against the live warehouse before landing (see the
+ * 2026-08-08 QA notes). Falls back to the old page-at-a-time loop if the
+ * server ever omits `count` (defensive — every current call site's view
+ * supports it) so this can never silently under-fetch. */
+const fetchAllPages = async <T,>(
+  build: (from: number, to: number, withCount: boolean) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null; count?: number | null }>,
+): Promise<T[] | "missing"> => {
+  const first = await build(0, PAGE - 1, true);
+  if (first.error) {
+    if (isMissingRelation(first.error)) return "missing";
+    throw toFriendlyError(first.error);
+  }
+  const firstPage = (first.data ?? []) as T[];
+  const total = first.count ?? null;
+
+  // Fits in one page, or the server didn't return a count (fall back to the
+  // safe serial loop below rather than guess how many pages remain).
+  if (firstPage.length < PAGE) return firstPage;
+  if (total === null) {
+    const all = [...firstPage];
+    for (let from = PAGE; ; from += PAGE) {
+      const { data, error } = await build(from, from + PAGE - 1, false);
+      if (error) {
+        if (isMissingRelation(error)) return "missing";
+        throw toFriendlyError(error);
+      }
+      const page = (data ?? []) as T[];
+      all.push(...page);
+      if (page.length < PAGE) break;
     }
-    const page = (data ?? []) as T[];
-    all.push(...page);
-    if (page.length < PAGE) break;
+    return all;
+  }
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE));
+  if (pageCount <= 1) return firstPage;
+  const rest = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, i) => {
+      const from = (i + 1) * PAGE;
+      return build(from, from + PAGE - 1, false);
+    }),
+  );
+  const all = [...firstPage];
+  for (const r of rest) {
+    if (r.error) {
+      if (isMissingRelation(r.error)) continue; // relation vanished mid-fetch — treat as no more rows, not a crash
+      throw toFriendlyError(r.error);
+    }
+    all.push(...((r.data ?? []) as T[]));
   }
   return all;
 };
@@ -97,10 +153,13 @@ interface VPnlBasisRow {
 export const fetchBasisRows = async (): Promise<BasisDataset> => {
   if (!supabase) throw new Error("Supabase is not configured");
   // Preferred: the DB-2 contract view.
-  const viaView = await fetchAllPages<VPnlBasisRow>((from, to) =>
+  const viaView = await fetchAllPages<VPnlBasisRow>((from, to, withCount) =>
     supabase!
       .from("v_pnl_basis")
-      .select("period_month,section,bu,cluster,leaf,moa_code,source,recurrence,drift_flag,amount_net_sar,amount_precn_sar,credit_note_sar")
+      .select(
+        "period_month,section,bu,cluster,leaf,moa_code,source,recurrence,drift_flag,amount_net_sar,amount_precn_sar,credit_note_sar",
+        withCount ? { count: "exact" } : undefined,
+      )
       .order("period_month", { ascending: true })
       .order("moa_code", { ascending: true })
       .range(from, to),
@@ -124,10 +183,13 @@ export const fetchBasisRows = async (): Promise<BasisDataset> => {
   }
   // Fallback: identical arithmetic on pnl_management (has `source`, incl.
   // 'credit_note' — migration 026). Certified live view, NOT a mock.
-  const viaMgmt = await fetchAllPages<Omit<BasisRow, "recurrence" | "drift_flag">>((from, to) =>
+  const viaMgmt = await fetchAllPages<Omit<BasisRow, "recurrence" | "drift_flag">>((from, to, withCount) =>
     supabase!
       .from("pnl_management")
-      .select("period_month,section,bu,cluster,leaf,moa_code,source,amount_sar")
+      .select(
+        "period_month,section,bu,cluster,leaf,moa_code,source,amount_sar",
+        withCount ? { count: "exact" } : undefined,
+      )
       .order("period_month", { ascending: true })
       .order("moa_code", { ascending: true })
       .range(from, to),
@@ -139,12 +201,19 @@ export const fetchBasisRows = async (): Promise<BasisDataset> => {
   };
 };
 
-export const useBasisRows = () =>
+/** `enabled` (2026-08-04, owner-audit #19/#9): defaults true — every existing
+ * call site keeps working unchanged. Callers that only need this query on
+ * SOME renders (the shell in `pages/Index.tsx`, which otherwise fired this
+ * 5000+ row paginated fetch on every route including pages with zero P&L
+ * content) can pass `false` to skip it — React Query still de-dupes/serves
+ * from cache for any other component on the same page that calls this with
+ * no args, so nothing that genuinely needs the data loses it. */
+export const useBasisRows = (enabled = true) =>
   useQuery({
     queryKey: ["alignment_basis_rows"],
     queryFn: fetchBasisRows,
     staleTime: 5 * 60 * 1000,
-    enabled: isSupabaseConfigured,
+    enabled: isSupabaseConfigured && enabled,
   });
 
 // ------------------------------------------------- recurrence dimension
@@ -230,7 +299,7 @@ export const resolveRecurrence = (
 /** Inclusive month-key window. */
 export interface Win { startKey: string; endKey: string }
 
-export type WindowPresetId = "AS_DELIVERED" | "LAST_MONTH" | "TTM" | "YTD" | "FY" | string; // "M:YYYY-MM"
+export type WindowPresetId = "AS_DELIVERED" | "MTD" | "LAST_MONTH" | "TTM" | "YTD" | "FY" | string; // "M:YYYY-MM" (a single month) | "Q:1".."Q:4" (a calendar quarter of the current year) | "CUSTOM:YYYY-MM:YYYY-MM" (user-picked month range, fix-25 2026-08-04 — see WindowPicker)
 
 /** The pinned package window (§0.2) — a WINDOW DEFINITION, not a figure. */
 export const AS_DELIVERED_WIN: Win = { startKey: "2025-06", endKey: "2026-05" };
@@ -246,25 +315,110 @@ export const shiftWin = (w: Win, months: number): Win => ({
 /** PY = the same window shifted −12 months (§0.2). Never anything else. */
 export const pyWin = (w: Win): Win => shiftWin(w, -12);
 
-export const resolveWindow = (preset: WindowPresetId, lastComplete: string): { win: Win; name: string } => {
+/** PP (Previous Period) = the immediately preceding window of the SAME
+ * length as `w` — the third comparison (CEO live-review request,
+ * 2026-08-08): "se il CEO sceglie gennaio-giugno 2026, deve poterlo
+ * confrontare con luglio-dicembre 2025, non solo con gennaio-giugno 2025."
+ * Length-aware by construction (`rangeLengthMonths`, already used by the
+ * cash-flow module's own PP definition in liveData.ts — reused here rather
+ * than re-derived, so there is exactly one "how many months is this window"
+ * implementation in the app): a 6-month window shifts back 6 months, a
+ * single month shifts back 1, a 3-month quarter shifts back 3 — never a
+ * fixed offset the way `pyWin` is. Deliberately distinct from `pyWin`
+ * (always −12 months, whole calendar-year shift) — the two answer different
+ * questions and must never be conflated. */
+export const ppWin = (w: Win): Win => {
+  const len = rangeLengthMonths(w.startKey, w.endKey);
+  return shiftWin(w, -len);
+};
+
+/** A window "includes open months" whenever it reaches past the last CLOSED
+ * month (`lastComplete`, derived from actual cost postings — see
+ * `lastCompleteFromBasis`). "To date" windows (Month to date / YTD / FY to
+ * date) are anchored to TODAY, not to the last close, so they routinely
+ * extend into a month that hasn't fully posted yet — that's the honesty-rule
+ * case (§0.3) the inline badge exists for. */
+export const windowIncludesOpenMonths = (w: Win, lastComplete: string): boolean => w.endKey > lastComplete;
+
+/** The most recently FINISHED calendar month relative to `todayKey` — e.g.
+ * any day in August resolves to July. Distinct from `lastComplete` (the last
+ * month whose COSTS are materially posted, data-driven): the global period
+ * selector's month list is anchored to the CALENDAR, not to accounting
+ * close, so a just-finished month is listed and selectable the moment it
+ * ends even if its costs are still partial — the page carries the
+ * open-month/completeness badge, the selector itself never hides the month
+ * (Marcello, live-review addendum 2026-08-03). */
+export const lastFinishedCalendarMonth = (todayKey: string): string => shiftMonthKey(todayKey, -1);
+
+/** Calendar-quarter month window: Q1=Jan-Mar … Q4=Oct-Dec of year `y`
+ * ("YYYY"). Plain calendar quarters — distinct from `fiscalQuarters` (FY
+ * start June), which serves a different, unrelated screen. */
+const quarterWin = (y: string, q: number): Win => {
+  const startKey = `${y}-${String((q - 1) * 3 + 1).padStart(2, "0")}`;
+  return { startKey, endKey: shiftMonthKey(startKey, 2) };
+};
+
+/** The four calendar quarters (Q1..Q4) of the year containing `todayKey` —
+ * ALWAYS all four, regardless of whether the warehouse has data for them yet
+ * (Marcello, live-review addendum 2026-08-03: "indipendentemente dal fatto
+ * che sia alimentato o no" — a quarter with no data shows an honest empty
+ * state on the page; it is never hidden from the selector). Preset ids
+ * "Q:1".."Q:4", resolved by `resolveWindow`. */
+export const calendarQuarters = (todayKey: string): { id: WindowPresetId; label: string; win: Win }[] => {
+  const y = todayKey.slice(0, 4);
+  return [1, 2, 3, 4].map((q) => ({ id: `Q:${q}`, label: `Q${q}`, win: quarterWin(y, q) }));
+};
+
+/**
+ * Resolve a window preset to an actual month range + display name.
+ *
+ * `lastComplete` = the last CLOSED month (data-driven — costs materially
+ * posted). Used by TTM / "Last closed month", which must stay 12 CLOSED
+ * months for trend comparability, never open ones.
+ *
+ * `todayKey` = today's real calendar month (device clock, see
+ * `todayMonthKey()` — never hard-coded). Used by "to date" windows (Month to
+ * date / YTD / FY to date) per the founder's request: these must track the
+ * actual calendar, not freeze at whatever month the data last closed.
+ */
+export const resolveWindow = (preset: WindowPresetId, lastComplete: string, todayKey: string): { win: Win; name: string } => {
   if (preset === "AS_DELIVERED") return { win: AS_DELIVERED_WIN, name: "As delivered (TTM Jun-25→May-26)" };
+  if (preset === "MTD") return { win: { startKey: todayKey, endKey: todayKey }, name: `Month to date (${monthKeyLabel(todayKey)})` };
   if (preset === "LAST_MONTH") return { win: { startKey: lastComplete, endKey: lastComplete }, name: `Last closed month (${monthKeyLabel(lastComplete)})` };
-  if (preset === "TTM") return { win: { startKey: shiftMonthKey(lastComplete, -11), endKey: lastComplete }, name: `TTM (${monthKeyLabel(shiftMonthKey(lastComplete, -11))}→${monthKeyLabel(lastComplete)})` };
+  if (preset === "TTM") return { win: { startKey: shiftMonthKey(lastComplete, -11), endKey: lastComplete }, name: `TTM (last 12 months) · ${monthKeyLabel(shiftMonthKey(lastComplete, -11))}→${monthKeyLabel(lastComplete)}` };
   if (preset === "YTD") {
-    const y = lastComplete.slice(0, 4);
-    return { win: { startKey: `${y}-01`, endKey: lastComplete }, name: `YTD (Jan→${monthKeyLabel(lastComplete)})` };
+    const y = todayKey.slice(0, 4);
+    return { win: { startKey: `${y}-01`, endKey: todayKey }, name: `YTD (Jan→${monthKeyLabel(todayKey)})` };
   }
   if (preset === "FY") {
-    // Fiscal year starts June (§0.2).
-    const [y, m] = lastComplete.split("-").map(Number);
+    // Fiscal year starts June (§0.2) — anchored to TODAY, not the last close.
+    const [y, m] = todayKey.split("-").map(Number);
     const fyStart = m >= 6 ? `${y}-06` : `${y - 1}-06`;
-    return { win: { startKey: fyStart, endKey: lastComplete }, name: `FY to date (${monthKeyLabel(fyStart)}→${monthKeyLabel(lastComplete)})` };
+    return { win: { startKey: fyStart, endKey: todayKey }, name: `FY to date (${monthKeyLabel(fyStart)}→${monthKeyLabel(todayKey)})` };
   }
   if (preset.startsWith("M:")) {
     const k = preset.slice(2);
     return { win: { startKey: k, endKey: k }, name: monthKeyLabel(k) };
   }
-  return resolveWindow("TTM", lastComplete);
+  if (preset.startsWith("Q:")) {
+    const q = Number(preset.slice(2));
+    const y = todayKey.slice(0, 4);
+    const win = quarterWin(y, q);
+    return { win, name: `Q${q} ${y} (${winLabel(win)})` };
+  }
+  if (preset.startsWith("CUSTOM:")) {
+    // User-picked month range (fix-25, 2026-08-04, live request — Marcello).
+    // Month-key grain, same as every other window: the warehouse has no
+    // daily P&L fact (see MTD proration note above), so a "day picker" UI
+    // resolves to the CONTAINING months rather than fabricating day-level
+    // precision. Defensive swap if the two keys arrive reversed.
+    const [, s, e] = preset.split(":");
+    if (s && e) {
+      const win = s <= e ? { startKey: s, endKey: e } : { startKey: e, endKey: s };
+      return { win, name: `Custom (${monthKeyLabel(win.startKey)}→${monthKeyLabel(win.endKey)})` };
+    }
+  }
+  return resolveWindow("TTM", lastComplete, todayKey);
 };
 
 /** Fiscal quarters of the FY containing/ending at the anchor (Q1=Jun-Aug). */
@@ -292,12 +446,39 @@ export interface PLAgg {
   ebit: number;
   nonOp: number;
   netResult: number;
+  // "Absent ≠ zero" per-section coverage (2026-08-04, owner-audit #3/#4): true
+  // only when at least one warehouse row landed in this section for the
+  // window — a section with ZERO matching rows (not yet booked) must never
+  // be indistinguishable from a section that summed to a real zero. Derived
+  // subtotals below read these to decide whether they're a real number or
+  // "not yet computable" — see `hasGrossMargin`..`hasNetResult`.
+  hasRevenue: boolean;
+  hasCogs: boolean;
+  hasOpexGa: boolean;
+  hasOpexMs: boolean;
+  hasOpexPeople: boolean;
+  hasProjectCosts: boolean;
+  hasDa: boolean;
+  hasNonOp: boolean;
+  // Derived coverage — a subtotal is only "real" when every section it
+  // depends on actually has posted rows (not merely a window with SOME data
+  // in it, e.g. revenue live but costs unbooked).
+  hasGrossMargin: boolean;
+  hasOpexTotal: boolean;
+  hasEbitda5: boolean;
+  hasEbitdaReported: boolean;
+  hasEbit: boolean;
+  hasNetResult: boolean;
 }
 
 const emptyAgg = (): PLAgg => ({
   revenue: 0, creditNotes: 0, cogs: 0, grossMargin: 0, opexGa: 0, opexMs: 0,
   opexPeople: 0, opex: 0, ebitda5: 0, projectCosts: 0, ebitdaReported: 0,
   da: 0, ebit: 0, nonOp: 0, netResult: 0,
+  hasRevenue: false, hasCogs: false, hasOpexGa: false, hasOpexMs: false,
+  hasOpexPeople: false, hasProjectCosts: false, hasDa: false, hasNonOp: false,
+  hasGrossMargin: false, hasOpexTotal: false, hasEbitda5: false,
+  hasEbitdaReported: false, hasEbit: false, hasNetResult: false,
 });
 
 const inWin = (k: string, w: Win) => k >= w.startKey && k <= w.endKey;
@@ -319,14 +500,14 @@ export const aggregatePL = (
     if (isCN) out.creditNotes += -r.amount_sar; // CN rows are negative revenue
     if (isCN && basis === "VALIDATED") continue; // Validated basis: CN excluded
     switch (r.section) {
-      case "Revenue": out.revenue += r.amount_sar; break;
-      case "COGS": out.cogs += r.amount_sar; break;
-      case "OPEX-GA": out.opexGa += r.amount_sar; break;
-      case "OPEX-MS": out.opexMs += r.amount_sar; break;
-      case "OPEX-People": out.opexPeople += r.amount_sar; break;
-      case "Project-Costs": out.projectCosts += r.amount_sar; break;
-      case "D&A": out.da += r.amount_sar; break;
-      case "NON-OP": out.nonOp += r.amount_sar; break;
+      case "Revenue": out.revenue += r.amount_sar; out.hasRevenue = true; break;
+      case "COGS": out.cogs += r.amount_sar; out.hasCogs = true; break;
+      case "OPEX-GA": out.opexGa += r.amount_sar; out.hasOpexGa = true; break;
+      case "OPEX-MS": out.opexMs += r.amount_sar; out.hasOpexMs = true; break;
+      case "OPEX-People": out.opexPeople += r.amount_sar; out.hasOpexPeople = true; break;
+      case "Project-Costs": out.projectCosts += r.amount_sar; out.hasProjectCosts = true; break;
+      case "D&A": out.da += r.amount_sar; out.hasDa = true; break;
+      case "NON-OP": out.nonOp += r.amount_sar; out.hasNonOp = true; break;
       default: break; // Unmapped = 0 everywhere post-verification 2026-07-21
     }
   }
@@ -336,6 +517,12 @@ export const aggregatePL = (
   out.ebitdaReported = out.ebitda5 + out.projectCosts;
   out.ebit = out.ebitdaReported + out.da;
   out.netResult = out.ebit + out.nonOp;
+  out.hasGrossMargin = out.hasRevenue && out.hasCogs;
+  out.hasOpexTotal = out.hasOpexGa && out.hasOpexMs && out.hasOpexPeople;
+  out.hasEbitda5 = out.hasGrossMargin && out.hasOpexTotal;
+  out.hasEbitdaReported = out.hasEbitda5 && out.hasProjectCosts;
+  out.hasEbit = out.hasEbitdaReported && out.hasDa;
+  out.hasNetResult = out.hasEbit && out.hasNonOp;
   return out;
 };
 
@@ -618,19 +805,181 @@ export const aggregateBudgetWindow = (
   return out;
 };
 
+// --------------------------------------------------- MTD linear proration
+
+/** Elapsed-day pro-ration for the "Month to date" window (Marcello, live
+ * review addendum 2026-08-03): comparing a partial current month against a
+ * FULL prior-year month or a FULL month's budget overstates both — August
+ * 1-3 actual vs the whole of August budget/PY is not a fair comparison. The
+ * warehouse has no daily-grain P&L fact (pnl_management/v_pnl_basis are
+ * month-grain), so a true day-bounded PY query isn't available without new
+ * data plumbing; the honest, available fix is linear pro-ration of the full
+ * month's Budget/PY by elapsed calendar days — e.g. August budget × 3/31 —
+ * clearly labeled as pro-rated everywhere it's shown (never presented as a
+ * literal day-level actual). Actual itself is NEVER prorated: an open
+ * month's actual already only contains transactions posted so far. */
+export interface MtdProration { elapsedDays: number; daysInMonth: number; fraction: number }
+
+export const computeMtdProration = (todayKey: string): MtdProration => {
+  const now = new Date();
+  const elapsedDays = now.getDate();
+  const [y, m] = todayKey.split("-").map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  return { elapsedDays, daysInMonth, fraction: daysInMonth > 0 ? elapsedDays / daysInMonth : 1 };
+};
+
+export const prorateAgg = (a: PLAgg, fraction: number): PLAgg => ({
+  ...a,
+  revenue: a.revenue * fraction,
+  creditNotes: a.creditNotes * fraction,
+  cogs: a.cogs * fraction,
+  grossMargin: a.grossMargin * fraction,
+  opexGa: a.opexGa * fraction,
+  opexMs: a.opexMs * fraction,
+  opexPeople: a.opexPeople * fraction,
+  opex: a.opex * fraction,
+  ebitda5: a.ebitda5 * fraction,
+  projectCosts: a.projectCosts * fraction,
+  ebitdaReported: a.ebitdaReported * fraction,
+  da: a.da * fraction,
+  ebit: a.ebit * fraction,
+  nonOp: a.nonOp * fraction,
+  netResult: a.netResult * fraction,
+});
+
+export const prorateRecurring = (a: RecurringAgg | null, fraction: number): RecurringAgg | null => {
+  if (!a) return null;
+  return {
+    ...a,
+    recRevenue: a.recRevenue * fraction,
+    nonRecRevenue: a.nonRecRevenue * fraction,
+    totalRevenue: a.totalRevenue * fraction,
+    recDirect: a.recDirect * fraction,
+    nonRecDirect: a.nonRecDirect * fraction,
+    recGrossProfit: a.recGrossProfit * fraction,
+    recOpex: a.recOpex * fraction,
+    nonRecOpex: a.nonRecOpex * fraction,
+    nonRecOpexLines: a.nonRecOpexLines.map((l) => ({ ...l, amount: l.amount * fraction })),
+    recEbitda: a.recEbitda * fraction,
+    reportedEbitda: a.reportedEbitda * fraction,
+  };
+};
+
+export const prorateBudget = (b: BudgetAgg | null, fraction: number): BudgetAgg | null => {
+  if (!b) return null;
+  return {
+    ...b,
+    revenue: b.revenue * fraction,
+    cogs: b.cogs * fraction,
+    opexGa: b.opexGa * fraction,
+    opexMs: b.opexMs * fraction,
+    opexPeople: b.opexPeople * fraction,
+    ebitdaAll: b.ebitdaAll * fraction,
+    nonRecLines: b.nonRecLines * fraction,
+    ebitdaPreNrp: b.ebitdaPreNrp * fraction,
+    // coveredMonths / monthsInWindow / versions describe DATA PROVENANCE, not
+    // magnitude — left unscaled so coverage notes stay accurate.
+  };
+};
+
 // -------------------------------------------------- completeness (DB-7 / §1.5)
 
 export interface CompletenessFlag {
   key: string;
   label: string;
-  kind: "costs-partial" | "costs-missing" | "lev-unbooked";
+  kind: "costs-partial" | "costs-missing" | "lev-unbooked" | "lev-not-invoiced" | "lev-awaiting-entry";
   detail: string;
 }
+
+/** All "lev-*" kinds describe the Project-Costs (Leveredge/F&F) gap at the
+ * BANNER level, not a specific P&L cell — callers marking individual cells
+ * (e.g. flaggedKeys in PnLOverview) must exclude all three, not just
+ * "lev-unbooked". */
+export const LEV_FLAG_KINDS = new Set<CompletenessFlag["kind"]>(["lev-unbooked", "lev-not-invoiced", "lev-awaiting-entry"]);
+
+/** Manually-confirmed invoicing status per month for the Leveredge
+ * project-cost gap (Marcello, 2026-08-04 — fix-31 verification against
+ * Qoyod/JK & Partners records). The warehouse only knows "posted" or
+ * "not posted"; it has no concept of *why* a month has no postings yet.
+ * This map supplies that human context for the CURRENT gap so the banner
+ * doesn't read as a data error when it's actually a business decision
+ * (not invoiced) or a known in-flight step (invoice issued, not yet
+ * entered in Qoyod). Any month NOT listed here — including future months
+ * as they open — falls back to the plain "no postings yet, status TBD"
+ * wording, i.e. genuinely unresolved. Prune/extend this map as invoicing
+ * catches up; it never overrides what the warehouse reports as booked. */
+const LEV_MONTH_CONTEXT: Record<string, { kind: "lev-not-invoiced" | "lev-awaiting-entry"; note: string }> = {
+  "2026-05": { kind: "lev-not-invoiced", note: "not invoiced (by decision) — nothing missing" },
+  "2026-06": { kind: "lev-not-invoiced", note: "not invoiced (by decision) — nothing missing" },
+  "2026-07": { kind: "lev-awaiting-entry", note: "invoice issued — entry into Qoyod pending" },
+};
+
+/** Static context on the F&F side of Project-Costs: F&F (Fortress & Flare
+ * / Camel and Partners) invoicing was last through January 2026 and none
+ * is expected after — i.e. F&F is not part of any gap shown here. This is
+ * a business status per Leveredge/JK & Partners records, not a warehouse
+ * figure — Trio's synced ledger carries no F&F-tagged postings to check
+ * it against (fix-31 verification), so it is stated as status, not as a
+ * booked amount. */
+const FF_STATUS_NOTE = "F&F (Fortress & Flare): invoiced through January 2026, none expected since — no gap on this line.";
+
+/** Short, plain-English summary of why the given months have no
+ * Project-Costs (Leveredge/F&F) postings — shares LEV_MONTH_CONTEXT with
+ * the completeness banner above so every screen tells the same story
+ * about the same gap. Falls back to "status TBD" for anything not in the
+ * map (fix-31, 2026-08-04). Used by PerformanceAnalysis's own honesty
+ * note, which computes its own window-scoped missing-months list rather
+ * than reusing buildLevFlags (that one is keyed to the trailing-13-month
+ * banner recency window, not an arbitrary user-picked window). */
+export const levGapSummary = (missingKeys: string[]): string => {
+  const sorted = [...missingKeys].sort();
+  const notInvoiced = sorted.filter((k) => LEV_MONTH_CONTEXT[k]?.kind === "lev-not-invoiced");
+  const awaiting = sorted.filter((k) => LEV_MONTH_CONTEXT[k]?.kind === "lev-awaiting-entry");
+  const tbd = sorted.filter((k) => !LEV_MONTH_CONTEXT[k]);
+  const parts: string[] = [];
+  if (notInvoiced.length) parts.push(`${notInvoiced.map(monthKeyLabel).join("/")} not invoiced (by decision)`);
+  if (awaiting.length) parts.push(`${awaiting.map(monthKeyLabel).join("/")} invoice issued, Qoyod entry pending`);
+  if (tbd.length) parts.push(`${tbd.map(monthKeyLabel).join("/")} status TBD`);
+  return parts.join(" · ");
+};
+
+/** Turns a sorted list of month-keys with no Project-Costs postings into
+ * banner flags: months with known context (above) get their explained
+ * kind/wording, unlisted months fall back to plain "status TBD". Always
+ * appends the F&F status note alongside so it never reads as if F&F were
+ * part of the gap. */
+const buildLevFlags = (missingKeys: string[], lastPostedKey: string | null): CompletenessFlag[] => {
+  if (missingKeys.length === 0) return [];
+  const groups: Partial<Record<CompletenessFlag["kind"], string[]>> = {};
+  for (const k of missingKeys) {
+    const kind = LEV_MONTH_CONTEXT[k]?.kind ?? "lev-unbooked";
+    (groups[kind] ??= []).push(k);
+  }
+  const labelsFor = (keys: string[]) => keys.map((k) => monthKeyLabel(k)).join(", ");
+  const flags: CompletenessFlag[] = [];
+  if (groups["lev-not-invoiced"]) {
+    const keys = groups["lev-not-invoiced"];
+    flags.push({ key: keys[0], label: labelsFor(keys), kind: "lev-not-invoiced", detail: `${labelsFor(keys)}: ${LEV_MONTH_CONTEXT[keys[0]].note}` });
+  }
+  if (groups["lev-awaiting-entry"]) {
+    const keys = groups["lev-awaiting-entry"];
+    flags.push({ key: keys[0], label: labelsFor(keys), kind: "lev-awaiting-entry", detail: `${labelsFor(keys)}: ${LEV_MONTH_CONTEXT[keys[0]].note}` });
+  }
+  if (groups["lev-unbooked"]) {
+    const keys = groups["lev-unbooked"];
+    const lp = lastPostedKey ? ` (last posted ${monthKeyLabel(lastPostedKey)})` : "";
+    flags.push({ key: keys[0], label: labelsFor(keys), kind: "lev-unbooked", detail: `${labelsFor(keys)}: no Leveredge project-fee postings yet — status TBD${lp}` });
+  }
+  flags.push({ key: missingKeys[0], label: "F&F", kind: "lev-not-invoiced", detail: FF_STATUS_NOTE });
+  return flags;
+};
 
 /** Warehouse-driven completeness heuristic (spec §1.5): flags months whose
  * cost postings are materially below the trailing norm, months with revenue
  * but zero cost rows, and the Project-Costs (LEV fees) series stopping. NO
- * hardcoded month list — derived from the fetched rows on every load. */
+ * hardcoded month list — derived from the fetched rows on every load (the
+ * lev-status wording above is the one deliberate exception: it explains a
+ * detected gap, it does not decide whether the gap exists). */
 export const deriveCompleteness = (rows: BasisRow[] | undefined): CompletenessFlag[] => {
   if (!rows || rows.length === 0) return [];
   const months = factMonths(rows);
@@ -661,18 +1010,13 @@ export const deriveCompleteness = (rows: BasisRow[] | undefined): CompletenessFl
       flags.push({ key: m, label: monthKeyLabel(m), kind: "costs-partial", detail: `${monthKeyLabel(m)}: costs partial (${Math.round((cost / norm) * 100)}% of trailing norm)` });
     }
   }
-  // Project-costs (Leveredge fees) series stopping before the revenue horizon.
+  // Project-costs (Leveredge/F&F) series stopping before the revenue horizon.
   const lastTpc = months.filter((m) => (tpcByMonth.get(m) ?? 0) > 0).pop();
   if (lastTpc && lastRevMonth && lastTpc < lastRevMonth) {
     let k = shiftMonthKey(lastTpc, 1);
     const missing: string[] = [];
-    while (k <= lastRevMonth) { missing.push(monthKeyLabel(k)); k = shiftMonthKey(k, 1); }
-    if (missing.length > 0) {
-      flags.push({
-        key: shiftMonthKey(lastTpc, 1), label: missing.join(", "), kind: "lev-unbooked",
-        detail: `Leveredge/project fees unbooked ${missing.join(", ")} (last posted ${monthKeyLabel(lastTpc)})`,
-      });
-    }
+    while (k <= lastRevMonth) { missing.push(k); k = shiftMonthKey(k, 1); }
+    flags.push(...buildLevFlags(missing, lastTpc));
   }
   return flags;
 };
@@ -709,20 +1053,17 @@ export const useCompletenessMonthly = () =>
 /** Flags from the DB-7 view (contract §1.5). */
 export const flagsFromCompletenessView = (rows: CompletenessViewRow[]): CompletenessFlag[] => {
   const flags: CompletenessFlag[] = [];
-  const levMonths: string[] = [];
+  const levMissing: string[] = [];
+  let lastPosted: string | null = null;
   for (const r of rows) {
     const k = monthKey(r.period_month);
     const label = monthKeyLabel(k);
     if (r.costs_missing) flags.push({ key: k, label, kind: "costs-missing", detail: `${label}: revenue synced, zero cost rows` });
     else if (r.costs_partial) flags.push({ key: k, label, kind: "costs-partial", detail: `${label}: costs partial` });
-    if (r.lev_fees_missing) levMonths.push(label);
+    if (r.lev_fees_missing) levMissing.push(k);
+    else if (r.project_costs_present) lastPosted = k;
   }
-  if (levMonths.length > 0) {
-    flags.push({
-      key: levMonths[0], label: levMonths.join(", "), kind: "lev-unbooked",
-      detail: `Leveredge/project fees unbooked ${levMonths.join(", ")}`,
-    });
-  }
+  flags.push(...buildLevFlags(levMissing, lastPosted));
   return flags;
 };
 
